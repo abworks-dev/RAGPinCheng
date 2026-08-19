@@ -14,12 +14,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api import content_bulk_operations, routes_content
+from api import content_bulk_operations, routes_admin, routes_content
 from api import content_trash_cleanup
 from api.content_permission_catalog import LEGACY_CONTENT_PERMISSION_MAP
 from api.content_storage import ContentStorage
 from api.db import connect, get_db, init_db
 from api.media_transcript_catalog import ensure_media_transcript_catalog_item
+from api.schemas import MediaAssetDTO
 from api.transcription_artifacts import LocalTranscriptionArtifactStore
 
 
@@ -103,6 +104,201 @@ def _auth(sessions: dict[str, tuple[str, str]], employee_id: str, *, csrf: bool 
     sid, token = sessions[employee_id]
     headers = {"X-CSRF-Token": token} if csrf else {}
     return {"cookies": {"pc_sid": sid}, "headers": headers}
+
+
+def test_unified_upload_preflight_routes_mp4_only_for_system_admin(content_api):
+    client, sessions, _queued, _db_path = content_api
+    body = {
+        "category_id": "cat-03",
+        "entries": [{"filename": "training.mp4", "relative_path": "training.mp4", "size_bytes": 1024}],
+    }
+    blocked = client.post(
+        "/api/admin/content/uploads/preflight",
+        json=body,
+        **_auth(sessions, "organizer", csrf=True),
+    )
+    assert blocked.status_code == 200
+    assert blocked.json()["entries"][0] == {
+        "sequence": 1,
+        "filename": "training.mp4",
+        "relative_path": "training.mp4",
+        "kind": "video",
+        "status": "blocked",
+        "reason": "视频上传首期仅限系统管理员",
+        "reason_code": "video_admin_only",
+        "suggested_filename": None,
+        "conflict": None,
+    }
+    ready = client.post(
+        "/api/admin/content/uploads/preflight",
+        json=body,
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert ready.status_code == 200
+    assert ready.json()["entries"][0]["kind"] == "video"
+    assert ready.json()["entries"][0]["status"] == "ready"
+
+
+def test_unified_upload_routes_documents_and_videos_to_independent_pipelines(
+    content_api, monkeypatch: pytest.MonkeyPatch
+):
+    client, sessions, _queued, db_path = content_api
+    video_bytes = b"synthetic-mp4"
+    media_id = "123e4567-e89b-42d3-a456-426614174301"
+    job_id = "123e4567-e89b-42d3-a456-426614174302"
+    request_key = "123e4567-e89b-42d3-a456-426614174303"
+    calls: list[dict[str, object]] = []
+
+    async def fake_upload_media(**kwargs):
+        conn = kwargs["conn"]
+        admin = kwargs["admin"]
+        calls.append(kwargs)
+        now = int(time.time())
+        conn.execute(
+            """INSERT INTO media_assets(
+                   media_id,title,original_filename,storage_rel_path,mime_type,file_size,sha256,
+                   transcript_source_path,transcript_origin,status,created_by,created_at,updated_at,
+                   error,target_category_id
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                media_id,
+                kwargs["title"],
+                kwargs["original_filename"],
+                f"{media_id}/original.mp4",
+                "video/mp4",
+                len(video_bytes),
+                hashlib.sha256(video_bytes).hexdigest(),
+                None,
+                "generated",
+                "uploaded",
+                admin.id,
+                now,
+                now,
+                None,
+                kwargs["category_id"],
+            ),
+        )
+        conn.execute(
+            """INSERT INTO transcription_jobs(
+                   id,media_id,created_by,attempt_number,request_idempotency_key,execution_identity,
+                   profile_id,provider_key,profile_definition_version,config_hash,profile_snapshot_json,
+                   execution_config_json,execution_fingerprint,audio_sha256,input_kind,input_size_bytes,
+                   total_ms,status,created_at,updated_at,scheme_id
+               ) VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,'media',?,1000,'pending',?,?,?)""",
+            (
+                job_id,
+                media_id,
+                admin.id,
+                kwargs["request_idempotency_key"],
+                "synthetic-execution",
+                "synthetic-profile",
+                "synthetic-provider",
+                "1",
+                "a" * 64,
+                "{}",
+                "{}",
+                "b" * 64,
+                "c" * 64,
+                len(video_bytes),
+                now,
+                now,
+                kwargs["scheme_id"],
+            ),
+        )
+        conn.commit()
+        return MediaAssetDTO(
+            media_id=media_id,
+            title=kwargs["title"],
+            original_filename=kwargs["original_filename"],
+            mime_type="video/mp4",
+            file_size=len(video_bytes),
+            transcript_origin="generated",
+            status="uploaded",
+            created_at=now,
+            updated_at=now,
+            transcription_job_id=job_id,
+            category_id=kwargs["category_id"],
+        )
+
+    monkeypatch.setattr(routes_admin, "upload_media", fake_upload_media)
+    response = client.post(
+        "/api/admin/content/uploads",
+        data={
+            "category_id": "cat-03",
+            "relative_paths": ["guide.md", "training.mp4"],
+            "video_scheme_id": "scheme-synthetic",
+            # Blank document slots must survive multipart parsing so keys stay aligned.
+            "video_idempotency_keys": ["", request_key],
+        },
+        files=[
+            ("files", ("guide.md", b"# managed document", "text/markdown")),
+            ("files", ("training.mp4", video_bytes, "video/mp4")),
+        ],
+        **_auth(sessions, "admin", csrf=True),
+    )
+
+    assert response.status_code == 200, response.text
+    document, video = response.json()["entries"]
+    assert document["kind"] == "document"
+    assert document["item_id"] and document["version_id"]
+    assert document["media_id"] is None and document["transcription_job_id"] is None
+    assert video == {
+        "filename": "training.mp4",
+        "kind": "video",
+        "item_id": None,
+        "version_id": None,
+        "media_id": media_id,
+        "transcription_job_id": job_id,
+        "sha256": None,
+        "status": "accepted",
+        "reason": None,
+        "reason_code": None,
+        "resolution": "created",
+    }
+    assert calls[0]["request_idempotency_key"] == request_key
+    assert calls[0]["scheme_id"] == "scheme-synthetic"
+
+    conn = connect(db_path)
+    try:
+        assert conn.execute("SELECT count(*) FROM content_versions").fetchone()[0] == 1
+        assert conn.execute("SELECT count(*) FROM content_index_jobs").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM media_assets").fetchone()[0] == 1
+        assert conn.execute("SELECT count(*) FROM transcription_jobs").fetchone()[0] == 1
+        batch_entries = conn.execute(
+            """SELECT entry_kind,item_id,version_id,media_id,transcription_job_id
+               FROM upload_batch_entries WHERE batch_id=? ORDER BY sequence""",
+            (response.json()["batch_id"],),
+        ).fetchall()
+        assert tuple(batch_entries[0])[:1] == ("document",)
+        assert batch_entries[0]["item_id"] and batch_entries[0]["version_id"]
+        assert tuple(batch_entries[1]) == ("video", None, None, media_id, job_id)
+    finally:
+        conn.close()
+
+    mismatch = client.post(
+        "/api/admin/content/uploads",
+        data={
+            "category_id": "cat-03",
+            "video_scheme_id": "scheme-synthetic",
+            "video_idempotency_keys": request_key,
+        },
+        files=[
+            ("files", ("another.md", b"# another", "text/markdown")),
+            ("files", ("another.mp4", video_bytes, "video/mp4")),
+        ],
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert mismatch.status_code == 400
+    assert mismatch.json()["detail"] == "文件和视频幂等键数量不一致"
+
+    forbidden = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03", "video_scheme_id": "scheme-synthetic"},
+        files=[("files", ("forbidden.mp4", video_bytes, "video/mp4"))],
+        **_auth(sessions, "organizer", csrf=True),
+    )
+    assert forbidden.status_code == 403
+    assert len(calls) == 1
 
 
 def _insert_published_media(

@@ -426,6 +426,33 @@ test.describe("资料管理", () => {
     await expectNoBodyOverflow(page);
   });
 
+  test("admin mixed upload keeps document and video routing explicit", async ({ page }, testInfo) => {
+    await openTab(page, "资料管理");
+    await openRootFolder(page);
+    await page.getByRole("button", { name: "上传文件" }).click();
+    await page.getByLabel("选择资料文件", { exact: true }).setInputFiles([
+      { name: "synthetic.pdf", mimeType: "application/pdf", buffer: Buffer.from("synthetic document") },
+      { name: "synthetic-video.mp4", mimeType: "video/mp4", buffer: Buffer.from("synthetic video") },
+    ]);
+
+    const dialog = page.getByRole("dialog", { name: "上传文件" });
+    await expect(dialog).toContainText("文档进入资料流程，MP4 进入独立转录任务");
+    await expect(dialog.getByLabel("视频转录方案")).not.toHaveValue("");
+    await expect(dialog).toContainText("视频会创建独立转录任务，不会进入普通索引任务");
+    await expectInViewport(dialog.getByRole("button", { name: "确定上传" }));
+
+    const multipartUpload = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/admin/content/uploads");
+    await dialog.getByRole("button", { name: "确定上传" }).click();
+    const request = (await multipartUpload).request();
+    const body = request.postData() || "";
+    expect(body).toContain('name="video_scheme_id"');
+    expect(body).toContain('name="video_idempotency_keys"');
+    expect(body).toContain("synthetic-video.mp4");
+    await expect(page.getByText("已接收 2 个文件", { exact: true })).toBeVisible();
+    await expectNoBodyOverflow(page);
+    await page.screenshot({ path: testInfo.outputPath("managed-content-mixed-upload-complete.png"), fullPage: true });
+  });
+
   test("upload filename conflicts stay contained in the resolution dialog", async ({ page }, testInfo) => {
     await openTab(page, "资料管理", "normal", "admin", { uploadConflict: true });
     await openRootFolder(page);
@@ -471,6 +498,7 @@ test.describe("资料管理", () => {
     await expect(dialog).toContainText("已忽略");
     await expect(dialog).toContainText("合成资料包/01 建筑/guide.md");
     await expect(dialog).toContainText("合成资料包/demo.mp4");
+    await expect(dialog.getByLabel("文件夹视频转录方案")).not.toHaveValue("");
     await expectInViewport(dialog.getByRole("button", { name: "开始上传" }));
     await expectNoBodyOverflow(page);
     await page.screenshot({ path: testInfo.outputPath("managed-content-folder-upload-confirmation.png"), fullPage: true });
@@ -499,7 +527,7 @@ test.describe("资料管理", () => {
     const dropOverlay = page.getByTestId("managed-content-drop-overlay");
     await expect(dropOverlay).toBeVisible();
     await expect(dropOverlay).toContainText("松开以上传文件到“03 公司内部标准”");
-    await expect(dropOverlay).toContainText("支持 PDF、Markdown、Word、Excel、PPT 和 XMind 文件");
+    await expect(dropOverlay).toContainText("MP4 视频将进入转录任务");
     await dropOverlay.scrollIntoViewIfNeeded();
     await folderBrowser.dispatchEvent("dragover", { dataTransfer });
     await expectInViewport(dropOverlay.getByText("松开以上传文件到“03 公司内部标准”"));
@@ -760,7 +788,7 @@ test.describe("资料管理", () => {
     await more.click();
     const replacementLink = page.getByRole("menu", { name: `“${title}”的更多操作` }).getByRole("menuitem", { name: "替换视频" });
     await replacementLink.click();
-    await expect(page).toHaveURL(/\/admin\/media\?media_id=media-library-1&action=replace$/);
+    await expect(page).toHaveURL(/\/admin\/content\?view=transcription&media_id=media-library-1&action=replace$/);
     const replacementDialog = page.getByRole("dialog", { name: "替换视频" });
     await expect(replacementDialog).toContainText(title);
     await expect(replacementDialog).toContainText("bim-project-delivery-training-long-responsive-name.mp4");
@@ -772,10 +800,11 @@ test.describe("资料管理", () => {
   });
 });
 
-test.describe("视频管理", () => {
+test.describe("转录任务", () => {
   test("media records keep duplicate submissions and recovery actions readable", async ({ page }) => {
-    await openTab(page, "视频管理");
-    await expect(page.getByRole("heading", { name: "视频管理" })).toBeVisible();
+    await openTab(page, "资料管理");
+    await page.getByRole("tab", { name: "转录任务", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "转录任务" })).toBeVisible();
     await expect(page.getByText("同名记录 2 条").first()).toBeVisible();
     await expect(page.getByRole("button", { name: "全部 3" })).toBeVisible();
     await expect(page.getByRole("button", { name: "失败 2" })).toBeVisible();

@@ -30,6 +30,7 @@ from src.config import (
     CONTENT_TRASH_EXPIRING_WARNING_DAYS,
     DOCS_DIR,
     MEDIA_DIR,
+    MAX_VIDEO_UPLOAD_MB,
     ROOT,
     TRANSCRIPTION_ARTIFACT_DIR,
 )
@@ -121,6 +122,7 @@ from .content_store import (
 )
 from .db import get_db
 from .routes_media import safe_join
+from .media_upload_conflicts import find_media_upload_conflicts, normalize_media_title
 from .schemas import (
     BulkArchiveManagedContentRequest,
     BulkOperationDTO,
@@ -210,6 +212,7 @@ _DOC_TYPES = {
     ".ppt": "ppt",
     ".xmind": "xmind",
 }
+_VIDEO_EXTENSIONS = {".mp4"}
 _CONTENT_READ = CONTENT_PERMISSIONS
 
 
@@ -370,6 +373,27 @@ def _suggest_available_filename(
         if find_content_filename_conflict(
             conn, category_id=category_id, original_filename=candidate
         ) is None:
+            return candidate
+    raise ValueError("filename_suggestion_exhausted")
+
+
+def _suggest_available_media_filename(
+    conn: sqlite3.Connection,
+    *,
+    category_id: str,
+    original_filename: str,
+) -> str:
+    path = Path(original_filename)
+    for number in range(1, 10_000):
+        marker = f" ({number})"
+        available = 255 - len(path.suffix) - len(marker)
+        candidate = f"{path.stem[:available]}{marker}{path.suffix}"
+        if not find_media_upload_conflicts(
+            conn,
+            category_id=category_id,
+            title=Path(candidate).stem,
+            original_filename=candidate,
+        ):
             return candidate
     raise ValueError("filename_suggestion_exhausted")
 
@@ -1092,6 +1116,87 @@ def preflight_managed_document_upload(
             normalized_path = None
 
         suffix = Path(filename).suffix.lower()
+        if suffix in _VIDEO_EXTENSIONS:
+            if user.role != "admin":
+                results.append(ManagedUploadPreflightEntryDTO(
+                    sequence=sequence, filename=filename, relative_path=normalized_path,
+                    kind="video", status="blocked", reason="视频上传首期仅限系统管理员",
+                    reason_code="video_admin_only",
+                ))
+                continue
+            video_limit = min(
+                settings.upload_max_file_mb * 1024 * 1024,
+                MAX_VIDEO_UPLOAD_MB * 1024 * 1024,
+            )
+            if entry.size_bytes > video_limit:
+                results.append(ManagedUploadPreflightEntryDTO(
+                    sequence=sequence, filename=filename, relative_path=normalized_path,
+                    kind="video", status="blocked", reason="视频超过上传大小上限",
+                    reason_code="video_too_large",
+                ))
+                continue
+            upload_category_id: str | None = body.category_id
+            blocked_reason: str | None = None
+            root_conflict = False
+            for folder_index, folder_name in enumerate(parts[:-1]):
+                try:
+                    _code, name = _parse_folder_name(folder_name)
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail="文件夹名称不符合规则") from exc
+                child = find_sibling_category_by_name(conn, upload_category_id, name, active_only=True)
+                if child is not None:
+                    if folder_index == 0 and not body.allow_folder_merge:
+                        key = str(child["id"])
+                        folder_conflicts.setdefault(key, ManagedUploadFolderConflictDTO(
+                            relative_path=folder_name,
+                            category_id=key,
+                            category_path=_category_path(conn, key),
+                            display_name=name,
+                            suggested_name=_suggest_available_folder_name(conn, parent_id=body.category_id, display_name=name),
+                            can_rename=can_create_folders,
+                        ))
+                        root_conflict = True
+                        break
+                    upload_category_id = str(child["id"])
+                    continue
+                if not can_create_folders:
+                    blocked_reason = "目录尚未批准，请联系资料负责人创建后重试"
+                upload_category_id = None
+                break
+            if root_conflict:
+                results.append(ManagedUploadPreflightEntryDTO(
+                    sequence=sequence, filename=filename, relative_path=normalized_path,
+                    kind="video", status="conflict", reason="上传文件夹与当前目录的子文件夹重名",
+                    reason_code="folder_name_conflict",
+                ))
+                continue
+            if blocked_reason:
+                results.append(ManagedUploadPreflightEntryDTO(
+                    sequence=sequence, filename=filename, relative_path=normalized_path,
+                    kind="video", status="blocked", reason=blocked_reason,
+                    reason_code="folder_approval_required",
+                ))
+                continue
+            if upload_category_id is not None and find_media_upload_conflicts(
+                conn,
+                category_id=upload_category_id,
+                title=Path(filename).stem,
+                original_filename=filename,
+            ):
+                results.append(ManagedUploadPreflightEntryDTO(
+                    sequence=sequence, filename=filename, relative_path=normalized_path,
+                    kind="video", status="conflict", reason="当前目录下已存在同名视频资料",
+                    reason_code="media_filename_conflict",
+                    suggested_filename=_suggest_available_media_filename(
+                        conn, category_id=upload_category_id, original_filename=filename,
+                    ),
+                ))
+                continue
+            results.append(ManagedUploadPreflightEntryDTO(
+                sequence=sequence, filename=filename, relative_path=normalized_path,
+                kind="video", status="ready",
+            ))
+            continue
         doc_type = _DOC_TYPES.get(suffix)
         if doc_type is None:
             results.append(ManagedUploadPreflightEntryDTO(
@@ -1202,6 +1307,8 @@ async def upload_managed_documents(
     relative_paths: list[str] | None = Form(None),
     upload_mode: str = Form("files"),
     allow_folder_merge: bool = Form(False),
+    video_scheme_id: str | None = Form(None),
+    video_idempotency_keys: list[str] | None = Form(None),
     conflict_actions: list[str] | None = Form(None),
     user: CurrentUser = Depends(require_content_permission("item.upload", csrf=True)),
     conn: sqlite3.Connection = Depends(get_db),
@@ -1217,6 +1324,10 @@ async def upload_managed_documents(
         relative_paths=relative_paths,
         upload_mode=upload_mode,
     )
+    if any(Path((upload.filename or "")).suffix.lower() in _VIDEO_EXTENSIONS for upload in files) and user.role != "admin":
+        raise HTTPException(status_code=403, detail="视频上传首期仅限系统管理员")
+    if video_idempotency_keys is not None and len(video_idempotency_keys) != len(files):
+        raise HTTPException(status_code=400, detail="文件和视频幂等键数量不一致")
     actions = _parse_upload_actions(conflict_actions, len(files))
     upload_sizes = [_upload_size(upload) for upload in files]
     batch_id = create_web_batch(
@@ -1237,6 +1348,145 @@ async def upload_managed_documents(
         action = actions[index]
         final_filename = action.filename.strip() if action.strategy == "rename" and action.filename else filename
         suffix = Path(filename).suffix.lower()
+        if suffix in _VIDEO_EXTENSIONS:
+            if action.strategy == "skip":
+                reason = "按用户选择跳过"
+                entries.append(ManagedUploadEntryDTO(filename=filename, kind="video", status="skipped", reason=reason, reason_code="conflict_skipped"))
+                record_upload_batch_entry(
+                    conn, batch_id=batch_id, sequence=index + 1, filename=filename,
+                    relative_path=relative_path, size_bytes=size_bytes, status="skipped",
+                    reason=reason, entry_kind="video", failure_code="conflict_skipped",
+                )
+                continue
+            if not video_scheme_id:
+                reason = "上传视频前请选择转录方案"
+                entries.append(ManagedUploadEntryDTO(filename=filename, kind="video", status="skipped", reason=reason, reason_code="video_scheme_required"))
+                record_upload_batch_entry(
+                    conn, batch_id=batch_id, sequence=index + 1, filename=filename,
+                    relative_path=relative_path, size_bytes=size_bytes, status="skipped",
+                    reason=reason, entry_kind="video", failure_code="video_scheme_required",
+                )
+                continue
+            video_limit = min(
+                settings.upload_max_file_mb * 1024 * 1024,
+                MAX_VIDEO_UPLOAD_MB * 1024 * 1024,
+            )
+            if size_bytes > video_limit:
+                reason = "视频超过上传大小上限"
+                entries.append(ManagedUploadEntryDTO(filename=filename, kind="video", status="skipped", reason=reason, reason_code="video_too_large"))
+                record_upload_batch_entry(
+                    conn, batch_id=batch_id, sequence=index + 1, filename=filename,
+                    relative_path=relative_path, size_bytes=size_bytes, status="skipped",
+                    reason=reason, entry_kind="video", failure_code="video_too_large",
+                )
+                continue
+            try:
+                _storage.validate_filename(final_filename)
+            except ValueError:
+                reason = "新文件名无效"
+                entries.append(ManagedUploadEntryDTO(filename=filename, kind="video", status="skipped", reason=reason, reason_code="invalid_filename"))
+                record_upload_batch_entry(
+                    conn, batch_id=batch_id, sequence=index + 1, filename=filename,
+                    relative_path=relative_path, size_bytes=size_bytes, status="skipped",
+                    reason=reason, entry_kind="video", failure_code="invalid_filename",
+                )
+                continue
+            if Path(final_filename).suffix.lower() not in _VIDEO_EXTENSIONS:
+                reason = "重命名不能改变视频文件扩展名"
+                entries.append(ManagedUploadEntryDTO(filename=filename, kind="video", status="skipped", reason=reason, reason_code="invalid_filename_extension"))
+                record_upload_batch_entry(
+                    conn, batch_id=batch_id, sequence=index + 1, filename=filename,
+                    relative_path=relative_path, size_bytes=size_bytes, status="skipped",
+                    reason=reason, entry_kind="video", failure_code="invalid_filename_extension",
+                )
+                continue
+            try:
+                upload_category_id = _resolve_upload_category(
+                    conn,
+                    category_id=category_id,
+                    relative_path=relative_path,
+                    can_create_folders=can_create_folders,
+                    actor_user_id=user.id,
+                    allow_existing_folders=allow_folder_merge,
+                    created_category_ids=created_category_ids,
+                )
+                # Keep the existing media/transcription implementation as the
+                # source of truth for storage, idempotency, queueing and status.
+                from .routes_admin import upload_media
+
+                media_rowid_before = conn.execute(
+                    "SELECT COALESCE(MAX(rowid), 0) FROM media_assets"
+                ).fetchone()[0]
+                media = await upload_media(
+                    video=upload,
+                    title=Path(final_filename).stem,
+                    transcript=None,
+                    profile_id=video_scheme_id,
+                    request_idempotency_key=(
+                        video_idempotency_keys[index]
+                        if video_idempotency_keys and video_idempotency_keys[index]
+                        else str(uuid.uuid4())
+                    ),
+                    admin=user,
+                    conn=conn,
+                    replacement_source_media_id=None,
+                    scheme_id=video_scheme_id,
+                    category_id=upload_category_id,
+                    original_filename=final_filename,
+                )
+                source_parts = relative_path.split("/") if relative_path else [final_filename]
+                source_parts[-1] = final_filename
+                entries.append(ManagedUploadEntryDTO(
+                    filename=final_filename, kind="video", media_id=media.media_id,
+                    transcription_job_id=media.transcription_job_id, status="accepted",
+                    resolution="renamed" if action.strategy == "rename" else "created",
+                ))
+                record_upload_batch_entry(
+                    conn, batch_id=batch_id, sequence=index + 1, filename=final_filename,
+                    relative_path="/".join(source_parts), size_bytes=size_bytes, status="accepted",
+                    entry_kind="video", media_id=media.media_id,
+                    transcription_job_id=media.transcription_job_id,
+                )
+            except HTTPException as exc:
+                conn.rollback()
+                detail = exc.detail
+                if isinstance(detail, dict):
+                    reason = str(detail.get("message") or detail.get("code") or "视频上传失败")
+                    failure_code = str(detail.get("code") or "video_upload_failed")
+                else:
+                    reason = str(detail or "视频上传失败")
+                    failure_code = "video_upload_failed"
+                failed_media = conn.execute(
+                    """SELECT media_id FROM media_assets
+                       WHERE rowid>? AND target_category_id=? AND normalized_title=?
+                         AND normalized_original_filename=? AND created_by=? AND status='failed'
+                       ORDER BY created_at DESC LIMIT 1""",
+                    (
+                        media_rowid_before,
+                        upload_category_id,
+                        normalize_media_title(Path(final_filename).stem)[1],
+                        normalize_content_filename(final_filename)[1],
+                        user.id,
+                    ),
+                ).fetchone()
+                failed_media_id = str(failed_media["media_id"]) if failed_media else None
+                entries.append(ManagedUploadEntryDTO(filename=final_filename, kind="video", media_id=failed_media_id, status="skipped", reason=reason, reason_code=failure_code))
+                record_upload_batch_entry(
+                    conn, batch_id=batch_id, sequence=index + 1, filename=final_filename,
+                    relative_path=relative_path, size_bytes=size_bytes, status="skipped",
+                    reason=reason, entry_kind="video", media_id=failed_media_id,
+                    failure_code=failure_code,
+                )
+            except (ValueError, sqlite3.IntegrityError) as exc:
+                conn.rollback()
+                reason = str(exc) or "视频上传失败"
+                entries.append(ManagedUploadEntryDTO(filename=final_filename, kind="video", status="skipped", reason=reason, reason_code="video_upload_failed"))
+                record_upload_batch_entry(
+                    conn, batch_id=batch_id, sequence=index + 1, filename=final_filename,
+                    relative_path=relative_path, size_bytes=size_bytes, status="skipped",
+                    reason=reason, entry_kind="video", failure_code="video_upload_failed",
+                )
+            continue
         doc_type = _DOC_TYPES.get(suffix)
         if doc_type is None:
             reason = "不支持的文件格式"
@@ -1450,8 +1700,13 @@ def _managed_upload_task_dto(
         entries=[ManagedUploadTaskEntryDTO(
             sequence=int(entry["sequence"]), filename=entry["filename"],
             relative_path=entry["relative_path"], size_bytes=int(entry["size_bytes"] or 0),
+            kind=entry["entry_kind"] if "entry_kind" in entry.keys() else "document",
             status=entry["status"], reason=entry["reason"], item_id=entry["item_id"],
-            version_id=entry["version_id"], created_at=int(entry["created_at"]),
+            version_id=entry["version_id"],
+            media_id=entry["media_id"] if "media_id" in entry.keys() else None,
+            transcription_job_id=entry["transcription_job_id"] if "transcription_job_id" in entry.keys() else None,
+            failure_code=entry["failure_code"] if "failure_code" in entry.keys() else None,
+            created_at=int(entry["created_at"]),
         ) for entry in entries] if entries is not None else None,
     )
 

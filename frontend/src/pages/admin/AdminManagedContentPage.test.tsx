@@ -1860,9 +1860,9 @@ describe("AdminManagedContentPage", () => {
       fromSource: false,
     });
     const moreMenu = openMoreActions("WhisperX 培训视频");
-    expect(within(moreMenu).getByRole("menuitem", { name: "编辑转录稿" })).toHaveAttribute("href", `/admin/media?media_id=${mediaItem.media_id}&workbench=1&action=edit-current`);
-    expect(within(moreMenu).getByRole("menuitem", { name: "替换视频" })).toHaveAttribute("href", `/admin/media?media_id=${mediaItem.media_id}&action=replace`);
-    expect(within(moreMenu).getByRole("menuitem", { name: "进入视频管理" })).toHaveAttribute("href", `/admin/media?media_id=${mediaItem.media_id}&workbench=1`);
+    expect(within(moreMenu).getByRole("menuitem", { name: "编辑转录稿" })).toHaveAttribute("href", `/admin/content?view=transcription&media_id=${mediaItem.media_id}&workbench=1&action=edit-current`);
+    expect(within(moreMenu).getByRole("menuitem", { name: "替换视频" })).toHaveAttribute("href", `/admin/content?view=transcription&media_id=${mediaItem.media_id}&action=replace`);
+    expect(within(moreMenu).getByRole("menuitem", { name: "进入转录任务" })).toHaveAttribute("href", `/admin/content?view=transcription&media_id=${mediaItem.media_id}&workbench=1`);
   });
 
   it.each([
@@ -1919,7 +1919,7 @@ describe("AdminManagedContentPage", () => {
     await openRootFolder();
 
     const moreMenu = openMoreActions("WhisperX 培训视频");
-    for (const action of ["编辑转录稿", "编辑媒体信息", "替换视频", "进入视频管理"]) {
+    for (const action of ["编辑转录稿", "编辑媒体信息", "替换视频", "进入转录任务"]) {
       expect(within(moreMenu).getByRole("menuitem", { name: action })).toBeDisabled();
     }
     expect(within(moreMenu).queryByRole("link")).not.toBeInTheDocument();

@@ -16,7 +16,6 @@ import { AdminFeedbackPage } from "./pages/admin/AdminFeedbackPage";
 import { AdminLayout } from "./pages/admin/AdminLayout";
 import { AdminMaintenancePage } from "./pages/admin/AdminMaintenancePage";
 import { AdminManagedContentPage } from "./pages/admin/AdminManagedContentPage";
-import { AdminMediaPage } from "./pages/admin/AdminMediaPage";
 import { AdminOverviewPage } from "./pages/admin/AdminOverviewPage";
 import { AdminUsersPage } from "./pages/admin/AdminUsersPage";
 import { Toaster } from "./components/ui/toast";
@@ -126,7 +125,7 @@ export default function App() {
                 <Route path="asr" element={<RequireSystemAdmin><AdminAsrSettingsPage /></RequireSystemAdmin>} />
                 <Route path="content" element={<AdminManagedContentPage />} />
                 <Route path="categories" element={<AdminCategoriesPage />} />
-                <Route path="media" element={<AdminMediaPage />} />
+                <Route path="media" element={<Navigate to="/admin/content?view=transcription" replace />} />
                 <Route path="index" element={<Navigate to="/admin/content?view=index" replace />} />
                 <Route path="users" element={<AdminUsersPage />} />
                 <Route path="conversations" element={<AdminConversationsPage />} />

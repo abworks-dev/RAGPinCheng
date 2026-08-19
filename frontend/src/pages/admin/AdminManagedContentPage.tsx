@@ -20,7 +20,7 @@ import { toast } from "../../components/ui/toast";
 import { useAuth } from "../../context/AuthContext";
 import { usePdfPreview } from "../../hooks/usePdfPreview";
 import { useVideoPlayer } from "../../hooks/useVideoPlayer";
-import type { BulkManagedContentResult, BulkOperationAction, BulkRestorePreflightResult, ContentPermission, ContentTrashAuditEvent, FolderRequest, ManagedCategory, ManagedContentItem, ManagedUploadConflictAction, ManagedUploadPreflightResponse, ManagedUploadTask, ManagedUploadTaskEntry, TrashPurgePreflight, TrashPurgeRun, TrashSettings } from "../../types";
+import type { BulkManagedContentResult, BulkOperationAction, BulkRestorePreflightResult, ContentPermission, ContentTrashAuditEvent, FolderRequest, ManagedCategory, ManagedContentItem, ManagedUploadConflictAction, ManagedUploadPreflightResponse, ManagedUploadTask, ManagedUploadTaskEntry, TranscriptionSchemeOption, TrashPurgePreflight, TrashPurgeRun, TrashSettings } from "../../types";
 import type { ManagedUploadOptions, ManagedUploadProgress } from "../../api/client";
 import { formatAdminDate } from "../../lib/admin-formatters";
 import { createRequestId } from "../../lib/request-id";
@@ -31,6 +31,7 @@ import { CategoryDestinationPicker } from "../../components/admin/CategoryDestin
 import { ManagedContentBulkOperationDialog } from "../../components/admin/ManagedContentBulkOperationDialog";
 import { ManagedItemType } from "../../components/admin/ManagedItemType";
 import { compareManagedCategories } from "../../lib/category-tree";
+import { AdminTranscriptionTasksPage } from "./AdminTranscriptionTasksPage";
 import {
   collectDroppedUpload,
   folderSelectionFromFiles,
@@ -46,7 +47,7 @@ const BULK_DOWNLOAD_TOAST_ID = "managed-content-bulk-download";
 const ACTIVE_RECLASSIFICATION_STATUSES = new Set(["pending", "applying", "committing", "rolling_back"]);
 type SortKey = "docType" | "title" | "updatedAt" | "status" | "source";
 type SortDirection = "asc" | "desc";
-type ManagedContentView = "library" | "trash" | "uploads" | "index";
+type ManagedContentView = "library" | "trash" | "uploads" | "index" | "transcription";
 type MoveOperation = "move" | "reclassify" | "archive";
 type UploadConflictChoice = { strategy: "skip" | "rename" | "update"; filename?: string };
 type UploadConflictReview = {
@@ -806,6 +807,7 @@ export function AdminManagedContentPage() {
   const { open: openDocumentPreview, openXMind, state: previewState } = usePdfPreview();
   const { open: openVideoPreview } = useVideoPlayer();
   const permissions = state.status === "authed" ? state.user.content_permissions || [] : [];
+  const isSystemAdmin = state.status === "authed" && state.user.role === "admin";
   const can = (permission: ContentPermission) => state.status === "authed" && (state.user.role === "admin" || permissions.includes(permission));
   const [items, setItems] = useState<ManagedContentItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -813,6 +815,8 @@ export function AdminManagedContentPage() {
   const [categories, setCategories] = useState<ManagedCategory[]>([]);
   const [enabled, setEnabled] = useState(false);
   const [uploadLimits, setUploadLimits] = useState({ maxFileBytes: 0, maxBatchFiles: 0, maxBatchBytes: 0 });
+  const [transcriptionSchemes, setTranscriptionSchemes] = useState<TranscriptionSchemeOption[]>([]);
+  const [videoSchemeId, setVideoSchemeId] = useState("");
   const [currentFolderId, setCurrentFolderId] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [pendingUploadFiles, setPendingUploadFiles] = useState<File[]>([]);
@@ -825,7 +829,7 @@ export function AdminManagedContentPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadChecking, setUploadChecking] = useState(false);
   const [activeUpload, setActiveUpload] = useState<ActiveUploadState | null>(null);
-  const [lastUploadAttempt, setLastUploadAttempt] = useState<{ batchId: string; files: Array<File | FolderUploadEntry>; categoryId: string; uploadMode: "files" | "folder" } | null>(null);
+  const [lastUploadAttempt, setLastUploadAttempt] = useState<{ batchId: string; files: Array<File | FolderUploadEntry>; categoryId: string; uploadMode: "files" | "folder"; options: ManagedUploadOptions } | null>(null);
   const [uploadConflictReview, setUploadConflictReview] = useState<UploadConflictReview | null>(null);
   const [uploadConflictChoices, setUploadConflictChoices] = useState<Record<number, UploadConflictChoice>>({});
   const [folderConflictMode, setFolderConflictMode] = useState<"merge" | "rename" | null>(null);
@@ -862,7 +866,7 @@ export function AdminManagedContentPage() {
   const [view, setViewState] = useState<ManagedContentView>(() => {
     if (typeof window === "undefined") return "library";
     const requestedView = new URLSearchParams(window.location.search).get("view");
-    return requestedView === "uploads" || requestedView === "index" ? requestedView : "library";
+    return requestedView === "uploads" || requestedView === "index" || requestedView === "transcription" ? requestedView : "library";
   });
   const [trashItems, setTrashItems] = useState<ManagedContentItem[]>([]);
   const [trashTotal, setTrashTotal] = useState(0);
@@ -955,7 +959,21 @@ export function AdminManagedContentPage() {
   useEffect(() => {
     if (view === "uploads" && !can("item.upload")) setView("library");
     if (view === "index" && !can("index.view")) setView("library");
+    if (view === "transcription" && !(state.status === "authed" && state.user.role === "admin")) setView("library");
   }, [view, state.status, permissions]);
+
+  useEffect(() => {
+    if (state.status !== "authed" || state.user.role !== "admin") return;
+    try {
+      void adminContentApi.transcriptionSchemes().then((rows) => {
+        const usable = rows.filter((row) => row.enabled && !row.archived && row.availability === "available");
+        setTranscriptionSchemes(rows);
+        setVideoSchemeId((current) => current || usable[0]?.scheme_id || "");
+      }).catch(() => setTranscriptionSchemes([]));
+    } catch {
+      setTranscriptionSchemes([]);
+    }
+  }, [state.status, state.status === "authed" ? state.user.role : null]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setQuery(queryInput.trim()), 250);
@@ -1050,13 +1068,22 @@ export function AdminManagedContentPage() {
         phase: progress.phase,
         loadedBytes: progress.phase === "processing" ? current.totalBytes : progress.loaded,
       } : current);
+      const hasVideo = uploadFiles.some((entry) => /\.mp4$/i.test("file" in entry ? entry.file.name : entry.name));
+      const resolvedOptions: ManagedUploadOptions = { ...options };
+      if (hasVideo) {
+        if (options.videoSchemeId || videoSchemeId) resolvedOptions.videoSchemeId = options.videoSchemeId || videoSchemeId;
+        resolvedOptions.videoIdempotencyKeys = options.videoIdempotencyKeys || uploadFiles.map((entry) => {
+          const file = "file" in entry ? entry.file : entry;
+          return /\.mp4$/i.test(file.name) ? createRequestId() : "";
+        });
+      }
       const result = uploadMode === "folder"
-        ? await adminContentApi.upload(uploadFiles, targetFolderId, "folder", onProgress, options)
-        : await adminContentApi.upload(uploadFiles, targetFolderId, "files", onProgress, options);
+        ? await adminContentApi.upload(uploadFiles, targetFolderId, "folder", onProgress, resolvedOptions)
+        : await adminContentApi.upload(uploadFiles, targetFolderId, "files", onProgress, resolvedOptions);
       const accepted = result.entries.filter((entry) => entry.status === "accepted").length;
       const skipped = result.entries.length - accepted;
       setActiveUpload((current) => current ? { ...current, batchId: result.batch_id, loadedBytes: current.totalBytes, phase: accepted ? "completed" : "failed", message: accepted ? undefined : "没有文件被接收，请查看任务详情" } : current);
-      if (skipped) setLastUploadAttempt({ batchId: result.batch_id, files: uploadFiles, categoryId: targetFolderId, uploadMode });
+      if (skipped) setLastUploadAttempt({ batchId: result.batch_id, files: uploadFiles, categoryId: targetFolderId, uploadMode, options: resolvedOptions });
       else setLastUploadAttempt(null);
       if (skipped) toast.error(`已接收 ${accepted} 个文件，${skipped} 个文件未完成，请查看上传任务`);
       else toast.success(`已接收 ${accepted} 个文件`);
@@ -1095,7 +1122,7 @@ export function AdminManagedContentPage() {
     setUploadConflictReview(review);
     setUploadConflictChoices(Object.fromEntries(
       review.preflight.entries
-        .filter((entry) => entry.status === "conflict" && entry.reason_code === "content_filename_conflict")
+        .filter((entry) => entry.status === "conflict" && ["content_filename_conflict", "media_filename_conflict"].includes(entry.reason_code || ""))
         .map((entry) => [entry.sequence, {
           strategy: "skip" as const,
           filename: entry.suggested_filename || entry.filename,
@@ -1113,6 +1140,7 @@ export function AdminManagedContentPage() {
     uploadFiles: Array<File | FolderUploadEntry>,
     uploadMode: "files" | "folder",
     allowFolderMerge = false,
+    uploadOptions: ManagedUploadOptions = {},
   ) => {
     setUploadChecking(true);
     setUploadConflictError(null);
@@ -1132,7 +1160,7 @@ export function AdminManagedContentPage() {
         });
         return false;
       }
-      return await upload(targetFolderId, uploadFiles, uploadMode, { allowFolderMerge });
+      return await upload(targetFolderId, uploadFiles, uploadMode, { ...uploadOptions, allowFolderMerge });
     } catch (preflightError) {
       const message = preflightError instanceof Error ? preflightError.message : "上传预检失败";
       setUploadConflictError(message);
@@ -1228,14 +1256,23 @@ export function AdminManagedContentPage() {
       toast.error("原始文件已不在当前页面，请重新选择后上传");
       return;
     }
-    await preflightUpload(lastUploadAttempt.categoryId, lastUploadAttempt.files, lastUploadAttempt.uploadMode);
+    await preflightUpload(
+      lastUploadAttempt.categoryId,
+      lastUploadAttempt.files,
+      lastUploadAttempt.uploadMode,
+      lastUploadAttempt.options.allowFolderMerge,
+      lastUploadAttempt.options,
+    );
   };
 
   const prepareFileDrop = (incoming: File[]) => {
-    const supported = incoming.filter((file) => /\.(pdf|md|doc|docx|xls|xlsx|ppt|pptx|xmind)$/i.test(file.name));
+    const supportsVideo = isSystemAdmin;
+    const supported = incoming.filter((file) => /\.(pdf|md|doc|docx|xls|xlsx|ppt|pptx|xmind)$/i.test(file.name) || (supportsVideo && /\.mp4$/i.test(file.name)));
     setListDropActive(false);
     if (!supported.length || !currentFolderId) {
-      if (incoming.length) toast.error("没有可上传的支持格式，仅支持 PDF、Markdown、Word、Excel、PPT 和 XMind 文件");
+      if (incoming.length) toast.error(supportsVideo
+        ? "没有可上传的支持格式，仅支持 PDF、Markdown、Word、Excel、PPT、XMind 和 MP4 文件"
+        : "没有可上传的支持格式，仅支持 PDF、Markdown、Word、Excel、PPT 和 XMind 文件");
       return;
     }
     setPendingUploadFiles(supported);
@@ -1259,25 +1296,34 @@ export function AdminManagedContentPage() {
       toast.error("请先选择资料目录");
       return;
     }
-    if (!selection.fileCount) {
-      const ignored = selection.ignoredEntries.length;
+    const supportsVideo = isSystemAdmin;
+    const restrictedVideos = supportsVideo ? [] : selection.entries.filter((entry) => /\.mp4$/i.test(entry.file.name));
+    const filteredSelection: FolderUploadSelection = restrictedVideos.length === 0 ? selection : {
+      ...selection,
+      entries: selection.entries.filter((entry) => !/\.mp4$/i.test(entry.file.name)),
+      ignoredEntries: [...selection.ignoredEntries, ...restrictedVideos],
+      fileCount: selection.fileCount - restrictedVideos.length,
+      totalSize: selection.totalSize - restrictedVideos.reduce((sum, entry) => sum + entry.file.size, 0),
+    };
+    if (!filteredSelection.fileCount) {
+      const ignored = filteredSelection.ignoredEntries.length;
       toast.error(ignored
         ? `文件夹中的 ${ignored} 个文件均不是支持的资料格式`
         : "所选文件夹中没有可上传的文件");
       return;
     }
-    if (selection.fileCount > uploadLimits.maxBatchFiles) {
+    if (filteredSelection.fileCount > uploadLimits.maxBatchFiles) {
       toast.error(`文件夹最多上传 ${uploadLimits.maxBatchFiles} 个文件`);
       return;
     }
-    if (selection.totalSize > uploadLimits.maxBatchBytes) {
+    if (filteredSelection.totalSize > uploadLimits.maxBatchBytes) {
       toast.error(`文件夹总大小不能超过 ${formatUploadSize(uploadLimits.maxBatchBytes)}`);
       return;
     }
     setUploadDialogOpen(false);
     setFiles([]);
     if (fileInputRef.current) fileInputRef.current.value = "";
-    setPendingFolderUpload(selection);
+    setPendingFolderUpload(filteredSelection);
     setPendingFolderUploadFolderId(currentFolderId);
   };
 
@@ -1637,7 +1683,8 @@ export function AdminManagedContentPage() {
   };
 
   const acceptFiles = (incoming: File[]) => {
-    const supported = incoming.filter((file) => /\.(pdf|md|doc|docx|xls|xlsx|ppt|pptx|xmind)$/i.test(file.name));
+    const supportsVideo = isSystemAdmin;
+    const supported = incoming.filter((file) => /\.(pdf|md|doc|docx|xls|xlsx|ppt|pptx|xmind)$/i.test(file.name) || (supportsVideo && /\.mp4$/i.test(file.name)));
     const oversized = supported.filter((file) => file.size > uploadLimits.maxFileBytes);
     setFiles(supported.filter((file) => file.size <= uploadLimits.maxFileBytes));
     if (supported.length !== incoming.length) toast.error("已忽略不支持的文件格式");
@@ -2323,7 +2370,7 @@ export function AdminManagedContentPage() {
     if (isMediaTranscript) {
       const moveTooltip = unavailableReason || (movable ? "调整归档目录" : "当前账号没有发布权限");
       const mediaManageAllowed = state.status === "authed" && state.user.role === "admin" && Boolean(item.media_id);
-      const mediaBaseUrl = `/admin/media?media_id=${encodeURIComponent(item.media_id || "")}`;
+      const mediaBaseUrl = `/admin/content?view=transcription&media_id=${encodeURIComponent(item.media_id || "")}`;
       return <div className="ml-auto flex min-h-10 w-[13.5rem] max-w-full items-center justify-end gap-1">
         <IconButton label={`查看“${item.title}”的详细信息`} tooltip={unavailableReason || "查看视频转录稿详情"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => setDetail(item)}><Info className="size-4" /></IconButton>
         <IconButton label={`播放“${item.title}”`} tooltip={unavailableReason || (item.media_id ? "播放视频与转录稿" : "媒体关联缺失，暂无法播放")} className="border border-border max-sm:size-10" disabled={disabled || !item.media_id} onClick={() => openVideoPreview({ mediaId: item.media_id!, title: item.title, startSeconds: 0, fromSource: false })}><Film className="size-4" /></IconButton>
@@ -2338,7 +2385,7 @@ export function AdminManagedContentPage() {
             { key: "edit-transcript", label: "编辑转录稿", icon: <FilePenLine className="size-4" />, href: mediaManageAllowed ? `${mediaBaseUrl}&workbench=1&action=edit-current` : undefined, disabled: !mediaManageAllowed, disabledReason: "当前账号没有发布权限" },
             { key: "edit-media-info", label: "编辑媒体信息", icon: <Pencil className="size-4" />, disabled: !mediaManageAllowed, disabledReason: "当前账号没有发布权限", onSelect: () => openMediaInfoDialog(item) },
             { key: "replace-video", label: "替换视频", icon: <Video className="size-4" />, href: mediaManageAllowed ? `${mediaBaseUrl}&action=replace` : undefined, disabled: !mediaManageAllowed, disabledReason: "当前账号没有发布权限" },
-            { key: "open-media", label: "进入视频管理", icon: <ExternalLink className="size-4" />, href: mediaManageAllowed ? `${mediaBaseUrl}&workbench=1` : undefined, disabled: !mediaManageAllowed, disabledReason: item.media_id ? "仅系统管理员可以进入视频管理" : "媒体关联缺失" },
+            { key: "open-media", label: "进入转录任务", icon: <ExternalLink className="size-4" />, href: mediaManageAllowed ? `${mediaBaseUrl}&workbench=1` : undefined, disabled: !mediaManageAllowed, disabledReason: item.media_id ? "仅系统管理员可以进入转录任务" : "媒体关联缺失" },
           ]}
         />
       </div>;
@@ -2442,12 +2489,13 @@ export function AdminManagedContentPage() {
     if (nextView === "library" || nextView === "trash") setPage(0);
     if (nextView !== "library") setSelected([]);
   };
-  const viewTabs = (can("trash.view") || can("item.upload") || can("index.view")) && (
+  const viewTabs = (can("trash.view") || can("item.upload") || can("index.view") || (state.status === "authed" && state.user.role === "admin")) && (
     <div className="flex flex-wrap gap-2" role="tablist" aria-label="资料视图">
       <Button size="sm" variant={view === "library" ? "default" : "outline"} role="tab" aria-selected={view === "library"} onClick={() => selectView("library")}><Folder className="size-4" />资料列表</Button>
       {can("trash.view") && <Button size="sm" variant={view === "trash" ? "default" : "outline"} role="tab" aria-selected={view === "trash"} onClick={() => selectView("trash")}><Trash2 className="size-4" />回收站</Button>}
       {can("item.upload") && <Button size="sm" variant={view === "uploads" ? "default" : "outline"} role="tab" aria-selected={view === "uploads"} onClick={() => selectView("uploads")}><Upload className="size-4" />上传任务</Button>}
       {can("index.view") && <Button size="sm" variant={view === "index" ? "default" : "outline"} role="tab" aria-selected={view === "index"} onClick={() => selectView("index")}><ListChecks className="size-4" />索引任务</Button>}
+      {state.status === "authed" && state.user.role === "admin" && <Button size="sm" variant={view === "transcription" ? "default" : "outline"} role="tab" aria-selected={view === "transcription"} onClick={() => selectView("transcription")}><Video className="size-4" />转录任务</Button>}
     </div>
   );
 
@@ -2472,6 +2520,14 @@ export function AdminManagedContentPage() {
       <header><p className="text-ui-xs font-medium text-primary">内容管理</p><h1 id="managed-content-title" className="mt-1 text-ui-2xl font-semibold tracking-tight">资料管理</h1><p className="mt-1 text-ui-sm text-muted-foreground">统一管理资料的上传、分类、确认和发布。</p></header>
       {viewTabs}
       <UploadTasksPanel activeUpload={activeUpload} canRetry={(task) => Boolean(lastUploadAttempt?.batchId === task.batch_id)} onRetry={(task) => void retryUploadTask(task)} />
+    </section>;
+  }
+
+  if (view === "transcription") {
+    return <section className="space-y-5" aria-labelledby="managed-content-title">
+      <header><p className="text-ui-xs font-medium text-primary">内容管理</p><h1 id="managed-content-title" className="mt-1 text-ui-2xl font-semibold tracking-tight">资料管理</h1><p className="mt-1 text-ui-sm text-muted-foreground">统一管理资料的上传、分类、确认和发布。</p></header>
+      {viewTabs}
+      <AdminTranscriptionTasksPage />
     </section>;
   }
 
@@ -2619,7 +2675,7 @@ export function AdminManagedContentPage() {
       <div className="border-b border-border bg-surface-muted/40 px-4 py-3 sm:px-5" data-testid="managed-folder-address"><div className="flex min-w-0 items-center gap-2"><nav className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden rounded-ui-md border border-input bg-background px-3 py-2 text-ui-sm" aria-label="资料路径"><button type="button" className="shrink-0 rounded px-1 py-0.5 font-medium hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId("")}>/</button>{breadcrumbs.map((folder) => <span key={folder.id} className="flex min-w-0 items-center gap-1"><ChevronRight className="size-4 shrink-0 text-muted-foreground" /><button type="button" className="max-w-56 truncate rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setCurrentFolderId(folder.id)}>{folder.display_code} {folder.display_name}</button></span>)}</nav><IconButton label="返回上一目录" tooltip={currentFolder ? "返回上一目录" : "当前已在根目录"} className="size-control-md border border-border bg-background" disabled={!currentFolder} onClick={() => setCurrentFolderId(currentFolder?.parent_id || "")}><ArrowUp className="size-4" /></IconButton></div></div>
 
       <div data-testid="managed-content-drop-list" className="relative" onDragEnter={handleListDragEnter} onDragOver={handleListDragOver} onDragLeave={handleListDragLeave} onDrop={handleListDrop}>
-      {listDropActive && <div data-testid="managed-content-drop-overlay" className="pointer-events-none absolute inset-1 z-sticky rounded-ui-lg border-2 border-dashed border-primary/70 bg-background/70 text-center shadow-focus backdrop-blur-[1px]" role="status" aria-live="polite"><div className="absolute left-1/2 flex w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-3" style={{ top: listDropPromptTop }}><span className="flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-surface" aria-hidden="true"><Upload className="size-6" /></span><div className="space-y-1"><p className="break-words text-ui-base font-semibold">松开以上传文件到“{currentFolderDropLabel}”</p><p className="text-ui-xs text-muted-foreground">也支持拖入文件夹；支持 PDF、Markdown、Word、Excel、PPT 和 XMind 文件</p></div></div></div>}
+      {listDropActive && <div data-testid="managed-content-drop-overlay" className="pointer-events-none absolute inset-1 z-sticky rounded-ui-lg border-2 border-dashed border-primary/70 bg-background/70 text-center shadow-focus backdrop-blur-[1px]" role="status" aria-live="polite"><div className="absolute left-1/2 flex w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-3" style={{ top: listDropPromptTop }}><span className="flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-surface" aria-hidden="true"><Upload className="size-6" /></span><div className="space-y-1"><p className="break-words text-ui-base font-semibold">松开以上传文件到“{currentFolderDropLabel}”</p><p className="text-ui-xs text-muted-foreground">也支持拖入文件夹；支持 PDF、Markdown、Word、Excel、PPT 和 XMind 文件{isSystemAdmin ? "；MP4 视频将进入转录任务" : ""}</p></div></div></div>}
       {loading ? <LoadingState className="min-h-48 border-x-0 border-b-0" label="正在加载资料…" /> : !error && items.length === 0 && childFolders.length === 0 ? <EmptyState className="min-h-56 rounded-none border-x-0 border-b-0 sm:min-h-64" title="没有符合条件的资料" description="请调整筛选条件或上传新资料。" /> : !error && <>
         <div className="hidden overflow-x-auto border-t border-border lg:block"><table className="w-full min-w-[72rem] text-ui-sm"><thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr><th className="w-8 px-1.5 py-3"><Checkbox aria-label="选择当前页前20份资料" checked={allSelected} onChange={toggleAll} /></th>{([ ["docType", "类型"], ["title", "资料"], ["updatedAt", "更新时间"], ["status", "状态"], ["source", "来源"] ] as [SortKey, string][]).map(([key, label]) => <th key={key} aria-sort={sort?.key === key ? sort.direction === "asc" ? "ascending" : "descending" : "none"} className={key === "docType" ? "w-16 px-1 py-3 text-center font-medium" : key === "title" ? "px-1.5 py-3 font-medium" : "px-3 py-3 font-medium"}><button type="button" className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => toggleSort(key)}>{label}{sortIcon(key)}</button></th>)}<th className="px-3 py-3 text-right font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">
           {sortedChildFolders.map((folder) => {
@@ -2823,7 +2879,7 @@ export function AdminManagedContentPage() {
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>{detail?.title || "资料详情"}</DialogTitle>
-          <DialogDescription>{detail?.content_kind === "media_transcript" ? "查看已发布的视频转录稿；校对、发布和删除仍在视频管理中完成。" : "核对文件、分类、来源、版本和最近审核记录。"}</DialogDescription>
+          <DialogDescription>{detail?.content_kind === "media_transcript" ? "查看已发布的视频转录稿；校对、发布和失败恢复在转录任务中完成。" : "核对文件、分类、来源、版本和最近审核记录。"}</DialogDescription>
         </DialogHeader>
         {detail && <div className="space-y-4">
           <PublicationFailure item={detail} />
@@ -2851,7 +2907,7 @@ export function AdminManagedContentPage() {
           </dl>
           {detail.content_kind === "media_transcript" ? <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={() => { setDetail(null); openVideoPreview({ mediaId: detail.media_id!, title: detail.title, startSeconds: 0, fromSource: false }); }} disabled={!detail.media_id}><Film className="size-4" />播放视频与转录稿</Button>
-            {state.status === "authed" && state.user.role === "admin" && <a className={buttonVariants({ variant: "outline" })} href={`/admin/media?media_id=${encodeURIComponent(detail.media_id || "")}&workbench=1`}><ExternalLink className="size-4" />进入视频管理</a>}
+            {state.status === "authed" && state.user.role === "admin" && <a className={buttonVariants({ variant: "outline" })} href={`/admin/content?view=transcription&media_id=${encodeURIComponent(detail.media_id || "")}&workbench=1`}><ExternalLink className="size-4" />进入转录任务</a>}
           </div> : <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={() => { const target = detail; setDetail(null); void openAudit(target); }}><History className="size-4" />操作记录</Button>
             {detail.doc_type === "xmind" ? <Button variant="outline" onClick={() => openXMind(detail.version_id, detail.title, "managed-content-detail")}><Eye className="size-4" />预览文件</Button> : detail.preview_parent_id && ["pdf", "docx", "xlsx", "pptx"].includes(detail.doc_type) ? <Button variant="outline" onClick={() => { openDocumentPreview(detail.preview_parent_id!, detail.title, detail.doc_type, 1, {}, "managed-content-detail"); }}><Eye className="size-4" />预览文件</Button> : detail.doc_type === "pdf" || can("item.download") ? <a className={buttonVariants({ variant: "outline" })} href={adminContentApi.fileUrl(detail.version_id)} target="_blank" rel="noreferrer"><Eye className="size-4" />打开文件</a> : <Button variant="outline" disabled title="打开文件（需要下载权限）"><Eye className="size-4" />打开文件</Button>}
@@ -2949,11 +3005,11 @@ export function AdminManagedContentPage() {
 
     <Dialog open={Boolean(updateTarget)} onOpenChange={(open) => { if (!open && busyAction !== "update") { setUpdateTarget(null); setUpdateConflict(null); setUpdateError(null); setUpdateFile(null); } }}><DialogContent><DialogHeader><DialogTitle>更新资料文件</DialogTitle><DialogDescription>上传替换文件后会创建新草稿版本，旧发布版本会继续检索，直到新版本发布成功。</DialogDescription></DialogHeader><div className="space-y-3"><label className="flex min-h-32 cursor-pointer flex-col items-center justify-center gap-2 rounded-ui-lg border border-dashed border-input bg-background px-4 py-5 text-center hover:bg-surface-muted focus-within:ring-2 focus-within:ring-ring"><FileUp className="size-6 text-primary" /><span className="text-ui-sm font-medium">{updateFile ? updateFile.name : "选择替换文件"}</span><span className="text-ui-xs text-muted-foreground">支持 PDF、Markdown、Word、Excel、PPT 和 XMind</span><input ref={updateFileInputRef} type="file" className="sr-only" aria-label="选择替换文件" accept=".pdf,.md,.docx,.xlsx,.pptx,.xmind" onChange={(event) => { setUpdateFile(event.target.files?.[0] || null); setUpdateConflict(null); }} /></label>{updateFile && <div className="space-y-2"><p className="text-ui-sm font-medium">文件名处理</p><div className="grid grid-cols-2 gap-2" role="group" aria-label="文件名处理"><Button type="button" variant={updateFilenameMode === "old" ? "default" : "outline"} aria-pressed={updateFilenameMode === "old"} onClick={() => { setUpdateFilenameMode("old"); setUpdateConflict(null); }}>沿用原名称</Button><Button type="button" variant={updateFilenameMode === "new" ? "default" : "outline"} aria-pressed={updateFilenameMode === "new"} onClick={() => { setUpdateFilenameMode("new"); setUpdateConflict(null); }}>使用新文件名</Button></div><p className="break-all text-ui-xs text-muted-foreground">{updateFilenameMode === "old" ? `将使用原名称并匹配新格式：${filenameForOldMode(updateTarget?.original_filename || "", updateFile.name)}` : `将使用：${updateFile.name}`}</p></div>}{updateConflict && <div className="space-y-2 rounded-ui-md border border-warning/50 bg-warning/10 p-3 text-ui-sm" role="alert"><p className="font-medium">当前目录存在同名资料，是否替换？</p><p>{updateConflict.title}（{updateConflict.original_filename}）</p><p className="text-muted-foreground">替换会将上述资料移入回收站并停止检索。</p></div>}{updateError && <p className="text-ui-sm text-destructive" role="alert">{updateError}</p>}</div><DialogFooter><Button variant="outline" disabled={busyAction === "update"} onClick={() => setUpdateTarget(null)}>取消</Button>{updateConflict ? <Button variant="destructive" disabled={busyAction === "update"} onClick={() => void updateContent(true)}>{busyAction === "update" ? "替换中…" : "确认替换并更新"}</Button> : <Button disabled={!updateFile || busyAction === "update"} onClick={() => void updateContent()}>{busyAction === "update" ? "上传中…" : "确认更新"}</Button>}</DialogFooter></DialogContent></Dialog>
 
-    <Dialog open={uploadDialogOpen} onOpenChange={(open) => { if (!open) closeUploadDialog(); }}><DialogContent><DialogHeader><DialogTitle>上传文件</DialogTitle><DialogDescription>文件将上传到当前目录“{currentFolder?.full_path || "请选择目录"}”，上传前会检查同名资料。</DialogDescription></DialogHeader><label onDragEnter={(event) => { event.preventDefault(); setDragActive(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false); }} onDrop={(event) => { event.preventDefault(); setDragActive(false); void inspectDroppedUpload(event.dataTransfer, "select"); }} className={`flex min-h-36 cursor-pointer flex-col items-center justify-center gap-2 rounded-ui-lg border border-dashed px-4 py-6 text-center transition-colors duration-normal focus-within:ring-2 focus-within:ring-ring ${dragActive ? "border-primary bg-primary/5" : "border-input bg-background hover:bg-surface-muted"}`}><Upload className="size-6 text-primary" /><span className="text-ui-sm font-medium">{folderScanning ? "正在读取文件夹…" : "拖动文件到这里，或选择文件"}</span><span className="text-ui-xs text-muted-foreground">支持 PDF、Markdown、Word、Excel、PPT 和 XMind</span><input ref={fileInputRef} aria-label="选择资料文件" type="file" multiple accept=".pdf,.md,.docx,.xlsx,.pptx,.xmind" className="sr-only" disabled={uploading || uploadChecking || folderScanning} onChange={(event) => acceptFiles(Array.from(event.target.files || []))} /></label><Button type="button" variant="outline" className="w-full" onClick={() => folderInputRef.current?.click()} disabled={uploading || uploadChecking || folderScanning}><Folder className="size-4" />上传文件夹</Button><input ref={folderInputRef} aria-label="选择资料文件夹" type="file" multiple className="sr-only" disabled={uploading || uploadChecking || folderScanning} onChange={(event) => selectFolder(Array.from(event.target.files || []))} {...({ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>)} />{files.length > 0 && <ul className="max-h-40 space-y-1 overflow-y-auto rounded-ui-md border border-border px-3 py-2 text-ui-sm">{files.map((file) => <li key={`${file.name}-${file.size}`} className="break-all">{file.name}<span className="ml-2 text-ui-xs text-muted-foreground">{formatUploadSize(file.size)}</span></li>)}</ul>}<DialogFooter><Button variant="outline" onClick={closeUploadDialog} disabled={uploading || uploadChecking || folderScanning}>取消</Button><Button onClick={() => void confirmDialogUpload()} disabled={!files.length || uploading || uploadChecking || folderScanning || !currentFolderId}>{uploadChecking ? "检查冲突中…" : uploading ? "上传中…" : "确定上传"}</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={uploadDialogOpen} onOpenChange={(open) => { if (!open) closeUploadDialog(); }}><DialogContent><DialogHeader><DialogTitle>上传文件</DialogTitle><DialogDescription>{isSystemAdmin ? "文档进入资料流程，MP4 进入独立转录任务。" : "上传后可在资料流程中确认并发布文档。"}</DialogDescription></DialogHeader><label onDragEnter={(event) => { event.preventDefault(); setDragActive(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false); }} onDrop={(event) => { event.preventDefault(); setDragActive(false); void inspectDroppedUpload(event.dataTransfer, "select"); }} className={`flex min-h-36 cursor-pointer flex-col items-center justify-center gap-2 rounded-ui-lg border border-dashed px-4 py-6 text-center transition-colors duration-normal focus-within:ring-2 focus-within:ring-ring ${dragActive ? "border-primary bg-primary/5" : "border-input bg-background hover:bg-surface-muted"}`}><Upload className="size-6 text-primary" /><span className="text-ui-sm font-medium">{folderScanning ? "正在读取文件夹…" : "拖动文件到这里，或选择文件"}</span><span className="text-ui-xs text-muted-foreground">支持 PDF、Markdown、Word、Excel、PPT、XMind{isSystemAdmin ? " 和 MP4" : ""}</span><input ref={fileInputRef} aria-label="选择资料文件" type="file" multiple accept={isSystemAdmin ? ".pdf,.md,.docx,.xlsx,.pptx,.xmind,.mp4" : ".pdf,.md,.docx,.xlsx,.pptx,.xmind"} className="sr-only" disabled={uploading || uploadChecking || folderScanning} onChange={(event) => acceptFiles(Array.from(event.target.files || []))} /></label><Button type="button" variant="outline" className="w-full" onClick={() => folderInputRef.current?.click()} disabled={uploading || uploadChecking || folderScanning}><Folder className="size-4" />上传文件夹</Button><input ref={folderInputRef} aria-label="选择资料文件夹" type="file" multiple className="sr-only" disabled={uploading || uploadChecking || folderScanning} onChange={(event) => selectFolder(Array.from(event.target.files || []))} {...({ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>)} />{files.some((file) => /\.mp4$/i.test(file.name)) && <label className="block space-y-1.5 text-ui-sm font-medium"><span>视频转录方案</span><Select aria-label="视频转录方案" value={videoSchemeId} onChange={(event) => setVideoSchemeId(event.target.value)}><option value="">请选择可用方案</option>{transcriptionSchemes.map((scheme) => <option key={scheme.scheme_id} value={scheme.scheme_id} disabled={!scheme.enabled || scheme.archived || scheme.availability !== "available"}>{scheme.name}{scheme.availability !== "available" ? "（不可用）" : ""}</option>)}</Select><span className="text-ui-xs font-normal text-muted-foreground">视频会创建独立转录任务，不会进入普通索引任务。</span></label>}{files.length > 0 && <ul className="max-h-40 space-y-1 overflow-y-auto rounded-ui-md border border-border px-3 py-2 text-ui-sm">{files.map((file) => <li key={`${file.name}-${file.size}`} className="break-all">{file.name}<span className="ml-2 text-ui-xs text-muted-foreground">{formatUploadSize(file.size)}</span></li>)}</ul>}<DialogFooter><Button variant="outline" onClick={closeUploadDialog} disabled={uploading || uploadChecking || folderScanning}>取消</Button><Button onClick={() => void confirmDialogUpload()} disabled={!files.length || uploading || uploadChecking || folderScanning || !currentFolderId || (files.some((file) => /\.mp4$/i.test(file.name)) && !videoSchemeId)}>{uploadChecking ? "检查冲突中…" : uploading ? "上传中…" : "确定上传"}</Button></DialogFooter></DialogContent></Dialog>
 
-    <Dialog open={pendingUploadFiles.length > 0} onOpenChange={(open) => { if (!open && !uploading && !uploadChecking) { setPendingUploadFiles([]); setPendingUploadFolderId(""); } }}><DialogContent><DialogHeader><DialogTitle>确认上传</DialogTitle><DialogDescription>将上传到“{categories.find((category) => category.id === pendingUploadFolderId)?.full_path || currentFolder?.full_path || "当前目录"}”，确认后先检查同名资料。</DialogDescription></DialogHeader><div className="space-y-2 text-ui-sm"><p>共 {pendingUploadFiles.length} 个文件</p><ul className="max-h-48 space-y-1 overflow-y-auto rounded-ui-md border border-border px-3 py-2">{pendingUploadFiles.map((file) => <li key={`${file.name}-${file.size}`} className="break-all">{file.name}<span className="ml-2 text-ui-xs text-muted-foreground">{formatUploadSize(file.size)}</span></li>)}</ul></div><DialogFooter><Button variant="outline" onClick={() => { setPendingUploadFiles([]); setPendingUploadFolderId(""); }} disabled={uploading || uploadChecking}>取消</Button><Button onClick={() => void confirmFileDropUpload()} disabled={uploading || uploadChecking}>{uploadChecking ? "检查冲突中…" : uploading ? "上传中…" : "确定上传"}</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={pendingUploadFiles.length > 0} onOpenChange={(open) => { if (!open && !uploading && !uploadChecking) { setPendingUploadFiles([]); setPendingUploadFolderId(""); } }}><DialogContent><DialogHeader><DialogTitle>确认上传</DialogTitle><DialogDescription>将上传到“{categories.find((category) => category.id === pendingUploadFolderId)?.full_path || currentFolder?.full_path || "当前目录"}”，确认后先检查同名资料。</DialogDescription></DialogHeader><div className="space-y-2 text-ui-sm"><p>共 {pendingUploadFiles.length} 个文件</p>{pendingUploadFiles.some((file) => /\.mp4$/i.test(file.name)) && <label className="block space-y-1.5 text-ui-sm font-medium"><span>视频转录方案</span><Select aria-label="拖入视频转录方案" value={videoSchemeId} onChange={(event) => setVideoSchemeId(event.target.value)}><option value="">请选择可用方案</option>{transcriptionSchemes.map((scheme) => <option key={scheme.scheme_id} value={scheme.scheme_id} disabled={!scheme.enabled || scheme.archived || scheme.availability !== "available"}>{scheme.name}</option>)}</Select></label>}<ul className="max-h-48 space-y-1 overflow-y-auto rounded-ui-md border border-border px-3 py-2">{pendingUploadFiles.map((file) => <li key={`${file.name}-${file.size}`} className="break-all">{file.name}<span className="ml-2 text-ui-xs text-muted-foreground">{formatUploadSize(file.size)}</span></li>)}</ul></div><DialogFooter><Button variant="outline" onClick={() => { setPendingUploadFiles([]); setPendingUploadFolderId(""); }} disabled={uploading || uploadChecking}>取消</Button><Button onClick={() => void confirmFileDropUpload()} disabled={uploading || uploadChecking || (pendingUploadFiles.some((file) => /\.mp4$/i.test(file.name)) && !videoSchemeId)}>{uploadChecking ? "检查冲突中…" : uploading ? "上传中…" : "确定上传"}</Button></DialogFooter></DialogContent></Dialog>
 
-    <Dialog open={Boolean(pendingFolderUpload)} onOpenChange={(open) => { if (!open && !uploading && !uploadChecking) { setPendingFolderUpload(null); setPendingFolderUploadFolderId(""); } }}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>上传文件夹</DialogTitle><DialogDescription>确认后将按相对路径检查并上传到“{categories.find((category) => category.id === pendingFolderUploadFolderId)?.full_path || currentFolder?.full_path || "当前目录"}”。同名文件夹不会自动合并。</DialogDescription></DialogHeader>{pendingFolderUpload && <div className="space-y-4 text-ui-sm"><dl className="grid grid-cols-2 gap-2 rounded-ui-md border border-border bg-surface-muted/40 p-3 sm:grid-cols-4"><div className="col-span-2 sm:col-span-4"><dt className="text-ui-xs text-muted-foreground">根文件夹</dt><dd className="mt-1 break-all font-medium">{pendingFolderUpload.rootFolderNames.length > 1 ? `${pendingFolderUpload.rootFolderNames[0]} 等 ${pendingFolderUpload.rootFolderNames.length} 个根文件夹` : pendingFolderUpload.rootFolderNames[0] || "所选文件夹"}</dd></div><div><dt className="text-ui-xs text-muted-foreground">文件夹</dt><dd className="mt-1 font-medium tabular-nums">{pendingFolderUpload.folderCount} 个</dd></div><div><dt className="text-ui-xs text-muted-foreground">可上传文件</dt><dd className="mt-1 font-medium tabular-nums">{pendingFolderUpload.fileCount} 个</dd></div><div><dt className="text-ui-xs text-muted-foreground">已忽略</dt><dd className="mt-1 font-medium tabular-nums">{pendingFolderUpload.ignoredEntries.length} 个</dd></div><div><dt className="text-ui-xs text-muted-foreground">上传大小</dt><dd className="mt-1 font-medium tabular-nums">{formatUploadSize(pendingFolderUpload.totalSize)}</dd></div></dl>{pendingFolderUpload.ignoredEntries.length > 0 && <div className="space-y-1"><p className="text-ui-xs font-medium text-muted-foreground">以下格式不受支持，将被忽略</p><ul className="max-h-24 space-y-1 overflow-y-auto rounded-ui-md border border-warning/40 bg-warning/10 px-3 py-2 text-ui-xs">{pendingFolderUpload.ignoredEntries.map((entry) => <li key={entry.relativePath} className="break-all">{entry.relativePath}</li>)}</ul></div>}<div className="space-y-1"><p className="text-ui-xs font-medium text-muted-foreground">将上传的文件</p><ul className="max-h-40 space-y-1 overflow-y-auto rounded-ui-md border border-border px-3 py-2">{pendingFolderUpload.entries.map((entry) => <li key={entry.relativePath} className="flex items-start justify-between gap-3"><span className="min-w-0 break-all">{entry.relativePath}</span><span className="shrink-0 text-ui-xs text-muted-foreground">{formatUploadSize(entry.file.size)}</span></li>)}</ul></div></div>}<DialogFooter><Button variant="outline" onClick={() => { setPendingFolderUpload(null); setPendingFolderUploadFolderId(""); }} disabled={uploading || uploadChecking}>取消</Button><Button onClick={() => void confirmFolderUpload()} disabled={uploading || uploadChecking || !pendingFolderUpload?.fileCount}>{uploadChecking ? "检查冲突中…" : uploading ? "上传中…" : "开始上传"}</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={Boolean(pendingFolderUpload)} onOpenChange={(open) => { if (!open && !uploading && !uploadChecking) { setPendingFolderUpload(null); setPendingFolderUploadFolderId(""); } }}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>上传文件夹</DialogTitle><DialogDescription>确认后将按相对路径检查并上传到“{categories.find((category) => category.id === pendingFolderUploadFolderId)?.full_path || currentFolder?.full_path || "当前目录"}”。同名文件夹不会自动合并。</DialogDescription></DialogHeader>{pendingFolderUpload && <div className="space-y-4 text-ui-sm"><dl className="grid grid-cols-2 gap-2 rounded-ui-md border border-border bg-surface-muted/40 p-3 sm:grid-cols-4"><div className="col-span-2 sm:col-span-4"><dt className="text-ui-xs text-muted-foreground">根文件夹</dt><dd className="mt-1 break-all font-medium">{pendingFolderUpload.rootFolderNames.length > 1 ? `${pendingFolderUpload.rootFolderNames[0]} 等 ${pendingFolderUpload.rootFolderNames.length} 个根文件夹` : pendingFolderUpload.rootFolderNames[0] || "所选文件夹"}</dd></div><div><dt className="text-ui-xs text-muted-foreground">文件夹</dt><dd className="mt-1 font-medium tabular-nums">{pendingFolderUpload.folderCount} 个</dd></div><div><dt className="text-ui-xs text-muted-foreground">可上传文件</dt><dd className="mt-1 font-medium tabular-nums">{pendingFolderUpload.fileCount} 个</dd></div><div><dt className="text-ui-xs text-muted-foreground">已忽略</dt><dd className="mt-1 font-medium tabular-nums">{pendingFolderUpload.ignoredEntries.length} 个</dd></div><div><dt className="text-ui-xs text-muted-foreground">上传大小</dt><dd className="mt-1 font-medium tabular-nums">{formatUploadSize(pendingFolderUpload.totalSize)}</dd></div></dl>{pendingFolderUpload.ignoredEntries.length > 0 && <div className="space-y-1"><p className="text-ui-xs font-medium text-muted-foreground">以下格式不受支持，将被忽略</p><ul className="max-h-24 space-y-1 overflow-y-auto rounded-ui-md border border-warning/40 bg-warning/10 px-3 py-2 text-ui-xs">{pendingFolderUpload.ignoredEntries.map((entry) => <li key={entry.relativePath} className="break-all">{entry.relativePath}</li>)}</ul></div>}{pendingFolderUpload.entries.some((entry) => /\.mp4$/i.test(entry.file.name)) && <label className="block space-y-1.5 text-ui-sm font-medium"><span>视频转录方案</span><Select aria-label="文件夹视频转录方案" value={videoSchemeId} onChange={(event) => setVideoSchemeId(event.target.value)}><option value="">请选择可用方案</option>{transcriptionSchemes.map((scheme) => <option key={scheme.scheme_id} value={scheme.scheme_id} disabled={!scheme.enabled || scheme.archived || scheme.availability !== "available"}>{scheme.name}</option>)}</Select></label>}<div className="space-y-1"><p className="text-ui-xs font-medium text-muted-foreground">将上传的文件</p><ul className="max-h-40 space-y-1 overflow-y-auto rounded-ui-md border border-border px-3 py-2">{pendingFolderUpload.entries.map((entry) => <li key={entry.relativePath} className="flex items-start justify-between gap-3"><span className="min-w-0 break-all">{entry.relativePath}</span><span className="shrink-0 text-ui-xs text-muted-foreground">{formatUploadSize(entry.file.size)}</span></li>)}</ul></div></div>}<DialogFooter><Button variant="outline" onClick={() => { setPendingFolderUpload(null); setPendingFolderUploadFolderId(""); }} disabled={uploading || uploadChecking}>取消</Button><Button onClick={() => void confirmFolderUpload()} disabled={uploading || uploadChecking || !pendingFolderUpload?.fileCount || (pendingFolderUpload?.entries.some((entry) => /\.mp4$/i.test(entry.file.name)) && !videoSchemeId)}>{uploadChecking ? "检查冲突中…" : uploading ? "上传中…" : "开始上传"}</Button></DialogFooter></DialogContent></Dialog>
     <Dialog open={Boolean(uploadConflictReview)} onOpenChange={(open) => { if (!open && !uploadChecking && !uploading) resetUploadConflictReview(); }}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
@@ -2966,9 +3022,9 @@ export function AdminManagedContentPage() {
             <ul className="space-y-2">{uploadConflictReview.preflight.folder_conflicts.map((conflict) => <li key={conflict.category_id} className="rounded-ui-md border border-warning/50 bg-warning/10 p-3"><p className="break-words font-medium">“{conflict.relative_path}”已存在</p><p className="mt-1 break-words text-ui-xs text-muted-foreground">现有目录：{conflict.category_path}</p><label className="mt-3 block space-y-1 text-ui-xs font-medium"><span>重命名整个文件夹</span><Input value={folderConflictRenames[conflict.relative_path] || ""} disabled={folderConflictMode !== "rename" || !conflict.can_rename} onChange={(event) => setFolderConflictRenames((current) => ({ ...current, [conflict.relative_path]: event.target.value }))} /></label></li>)}</ul>
             <div className="flex flex-wrap gap-2" role="group" aria-label="文件夹冲突处理方式"><Button type="button" variant={folderConflictMode === "merge" ? "default" : "outline"} disabled={uploadChecking} aria-pressed={folderConflictMode === "merge"} onClick={() => void refreshConflictPreflight("merge")}>合并到现有目录</Button><Button type="button" variant={folderConflictMode === "rename" ? "default" : "outline"} disabled={uploadChecking || uploadConflictReview.preflight.folder_conflicts.some((conflict) => !conflict.can_rename)} aria-pressed={folderConflictMode === "rename"} onClick={() => setFolderConflictMode("rename")}>重命名文件夹</Button></div>
           </section>}
-          {uploadConflictReview.preflight.entries.some((entry) => entry.status === "conflict" && entry.reason_code === "content_filename_conflict") && <section className="space-y-3" aria-labelledby="upload-file-conflicts-title">
+          {uploadConflictReview.preflight.entries.some((entry) => entry.status === "conflict" && ["content_filename_conflict", "media_filename_conflict"].includes(entry.reason_code || "")) && <section className="space-y-3" aria-labelledby="upload-file-conflicts-title">
             <div className="flex flex-wrap items-end justify-between gap-2"><div><h3 id="upload-file-conflicts-title" className="font-semibold">文件名冲突</h3><p className="mt-1 text-ui-xs text-muted-foreground">每个文件可单独处理，也可以批量跳过。</p></div><Button size="sm" variant="outline" onClick={() => setUploadConflictChoices((current) => Object.fromEntries(Object.keys(current).map((key) => [key, { strategy: "skip" as const, filename: current[Number(key)]?.filename }])))}>全部跳过</Button></div>
-            <ul className="space-y-3">{uploadConflictReview.preflight.entries.filter((entry) => entry.status === "conflict" && entry.reason_code === "content_filename_conflict").map((entry) => { const choice = uploadConflictChoices[entry.sequence] || { strategy: "skip" as const, filename: entry.suggested_filename || entry.filename }; return <li key={entry.sequence} className="space-y-3 rounded-ui-md border border-warning/50 bg-warning/10 p-3"><div className="min-w-0"><p className="break-all font-medium">{entry.relative_path || entry.filename}</p>{entry.conflict && <p className="mt-1 break-words text-ui-xs text-muted-foreground">已有资料：{entry.conflict.title}（{entry.conflict.original_filename}）</p>}</div><div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"><label className="space-y-1 text-ui-xs font-medium"><span>处理方式</span><Select value={choice.strategy} onChange={(event) => setUploadConflictChoices((current) => ({ ...current, [entry.sequence]: { ...current[entry.sequence], strategy: event.target.value as UploadConflictChoice["strategy"] } }))}><option value="skip">跳过此文件</option><option value="rename">另存为新资料</option>{entry.conflict?.can_update && <option value="update">作为已有资料的新版本</option>}</Select></label>{choice.strategy === "rename" && <label className="space-y-1 text-ui-xs font-medium"><span>新文件名</span><Input value={choice.filename || ""} onChange={(event) => setUploadConflictChoices((current) => ({ ...current, [entry.sequence]: { ...current[entry.sequence], strategy: "rename", filename: event.target.value } }))} /></label>}</div></li>; })}</ul>
+            <ul className="space-y-3">{uploadConflictReview.preflight.entries.filter((entry) => entry.status === "conflict" && ["content_filename_conflict", "media_filename_conflict"].includes(entry.reason_code || "")).map((entry) => { const choice = uploadConflictChoices[entry.sequence] || { strategy: "skip" as const, filename: entry.suggested_filename || entry.filename }; return <li key={entry.sequence} className="space-y-3 rounded-ui-md border border-warning/50 bg-warning/10 p-3"><div className="min-w-0"><p className="break-all font-medium">{entry.relative_path || entry.filename}</p>{entry.conflict && <p className="mt-1 break-words text-ui-xs text-muted-foreground">已有资料：{entry.conflict.title}（{entry.conflict.original_filename}）</p>}<p className="mt-1 text-ui-xs text-muted-foreground">{entry.reason}</p></div><div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"><label className="space-y-1 text-ui-xs font-medium"><span>处理方式</span><Select value={choice.strategy} onChange={(event) => setUploadConflictChoices((current) => ({ ...current, [entry.sequence]: { ...current[entry.sequence], strategy: event.target.value as UploadConflictChoice["strategy"] } }))}><option value="skip">跳过此文件</option><option value="rename">另存为新资料</option>{entry.conflict?.can_update && <option value="update">作为已有资料的新版本</option>}</Select></label>{choice.strategy === "rename" && <label className="space-y-1 text-ui-xs font-medium"><span>新文件名</span><Input value={choice.filename || ""} onChange={(event) => setUploadConflictChoices((current) => ({ ...current, [entry.sequence]: { ...current[entry.sequence], strategy: "rename", filename: event.target.value } }))} /></label>}</div></li>; })}</ul>
           </section>}
           {uploadConflictReview.preflight.entries.some((entry) => entry.status === "blocked") && <section className="space-y-2"><h3 className="font-semibold">无法上传的文件</h3><ul className="space-y-1 rounded-ui-md border border-border px-3 py-2 text-ui-xs">{uploadConflictReview.preflight.entries.filter((entry) => entry.status === "blocked").map((entry) => <li key={entry.sequence} className="flex flex-wrap justify-between gap-2"><span className="break-all">{entry.relative_path || entry.filename}</span><span className="text-muted-foreground">{entry.reason}</span></li>)}</ul></section>}
           {uploadConflictError && <p className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive" role="alert">{uploadConflictError}</p>}

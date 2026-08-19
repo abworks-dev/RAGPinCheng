@@ -1492,15 +1492,23 @@ def record_upload_batch_entry(
     reason: str | None = None,
     item_id: str | None = None,
     version_id: str | None = None,
+    entry_kind: str = "document",
+    media_id: str | None = None,
+    transcription_job_id: str | None = None,
+    failure_code: str | None = None,
 ) -> None:
     if sequence <= 0 or size_bytes < 0 or status not in {"accepted", "skipped"}:
         raise ValueError("invalid_upload_batch_entry")
+    if entry_kind not in {"document", "video"}:
+        raise ValueError("invalid_upload_batch_entry_kind")
     now = _now()
     conn.execute(
         """INSERT INTO upload_batch_entries
-           (batch_id,sequence,filename,relative_path,size_bytes,status,reason,item_id,version_id,created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?)""",
-        (batch_id, sequence, filename, relative_path, size_bytes, status, reason, item_id, version_id, now),
+           (batch_id,sequence,filename,relative_path,size_bytes,status,reason,item_id,version_id,
+            entry_kind,media_id,transcription_job_id,failure_code,created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (batch_id, sequence, filename, relative_path, size_bytes, status, reason, item_id, version_id,
+         entry_kind, media_id, transcription_job_id, failure_code, now),
     )
     accepted_increment = 1 if status == "accepted" else 0
     skipped_increment = 1 if status == "skipped" else 0

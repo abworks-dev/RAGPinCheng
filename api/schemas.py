@@ -551,6 +551,7 @@ class ManagedUploadPreflightEntryDTO(BaseModel):
     sequence: int
     filename: str
     relative_path: str | None = None
+    kind: Literal["document", "video"] = "document"
     status: Literal["ready", "conflict", "blocked"]
     reason: str | None = None
     reason_code: str | None = None
@@ -572,8 +573,11 @@ class ManagedUploadConflictAction(BaseModel):
 
 class ManagedUploadEntryDTO(BaseModel):
     filename: str
+    kind: Literal["document", "video"] = "document"
     item_id: str | None = None
     version_id: str | None = None
+    media_id: str | None = None
+    transcription_job_id: str | None = None
     sha256: str | None = None
     status: Literal["accepted", "skipped"]
     reason: str | None = None
@@ -590,11 +594,15 @@ class ManagedUploadTaskEntryDTO(BaseModel):
     sequence: int
     filename: str
     relative_path: str | None = None
+    kind: Literal["document", "video"] = "document"
     size_bytes: int
     status: Literal["accepted", "skipped"]
     reason: str | None = None
     item_id: str | None = None
     version_id: str | None = None
+    media_id: str | None = None
+    transcription_job_id: str | None = None
+    failure_code: str | None = None
     created_at: int
 
 
@@ -1177,6 +1185,9 @@ class MediaAssetDTO(BaseModel):
     updated_at: int
     error: str | None = None
     transcription_job_id: str | None = None
+    transcription_job_status: str | None = None
+    transcription_stage: str | None = None
+    current_phase: Literal["upload", "transcription", "review", "publication", "index", "ready", "failed"] = "upload"
     review_status: str | None = None
     publication_status: str | None = None
     publication_index_status: str | None = None
@@ -1192,6 +1203,8 @@ class MediaAssetDTO(BaseModel):
     external_source_id: str | None = None
     external_relative_path: str | None = None
     external_availability: Literal["available", "missing", "superseded"] | None = None
+    available_actions: list[str] = Field(default_factory=list)
+    disabled_actions: dict[str, str] = Field(default_factory=dict)
 
 
 class MediaUploadPreflightItem(BaseModel):

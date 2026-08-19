@@ -1281,6 +1281,18 @@ MIGRATIONS = (
         ),
     ),
     Migration(31, "legacy_office_managed_content", ("RELAX_CONTENT_VERSION_DOC_TYPE_LEGACY_OFFICE",)),
+    Migration(
+        32,
+        "unified_upload_transcription_entries",
+        (
+            "ALTER TABLE upload_batch_entries ADD COLUMN entry_kind TEXT NOT NULL DEFAULT 'document' CHECK (entry_kind IN ('document','video'))",
+            "ALTER TABLE upload_batch_entries ADD COLUMN media_id TEXT REFERENCES media_assets(media_id) ON DELETE SET NULL",
+            "ALTER TABLE upload_batch_entries ADD COLUMN transcription_job_id TEXT REFERENCES transcription_jobs(id) ON DELETE SET NULL",
+            "ALTER TABLE upload_batch_entries ADD COLUMN failure_code TEXT",
+            "CREATE INDEX IF NOT EXISTS idx_upload_batch_entries_media ON upload_batch_entries(media_id)",
+            "CREATE INDEX IF NOT EXISTS idx_upload_batch_entries_transcription_job ON upload_batch_entries(transcription_job_id)",
+        ),
+    ),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
