@@ -1477,14 +1477,25 @@ async def upload_managed_documents(
                     reason=reason, entry_kind="video", media_id=failed_media_id,
                     failure_code=failure_code,
                 )
-            except (ValueError, sqlite3.IntegrityError) as exc:
+            except (ValueError, OSError, sqlite3.Error, RuntimeError) as exc:
                 conn.rollback()
-                reason = str(exc) or "视频上传失败"
-                entries.append(ManagedUploadEntryDTO(filename=final_filename, kind="video", status="skipped", reason=reason, reason_code="video_upload_failed"))
+                if isinstance(exc, OSError):
+                    reason_code = "media_storage_unavailable"
+                    reason = "服务器暂时无法保存视频，请稍后重试"
+                elif isinstance(exc, sqlite3.Error):
+                    reason_code = "media_database_unavailable"
+                    reason = "服务器暂时无法登记视频，请稍后重试"
+                elif isinstance(exc, RuntimeError):
+                    reason_code = "transcription_job_unavailable"
+                    reason = "服务器暂时无法创建转录任务，请稍后重试"
+                else:
+                    reason_code = "video_upload_failed"
+                    reason = str(exc) or "视频上传失败"
+                entries.append(ManagedUploadEntryDTO(filename=final_filename, kind="video", status="skipped", reason=reason, reason_code=reason_code))
                 record_upload_batch_entry(
                     conn, batch_id=batch_id, sequence=index + 1, filename=final_filename,
                     relative_path=relative_path, size_bytes=size_bytes, status="skipped",
-                    reason=reason, entry_kind="video", failure_code="video_upload_failed",
+                    reason=reason, entry_kind="video", failure_code=reason_code,
                 )
             continue
         doc_type = _DOC_TYPES.get(suffix)
