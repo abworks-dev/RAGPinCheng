@@ -385,6 +385,10 @@ class ManagedCategoryDTO(BaseModel):
     is_active: bool
     chat_search_enabled: bool
     chat_filter_selectable: bool
+    chat_search_effective: bool = True
+    chat_filter_effective: bool = True
+    chat_search_inherited: bool = False
+    chat_filter_inherited: bool = False
     version: int
     created_at: int
     updated_at: int

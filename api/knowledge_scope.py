@@ -43,6 +43,7 @@ def resolve_category_scope(
         children.setdefault(row["parent_id"], []).append(row)
 
     effective: dict[str, bool] = {}
+    filter_effective: dict[str, bool] = {}
 
     def is_effective(row: sqlite3.Row) -> bool:
         category_id = str(row["id"])
@@ -54,6 +55,18 @@ def resolve_category_scope(
         )
         available = bool(row["is_active"] and row["chat_search_enabled"] and parent_available)
         effective[category_id] = available
+        return available
+
+    def is_filter_effective(row: sqlite3.Row) -> bool:
+        category_id = str(row["id"])
+        if category_id in filter_effective:
+            return filter_effective[category_id]
+        parent_id = row["parent_id"]
+        parent_available = parent_id is None or (
+            str(parent_id) in by_id and is_filter_effective(by_id[str(parent_id)])
+        )
+        available = bool(is_effective(row) and row["chat_filter_selectable"] and parent_available)
+        filter_effective[category_id] = available
         return available
 
     requested = category_ids if category_ids is not None else legacy_categories
@@ -69,7 +82,7 @@ def resolve_category_scope(
                 raise ValueError("knowledge_scope_not_found")
             if not is_effective(row):
                 raise ValueError("knowledge_scope_unavailable")
-            if not row["chat_filter_selectable"]:
+            if not is_filter_effective(row):
                 raise ValueError("knowledge_scope_not_selectable")
             if row["id"] not in seen:
                 selected.append(row)
@@ -95,6 +108,7 @@ def list_knowledge_scopes(conn: sqlite3.Connection) -> list[dict[str, object]]:
             children.setdefault(str(parent), []).append(row)
 
     effective: dict[str, bool] = {}
+    filter_effective: dict[str, bool] = {}
 
     def is_effective(row: sqlite3.Row) -> bool:
         category_id = str(row["id"])
@@ -106,6 +120,18 @@ def list_knowledge_scopes(conn: sqlite3.Connection) -> list[dict[str, object]]:
         )
         available = bool(row["is_active"] and row["chat_search_enabled"] and parent_available)
         effective[category_id] = available
+        return available
+
+    def is_filter_effective(row: sqlite3.Row) -> bool:
+        category_id = str(row["id"])
+        if category_id in filter_effective:
+            return filter_effective[category_id]
+        parent_id = row["parent_id"]
+        parent_available = parent_id is None or (
+            str(parent_id) in by_id and is_filter_effective(by_id[str(parent_id)])
+        )
+        available = bool(is_effective(row) and row["chat_filter_selectable"] and parent_available)
+        filter_effective[category_id] = available
         return available
 
     def count_descendants(category_id: str) -> int:
@@ -129,5 +155,5 @@ def list_knowledge_scopes(conn: sqlite3.Connection) -> list[dict[str, object]]:
             "chat_filter_selectable": bool(row["chat_filter_selectable"]),
         }
         for row in rows
-        if is_effective(row) and row["chat_filter_selectable"]
+        if is_filter_effective(row)
     ]

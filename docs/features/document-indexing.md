@@ -133,7 +133,7 @@
 - 删除源文件结果区分 `not_requested`、`deleted`、`missing` 和 `failed`；`missing` 作为幂等成功，`failed` 必须向管理员明确提示；
 - `data/parents.sqlite` 是可重建索引状态，`data/app.sqlite` 不是。
 - 受管资料的分类身份使用数据库 ID 和稳定 `category_key`；显示编号、显示名称与物理目录名可以调整；分类列表 DTO 保持扁平兼容，服务端按树的深度优先顺序返回，所有同级节点依次按显示编号、显示名称和 ID 稳定排序。同一父分类下的显示编号由数据库唯一索引约束，不同父分类可复用编号；`sort_order` 仅作为服务端维护的兼容字段保留，不再由业务界面控制；
-- `category_nodes.chat_search_enabled` 控制目录内容是否进入企业知识问答，`chat_filter_selectable` 控制目录是否出现在登录用户的范围筛选器；分类只有在自身及全部祖先均启用且纳入问答时，才进入默认检索、对话范围或直接分类检索。关闭父分类会排除整个子树，重新开启父分类不会改写子节点自身设置；既有迁移数据保持原值，由分类管理员逐项调整；
+- `category_nodes.chat_search_enabled` 控制目录内容是否进入企业知识问答，`chat_filter_selectable` 控制目录是否出现在登录用户的范围筛选器；分类只有在自身及全部祖先均启用且纳入问答时，才进入默认检索、对话范围或直接分类检索。两项状态均受祖先约束：上级关闭问答会使整棵子树退出问答和筛选，上级仅关闭筛选会使整棵子树退出筛选但仍可参与问答。关闭父分类会排除整个子树，重新开启父分类不会改写子节点自身设置；既有迁移数据保持原值，由分类管理员逐项调整；分类管理树展示最终有效状态及“继承关闭”原因；
 - 分类移动使用 `POST /api/admin/content/categories/{category_id}/move` 和 `expected_version` 乐观并发契约；服务端在单个 SQLite 写事务中校验父分类启用状态、循环引用和四级深度，按显示编号重新规范化受影响同级节点的兼容顺序、同步后代层级并记录 `category.moved` 审计事件。旧客户端的 `before_category_id` 仍可传入并接受合法性校验，但不再改变显示顺序。移动不改变 `category_key`、资料归属或索引身份，因此不触发资料移动、数据库迁移或重建索引；
 - 网盘式目录复用 `category_nodes`，不新增第二套文件夹事实来源；`content_items.category_id` 表达当前目录，状态和版本不编码进目录名称；
 - 文件夹上传使用 multipart `upload_mode=folder`，每个 `files` 字段都有同序 `relative_paths`；服务端在创建批次和写对象前统一拒绝绝对路径、路径穿越、NUL、文件名不一致、重复路径和超过四级分类深度的路径。默认单批最多 500 个文件、总大小 1024 MB，分别可由 `MAX_FOLDER_UPLOAD_FILES` 和 `MAX_FOLDER_UPLOAD_MB` 调整；单文件仍受 `MAX_UPLOAD_MB` 限制；

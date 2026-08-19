@@ -672,6 +672,11 @@ function CategoryTreeNodeView({
       <span className="flex min-w-0 flex-1 items-center gap-2">
         <span className={`inline-flex w-11 shrink-0 items-center gap-1 text-ui-xs font-medium ${category.is_active ? "text-success" : "text-muted-foreground"}`}><span className={`size-2 rounded-full ${category.is_active ? "bg-success" : "bg-muted-foreground/60"}`} aria-hidden="true" />{category.is_active ? "启用" : "停用"}</span>
         <span className={`min-w-0 flex-1 break-words tabular-nums ${level === 1 ? "font-semibold" : "font-medium"}`}>{category.display_code} {category.display_name}</span>
+        <span className="hidden shrink-0 items-center gap-1 sm:inline-flex" aria-label="问答与筛选状态">
+          <Badge variant={category.chat_search_effective === false ? "secondary" : "success"}>{category.chat_search_effective === false ? "问答关" : "问答"}</Badge>
+          <Badge variant={category.chat_filter_effective === false ? "secondary" : "success"}>{category.chat_filter_effective === false ? "筛选关" : "筛选"}</Badge>
+          {(category.chat_search_inherited || category.chat_filter_inherited) && <span className="text-ui-xs text-muted-foreground">继承关闭</span>}
+        </span>
         <span className="hidden shrink-0 text-right text-ui-xs tabular-nums text-muted-foreground sm:block">{category.item_count} 份{hasChildren ? ` · ${children.length} 项` : ""}</span>
       </span>
     </div>
@@ -758,6 +763,7 @@ function CategoryDetail({
           <span><span className="block font-medium">显示为对话筛选项</span><span className="block text-ui-xs text-muted-foreground">用户可以选择此目录，并同时覆盖可用子目录。</span></span>
         </label>
         {!draft.is_active && <p className="text-ui-xs text-muted-foreground">停用目录不会进入企业知识问答，也不会显示为筛选项。</p>}
+        {(category.chat_search_inherited || category.chat_filter_inherited) && <p className="text-ui-xs text-warning" role="status">当前生效状态受上级目录影响：{category.chat_search_inherited && "问答"}{category.chat_search_inherited && category.chat_filter_inherited && "、"}{category.chat_filter_inherited && "筛选"}继承关闭；本目录自身设置未被修改。</p>}
       </section>
     </div>
     <div className="flex flex-col-reverse gap-2 border-t border-border px-5 py-4 sm:flex-row sm:justify-end"><Button variant="outline" onClick={onCancel} disabled={saving || moving || !isDirty}>取消</Button><Button onClick={onSave} disabled={saving || moving || !isDirty || !draft.display_name.trim()}><Save className="size-4" />{saving ? "保存中…" : "保存修改"}</Button></div>
