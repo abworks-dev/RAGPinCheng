@@ -82,6 +82,7 @@ export type ChatMessage = {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  createdAt?: number;
   query?: string;
   sources?: Source[];
   prep?: PrepData;

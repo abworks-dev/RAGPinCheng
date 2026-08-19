@@ -81,6 +81,7 @@ export function useChat({
             id: m.id != null ? String(m.id) : newId(),
             role: m.role,
             content: m.content,
+            createdAt: m.created_at,
             sources: m.sources_for_ui || undefined,
             query: m.role === "assistant" ? lastUserContent : undefined,
             stage: "done",
@@ -136,12 +137,14 @@ export function useChat({
       const ctrl = new AbortController();
       abortRef.current = ctrl;
 
-      const userMsg: ChatMessage = { id: newId(), role: "user", content: trimmed };
+      const createdAt = Math.floor(Date.now() / 1000);
+      const userMsg: ChatMessage = { id: newId(), role: "user", content: trimmed, createdAt };
       const assistantId = newId();
       const assistantMsg: ChatMessage = {
         id: assistantId,
         role: "assistant",
         content: "",
+        createdAt,
         query: trimmed,
         streaming: true,
         stage: "retrieving",
