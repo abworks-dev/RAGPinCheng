@@ -907,6 +907,11 @@ test.describe("分类管理", () => {
       await page.getByRole("treeitem", { name: /公司内部标准/ }).click();
       const editor = page.getByRole("dialog", { name: "公司内部标准" });
       await expect(editor).toBeVisible();
+      const structure = editor.getByRole("heading", { name: "目录结构" });
+      await expect(structure).toBeVisible();
+      await expect(editor.getByRole("button", { name: "新增子分类" })).toBeVisible();
+      await expect(editor.getByRole("button", { name: "移动至" })).toBeVisible();
+      await expect(editor.getByRole("button", { name: "删除文件夹" })).toBeVisible();
       const categoryToggle = editor.getByRole("radio", { name: "公司内部标准停用" });
       await categoryToggle.scrollIntoViewIfNeeded();
       await expectInViewport(categoryToggle);
@@ -915,6 +920,12 @@ test.describe("分类管理", () => {
       await save.scrollIntoViewIfNeeded();
       await expectInViewport(save);
     } else {
+      const editor = page.locator("[aria-labelledby='category-list-title']").getByText("基本信息").locator("xpath=ancestor::div[contains(@class,'h-full')]");
+      const structure = editor.getByRole("heading", { name: "目录结构" });
+      await expect(structure).toBeVisible();
+      await expect(editor.getByRole("button", { name: "新增子分类" })).toBeVisible();
+      await expect(editor.getByRole("button", { name: "移动至" })).toBeVisible();
+      await expect(editor.getByRole("button", { name: "删除文件夹" })).toBeVisible();
       const parent = page.getByTestId("category-tree-item-cat-company");
       const child = page.getByTestId("category-tree-item-cat-company-modeling");
       await expect(parent).toHaveAttribute("aria-expanded", "false");

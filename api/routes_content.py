@@ -867,11 +867,17 @@ def move_managed_category(
 )
 def get_managed_category_delete_preview(
     category_id: str,
-    _user: CurrentUser = Depends(require_content_permission("category.manage")),
+    user: CurrentUser = Depends(require_content_permission("category.manage")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> DeleteManagedCategoryPreviewDTO:
     _require_feature()
     try:
+        category = conn.execute(
+            "SELECT parent_id FROM category_nodes WHERE id=? AND deleted_at IS NULL",
+            (category_id,),
+        ).fetchone()
+        if category is not None and category["parent_id"] is None and user.role != "admin":
+            raise HTTPException(status_code=403, detail="仅系统管理员可以预检一级分类删除")
         return DeleteManagedCategoryPreviewDTO(**get_category_force_delete_preview(conn, category_id))
     except ValueError as exc:
         _raise_domain_error(exc)
@@ -889,6 +895,12 @@ def delete_managed_category(
 ) -> DeleteManagedCategoryResponse:
     _require_feature()
     try:
+        category = conn.execute(
+            "SELECT parent_id FROM category_nodes WHERE id=? AND deleted_at IS NULL",
+            (category_id,),
+        ).fetchone()
+        if category is not None and category["parent_id"] is None and user.role != "admin":
+            raise HTTPException(status_code=403, detail="仅系统管理员可以删除一级分类")
         if body.force:
             if not has_content_permission(conn, user, "category.force_delete"):
                 raise HTTPException(status_code=403, detail="当前账号没有强制永久删除目录的权限")

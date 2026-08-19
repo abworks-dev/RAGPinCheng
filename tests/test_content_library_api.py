@@ -1850,6 +1850,28 @@ def test_category_create_at_occupied_number_requires_confirmation(content_api):
     assert [row["display_code"] for row in top_level] == [f"{index:02d}" for index in range(1, 9)]
 
 
+def test_category_creation_uses_level_specific_chat_defaults(content_api):
+    client, sessions, _queued, _db_path = content_api
+    auth = _auth(sessions, "category_manager", csrf=True)
+    root = client.post(
+        "/api/admin/content/categories",
+        json={"parent_id": None, "display_code": "08", "display_name": "默认一级"},
+        **auth,
+    )
+    assert root.status_code == 200
+    assert root.json()["chat_search_enabled"] is True
+    assert root.json()["chat_filter_selectable"] is True
+
+    child = client.post(
+        "/api/admin/content/categories",
+        json={"parent_id": root.json()["id"], "display_code": "01", "display_name": "默认子级"},
+        **auth,
+    )
+    assert child.status_code == 200
+    assert child.json()["chat_search_enabled"] is True
+    assert child.json()["chat_filter_selectable"] is False
+
+
 def test_category_manager_can_reorder_and_reparent_categories(content_api):
     client, sessions, _queued, db_path = content_api
     auth = _auth(sessions, "category_manager", csrf=True)
@@ -2068,6 +2090,52 @@ def test_category_force_delete_requires_dedicated_permission_and_exact_path(cont
     )
     assert blocked.status_code == 409
     assert "系统默认分类" in blocked.json()["detail"]
+
+
+def test_only_admin_can_preflight_or_delete_top_level_category(content_api):
+    client, sessions, _queued, _db_path = content_api
+    manager_csrf = _auth(sessions, "category_manager", csrf=True)
+    root = client.post(
+        "/api/admin/content/categories",
+        json={"parent_id": None, "display_code": "08", "display_name": "一级删除边界"},
+        **manager_csrf,
+    ).json()
+    child = client.post(
+        "/api/admin/content/categories",
+        json={"parent_id": root["id"], "display_code": "01", "display_name": "子级删除边界"},
+        **manager_csrf,
+    ).json()
+
+    assert client.get(
+        f"/api/admin/content/categories/{root['id']}/delete-preview",
+        **_auth(sessions, "category_manager"),
+    ).status_code == 403
+    assert client.request(
+        "DELETE", f"/api/admin/content/categories/{root['id']}",
+        json={"expected_version": root["version"], "confirmed": True}, **manager_csrf,
+    ).status_code == 403
+
+    child_preview = client.get(
+        f"/api/admin/content/categories/{child['id']}/delete-preview",
+        **_auth(sessions, "category_manager"),
+    )
+    assert child_preview.status_code == 200
+    assert client.request(
+        "DELETE", f"/api/admin/content/categories/{child['id']}",
+        json={"expected_version": child["version"], "confirmed": True}, **manager_csrf,
+    ).status_code == 200
+
+    current_root = next(row for row in client.get(
+        "/api/admin/content/categories?include_inactive=true", **_auth(sessions, "admin")
+    ).json() if row["id"] == root["id"])
+    assert client.get(
+        f"/api/admin/content/categories/{root['id']}/delete-preview", **_auth(sessions, "admin")
+    ).status_code == 200
+    assert client.request(
+        "DELETE", f"/api/admin/content/categories/{root['id']}",
+        json={"expected_version": current_root["version"], "confirmed": True},
+        **_auth(sessions, "admin", csrf=True),
+    ).status_code == 200
 
 
 @pytest.mark.parametrize("employee_id", ["plain", "category_manager"])
