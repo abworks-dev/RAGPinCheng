@@ -395,7 +395,7 @@ export const api = {
     jsonFetch<CleanupPreview>(
       `/api/admin/maintenance/cleanup-preview${retentionDays === undefined ? "" : `?retention_days=${retentionDays}`}`,
     ),
-  adminUpdateMaintenanceSettings: (settings: Pick<MaintenanceSettings, "conversation_cleanup_enabled" | "conversation_retention_days">) =>
+  adminUpdateMaintenanceSettings: (settings: Omit<MaintenanceSettings, "updated_at" | "updated_by">) =>
     jsonFetch<MaintenanceSettings>("/api/admin/maintenance/settings", {
       method: "PATCH",
       body: JSON.stringify(settings),
@@ -429,6 +429,8 @@ export const api = {
     jsonFetch<{
       enabled: boolean;
       max_upload_bytes: number;
+      max_batch_files: number;
+      max_batch_bytes: number;
       supported_extensions: string[];
     }>("/api/admin/content/capabilities"),
   managedCategories: (includeInactive = false) =>

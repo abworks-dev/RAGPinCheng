@@ -498,6 +498,9 @@ def patch_maintenance_settings(
     settings = save_settings(
         enabled=body.conversation_cleanup_enabled,
         retention_days=body.conversation_retention_days,
+        upload_max_file_mb=body.upload_max_file_mb,
+        upload_max_batch_files=body.upload_max_batch_files,
+        upload_max_batch_mb=body.upload_max_batch_mb,
         updated_by=admin.id,
     )
     return _settings_dto(settings)

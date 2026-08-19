@@ -136,7 +136,7 @@
 - `category_nodes.chat_search_enabled` 控制目录内容是否进入企业知识问答，`chat_filter_selectable` 控制目录是否出现在登录用户的范围筛选器；分类只有在自身及全部祖先均启用且纳入问答时，才进入默认检索、对话范围或直接分类检索。两项状态均受祖先约束：上级关闭问答会使整棵子树退出问答和筛选，上级仅关闭筛选会使整棵子树退出筛选但仍可参与问答。关闭父分类会排除整个子树，重新开启父分类不会改写子节点自身设置；既有迁移数据保持原值，由分类管理员逐项调整；分类管理树展示最终有效状态及“继承关闭”原因；
 - 分类移动使用 `POST /api/admin/content/categories/{category_id}/move` 和 `expected_version` 乐观并发契约；服务端在单个 SQLite 写事务中校验父分类启用状态、循环引用和四级深度，按显示编号重新规范化受影响同级节点的兼容顺序、同步后代层级并记录 `category.moved` 审计事件。旧客户端的 `before_category_id` 仍可传入并接受合法性校验，但不再改变显示顺序。移动不改变 `category_key`、资料归属或索引身份，因此不触发资料移动、数据库迁移或重建索引；
 - 网盘式目录复用 `category_nodes`，不新增第二套文件夹事实来源；`content_items.category_id` 表达当前目录，状态和版本不编码进目录名称；
-- 文件夹上传使用 multipart `upload_mode=folder`，每个 `files` 字段都有同序 `relative_paths`；服务端在创建批次和写对象前统一拒绝绝对路径、路径穿越、NUL、文件名不一致、重复路径和超过四级分类深度的路径。默认单批最多 500 个文件、总大小 1024 MB，分别可由 `MAX_FOLDER_UPLOAD_FILES` 和 `MAX_FOLDER_UPLOAD_MB` 调整；单文件仍受 `MAX_UPLOAD_MB` 限制；
+- 文件夹上传使用 multipart `upload_mode=folder`，每个 `files` 字段都有同序 `relative_paths`；服务端在创建批次和写对象前统一拒绝绝对路径、路径穿越、NUL、文件名不一致、重复路径和超过四级分类深度的路径。系统维护页持久化配置单文件、单批数量和单批总大小限制，默认分别为 2000 MB、5000 个和 10240 MB；JSON 预检、multipart 正式上传、资料更新和 capabilities 每次请求读取同一份配置，保存后无需重启；
 - `content_objects` 允许 SHA-256 物理去重，`content_items` 不做跨项目强制合并；
 - `content_item_heads.current_version_id` 是普通受管资料正式可见性的唯一事实；候选索引完成前不切换；
 - 已发布资料分类调整只修改 Qdrant Child payload 和 Parent 的 `category/category_key`、`content_items.category_id` 以及可重建只读视图；向量、Point/Parent ID、Point 数量、正式 head、版本、发布记录和索引任务保持不变。接口为 `POST /api/admin/content/items/{item_id}/reclassify`、`GET/POST /api/admin/content/reclassification-jobs/{job_id}` 与 `POST /api/admin/content/bulk-reclassify`；写接口同时要求 Cookie、CSRF 和 `item.reclassify_published`；

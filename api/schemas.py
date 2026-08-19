@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # ── auth ────────────────────────────────────────────────────────────────────
@@ -214,6 +214,9 @@ class AdminFeedbackPatchRequest(BaseModel):
 class MaintenanceSettingsDTO(BaseModel):
     conversation_cleanup_enabled: bool
     conversation_retention_days: int | None
+    upload_max_file_mb: int
+    upload_max_batch_files: int
+    upload_max_batch_mb: int
     updated_at: int | None = None
     updated_by: int | None = None
 
@@ -221,6 +224,15 @@ class MaintenanceSettingsDTO(BaseModel):
 class MaintenanceSettingsPatchRequest(BaseModel):
     conversation_cleanup_enabled: bool
     conversation_retention_days: int | None = Field(default=None, ge=7, le=3650)
+    upload_max_file_mb: int = Field(ge=1, le=10240)
+    upload_max_batch_files: int = Field(ge=1, le=10000)
+    upload_max_batch_mb: int = Field(ge=1, le=102400)
+
+    @model_validator(mode="after")
+    def validate_upload_limits(self):
+        if self.upload_max_batch_mb < self.upload_max_file_mb:
+            raise ValueError("单批总大小不能小于单文件上限")
+        return self
 
 
 class CleanupPreviewResponse(BaseModel):

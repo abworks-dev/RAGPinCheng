@@ -809,6 +809,7 @@ export function AdminManagedContentPage() {
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [categories, setCategories] = useState<ManagedCategory[]>([]);
   const [enabled, setEnabled] = useState(false);
+  const [uploadLimits, setUploadLimits] = useState({ maxFileBytes: 0, maxBatchFiles: 0, maxBatchBytes: 0 });
   const [currentFolderId, setCurrentFolderId] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [pendingUploadFiles, setPendingUploadFiles] = useState<File[]>([]);
@@ -971,6 +972,11 @@ export function AdminManagedContentPage() {
         }),
       ]);
       setEnabled(capabilities.enabled);
+      setUploadLimits({
+        maxFileBytes: capabilities.max_upload_bytes,
+        maxBatchFiles: capabilities.max_batch_files,
+        maxBatchBytes: capabilities.max_batch_bytes,
+      });
       setCategories(categoryRows);
       setItems(currentFolderId ? listing.items : []);
       setTotal(currentFolderId ? listing.total : 0);
@@ -1247,6 +1253,14 @@ export function AdminManagedContentPage() {
       toast.error(ignored
         ? `文件夹中的 ${ignored} 个文件均不是支持的资料格式`
         : "所选文件夹中没有可上传的文件");
+      return;
+    }
+    if (selection.fileCount > uploadLimits.maxBatchFiles) {
+      toast.error(`文件夹最多上传 ${uploadLimits.maxBatchFiles} 个文件`);
+      return;
+    }
+    if (selection.totalSize > uploadLimits.maxBatchBytes) {
+      toast.error(`文件夹总大小不能超过 ${formatUploadSize(uploadLimits.maxBatchBytes)}`);
       return;
     }
     setUploadDialogOpen(false);
@@ -1613,8 +1627,10 @@ export function AdminManagedContentPage() {
 
   const acceptFiles = (incoming: File[]) => {
     const supported = incoming.filter((file) => /\.(pdf|md|docx|xlsx|pptx)$/i.test(file.name));
-    setFiles(supported);
+    const oversized = supported.filter((file) => file.size > uploadLimits.maxFileBytes);
+    setFiles(supported.filter((file) => file.size <= uploadLimits.maxFileBytes));
     if (supported.length !== incoming.length) toast.error("已忽略不支持的文件格式");
+    if (oversized.length) toast.error(`单文件不能超过 ${formatUploadSize(uploadLimits.maxFileBytes)}`);
   };
 
   const openUploadDialog = () => {

@@ -1115,6 +1115,15 @@ MIGRATIONS = (
                WHERE status<>'archived' AND target_category_id IS NOT NULL AND normalized_original_filename IS NOT NULL""",
         ),
     ),
+    Migration(
+        27,
+        "managed_upload_limit_settings",
+        (
+            "ALTER TABLE maintenance_settings ADD COLUMN upload_max_file_mb INTEGER NOT NULL DEFAULT 2000 CHECK (upload_max_file_mb BETWEEN 1 AND 10240)",
+            "ALTER TABLE maintenance_settings ADD COLUMN upload_max_batch_files INTEGER NOT NULL DEFAULT 5000 CHECK (upload_max_batch_files BETWEEN 1 AND 10000)",
+            "ALTER TABLE maintenance_settings ADD COLUMN upload_max_batch_mb INTEGER NOT NULL DEFAULT 10240 CHECK (upload_max_batch_mb BETWEEN 1 AND 102400)",
+        ),
+    ),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
