@@ -1290,7 +1290,9 @@ def validate_transcript_manual_revision_schema(conn: sqlite3.Connection) -> None
         raise RuntimeError("transcript_manual_revision_schema_mismatch")
 
 
-def validate_content_version_metadata(conn: sqlite3.Connection) -> None:
+def validate_content_version_metadata(
+    conn: sqlite3.Connection, *, require_xmind: bool = True
+) -> None:
     item_columns = {row[1] for row in conn.execute("PRAGMA table_info(content_items)")}
     version_columns = {row[1] for row in conn.execute("PRAGMA table_info(content_versions)")}
     indexes = {row[1] for row in conn.execute("PRAGMA index_list(content_items)")}
@@ -1303,7 +1305,7 @@ def validate_content_version_metadata(conn: sqlite3.Connection) -> None:
     schema = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='content_versions'"
     ).fetchone()
-    if schema is None or "'xmind'" not in str(schema[0]):
+    if schema is None or (require_xmind and "'xmind'" not in str(schema[0])):
         raise RuntimeError("migration_schema_mismatch")
 
 
@@ -1461,7 +1463,10 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
     if any(version == 10 for version, _name in applied):
         conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
         try:
-            validate_content_version_metadata(conn)
+            validate_content_version_metadata(
+                conn,
+                require_xmind=any(version == 29 for version, _name in applied),
+            )
         finally:
             conn.close()
     if any(version == 14 for version, _name in applied) and not UPLOAD_TASK_TABLES.issubset(tables):

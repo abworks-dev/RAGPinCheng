@@ -92,11 +92,17 @@ def test_repeated_init_is_noop_and_does_not_create_second_backup(tmp_path):
     assert list((tmp_path / "backups").glob("*.sqlite")) == first
 
 
-def test_schema_26_relaxes_managed_content_doc_type_for_xmind(tmp_path, monkeypatch):
+def test_schema_29_relaxes_managed_content_doc_type_for_xmind(tmp_path, monkeypatch):
     path = tmp_path / "app.sqlite"
     migrations = db_migrations.MIGRATIONS
-    monkeypatch.setattr(db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 26))
+    legacy_schema = SCHEMA.replace(
+        "'pdf','markdown','docx','xlsx','pptx','xmind','transcript'",
+        "'pdf','markdown','docx','xlsx','pptx','transcript'",
+    )
+    monkeypatch.setattr(app_db, "SCHEMA", legacy_schema)
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 28))
     init_db(path, backup_dir=tmp_path / "backups")
+    monkeypatch.setattr(app_db, "SCHEMA", SCHEMA)
     monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
 
     init_db(path, backup_dir=tmp_path / "backups")
