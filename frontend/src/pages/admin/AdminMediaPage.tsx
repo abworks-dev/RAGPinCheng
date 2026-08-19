@@ -688,7 +688,7 @@ export function AdminMediaPage() {
             ))}
           </ol>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto" data-testid="media-upload-scroll-region">
         <div className="space-y-4 px-4 py-4 sm:space-y-5 sm:px-6 sm:py-5">
           {step === 1 && (
             <>
@@ -747,19 +747,21 @@ export function AdminMediaPage() {
                 onChange={(categoryId) => { setTargetCategoryId(categoryId); setConflictReview(null); }}
                 label="发布后的归档目录"
               />
-              <div className="flex flex-wrap items-end gap-3">
-                <Button variant="outline" size="sm" onClick={() => setPending((current) => current.map((item) => ({ ...item, selected: true })))}>全选</Button>
-                <Button variant="outline" size="sm" onClick={() => setPending((current) => current.map((item) => ({ ...item, selected: false })))}>取消全选</Button>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" onClick={() => setPending((current) => current.map((item) => ({ ...item, selected: true })))}>全选</Button>
+                  <Button variant="outline" onClick={() => setPending((current) => current.map((item) => ({ ...item, selected: false })))}>取消全选</Button>
+                </div>
                 {mode === "automatic" && (
-                  <>
-                    <label className="text-ui-sm font-medium">批量转录方案
-                      <Select aria-label="批量转录方案" value={bulkProfileId} onChange={(event) => setBulkProfileId(event.target.value)} className="mt-1 min-w-64">
+                  <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(16rem,20rem)_auto] sm:items-end">
+                    <label className="min-w-0 text-ui-sm font-medium">批量转录方案
+                      <Select aria-label="批量转录方案" value={bulkProfileId} onChange={(event) => setBulkProfileId(event.target.value)} className="mt-1">
                         <option value="">请选择转录方案</option>
                         {schemes.map((scheme) => <option key={scheme.scheme_id} value={scheme.scheme_id} disabled={!scheme.enabled || scheme.archived || scheme.availability !== "available"}>{scheme.name}{scheme.availability !== "available" ? "（不可用）" : ""}</option>)}
                       </Select>
                     </label>
-                    <Button variant="outline" onClick={() => setPending((current) => current.map((item) => item.selected ? { ...item, profileId: bulkProfileId, requestId: createRequestId(), state: "waiting", error: null } : item))}>应用到已选择视频</Button>
-                  </>
+                    <Button variant="outline" className="w-full sm:w-auto" onClick={() => setPending((current) => current.map((item) => item.selected ? { ...item, profileId: bulkProfileId, requestId: createRequestId(), state: "waiting", error: null } : item))}>应用到已选择视频</Button>
+                  </div>
                 )}
               </div>
 
@@ -870,24 +872,26 @@ export function AdminMediaPage() {
                 </div>
               )}
 
-              <div className="sticky bottom-0 z-10 -mx-4 flex flex-col gap-3 border-t border-border bg-popover/95 px-4 pb-1 pt-4 backdrop-blur sm:-mx-6 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <Button variant="outline" className="w-full sm:w-auto" disabled={submitting || allUploadItemsSettled} onClick={() => setStep(2)}><ArrowLeft className="size-4" />返回选择方式</Button>
-                  {!allUploadItemsSettled && <Button variant="destructive" className="w-full sm:w-auto" disabled={submitting} onClick={() => requestDiscardUpload("cancel")}><Trash2 className="size-4" />放弃本次上传</Button>}
-                </div>
-                <div className="flex flex-col gap-2 sm:items-end">
-                  {!allUploadItemsSettled && <p className="text-ui-xs text-muted-foreground sm:text-right">{mode === "manual" ? "保持现有人工 Markdown 上传与索引路径。" : "每个文件使用独立幂等键；最多并发上传 2 个。"}</p>}
-                  {allUploadItemsSettled ? (
-                    <Button className="w-full sm:w-auto" onClick={() => requestUploadDialogClose(false)}><CheckCircle2 className="size-4" />完成并关闭</Button>
-                  ) : (
-                    <Button className="w-full sm:w-auto" disabled={!canSubmit || !targetCategoryId} onClick={() => void submitBatch()}>{submitting ? "正在批量提交…" : conflictReview ? "按选择上传" : mode === "manual" ? "上传视频与人工转写" : "上传并创建自动转录任务"}</Button>
-                  )}
-                </div>
-              </div>
             </>
           )}
         </div>
         </div>
+        {step === 3 && mode && (
+          <div className="shrink-0 border-t border-border bg-popover px-4 py-4 sm:px-6" data-testid="media-upload-action-bar">
+            {!allUploadItemsSettled && <p className="mb-3 text-ui-xs text-muted-foreground sm:text-right">{mode === "manual" ? "保持现有人工 Markdown 上传与索引路径。" : "每个文件使用独立幂等键；最多并发上传 2 个。"}</p>}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <Button variant="outline" className="w-full sm:w-auto" disabled={submitting || allUploadItemsSettled} onClick={() => setStep(2)}><ArrowLeft className="size-4" />返回选择方式</Button>
+                {!allUploadItemsSettled && <Button variant="destructive" className="w-full sm:w-auto" disabled={submitting} onClick={() => requestDiscardUpload("cancel")}><Trash2 className="size-4" />放弃本次上传</Button>}
+              </div>
+              {allUploadItemsSettled ? (
+                <Button className="w-full sm:w-auto" onClick={() => requestUploadDialogClose(false)}><CheckCircle2 className="size-4" />完成并关闭</Button>
+              ) : (
+                <Button className="w-full sm:w-auto" disabled={!canSubmit || !targetCategoryId} onClick={() => void submitBatch()}>{submitting ? "正在批量提交…" : conflictReview ? "按选择上传" : mode === "manual" ? "上传视频与人工转写" : "上传并创建自动转录任务"}</Button>
+              )}
+            </div>
+          </div>
+        )}
       </DialogContent>
       </Dialog>
 
