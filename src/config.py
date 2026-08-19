@@ -1,5 +1,7 @@
 from pathlib import Path
+import json
 import os
+import re
 from dotenv import load_dotenv
 
 from src.transcription_admission_config import (
@@ -16,6 +18,38 @@ CONTENT_ROOT = Path(os.getenv("CONTENT_ROOT", str(ROOT / "content"))).resolve()
 # overlap the repository's project documentation directory.
 DOCS_DIR = Path(os.getenv("DOCS_DIR", str(CONTENT_ROOT / "legacy-docs"))).resolve()
 MEDIA_DIR = Path(os.getenv("MEDIA_DIR", str(ROOT / "media"))).resolve()
+
+
+def parse_external_media_roots(raw: str) -> dict[str, Path]:
+    """Parse server-owned external media root aliases without exposing paths to clients."""
+    if not raw.strip():
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("EXTERNAL_MEDIA_ROOTS_JSON must be a JSON object") from exc
+    if not isinstance(value, dict):
+        raise ValueError("EXTERNAL_MEDIA_ROOTS_JSON must be a JSON object")
+    roots: dict[str, Path] = {}
+    for alias, configured_path in value.items():
+        if not isinstance(alias, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", alias):
+            raise ValueError("external media root alias is invalid")
+        if not isinstance(configured_path, str) or not configured_path.strip():
+            raise ValueError(f"external media root path is invalid: {alias}")
+        path = Path(configured_path).expanduser()
+        if not path.is_absolute():
+            raise ValueError(f"external media root must be absolute: {alias}")
+        roots[alias] = path.resolve(strict=False)
+    return roots
+
+
+EXTERNAL_MEDIA_ROOTS = parse_external_media_roots(os.getenv("EXTERNAL_MEDIA_ROOTS_JSON", ""))
+EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE = int(os.getenv("EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE", "10000"))
+EXTERNAL_MEDIA_SCAN_POLL_SECONDS = int(os.getenv("EXTERNAL_MEDIA_SCAN_POLL_SECONDS", "60"))
+if EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE < 1:
+    raise ValueError("EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE must be positive")
+if EXTERNAL_MEDIA_SCAN_POLL_SECONDS < 10:
+    raise ValueError("EXTERNAL_MEDIA_SCAN_POLL_SECONDS must be at least 10")
 PARSED_DIR = DATA_DIR / "parsed"
 QDRANT_DIR = DATA_DIR / "qdrant"  # legacy embedded-mode path; unused after the server migration but kept for the optional cleanup script
 PARENTS_DB = DATA_DIR / "parents.sqlite"

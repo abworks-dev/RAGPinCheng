@@ -1124,6 +1124,76 @@ MIGRATIONS = (
             "ALTER TABLE maintenance_settings ADD COLUMN upload_max_batch_mb INTEGER NOT NULL DEFAULT 10240 CHECK (upload_max_batch_mb BETWEEN 1 AND 102400)",
         ),
     ),
+    Migration(
+        28,
+        "external_media_sources",
+        (
+            """CREATE TABLE IF NOT EXISTS external_media_sources (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                root_alias TEXT NOT NULL,
+                relative_path TEXT NOT NULL,
+                target_category_id TEXT NOT NULL REFERENCES category_nodes(id) ON DELETE RESTRICT,
+                default_scheme_id TEXT NOT NULL REFERENCES transcription_schemes(id) ON DELETE RESTRICT,
+                auto_enqueue INTEGER NOT NULL DEFAULT 0 CHECK (auto_enqueue IN (0,1)),
+                scan_interval_seconds INTEGER NOT NULL DEFAULT 900 CHECK (scan_interval_seconds >= 60),
+                enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+                status TEXT NOT NULL DEFAULT 'never_scanned'
+                    CHECK (status IN ('never_scanned','scanning','available','unavailable','scan_failed')),
+                total_files INTEGER NOT NULL DEFAULT 0 CHECK (total_files >= 0),
+                available_files INTEGER NOT NULL DEFAULT 0 CHECK (available_files >= 0),
+                missing_files INTEGER NOT NULL DEFAULT 0 CHECK (missing_files >= 0),
+                last_scan_at INTEGER,
+                last_successful_scan_at INTEGER,
+                last_error_code TEXT,
+                created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+                UNIQUE(root_alias, relative_path)
+            )""",
+            """CREATE TABLE IF NOT EXISTS external_media_entries (
+                id TEXT PRIMARY KEY,
+                source_id TEXT NOT NULL REFERENCES external_media_sources(id) ON DELETE CASCADE,
+                media_id TEXT UNIQUE REFERENCES media_assets(media_id) ON DELETE RESTRICT,
+                relative_path TEXT NOT NULL,
+                parent_relative_path TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                file_size INTEGER NOT NULL CHECK (file_size >= 0),
+                modified_ns INTEGER NOT NULL CHECK (modified_ns >= 0),
+                fingerprint TEXT NOT NULL,
+                availability TEXT NOT NULL CHECK (availability IN ('available','missing','superseded')),
+                discovered_at INTEGER NOT NULL,
+                last_seen_at INTEGER NOT NULL,
+                missing_since INTEGER,
+                updated_at INTEGER NOT NULL
+            )""",
+            """CREATE INDEX IF NOT EXISTS idx_external_media_entries_identity
+               ON external_media_entries(source_id,relative_path,fingerprint)""",
+            """CREATE INDEX IF NOT EXISTS idx_external_media_entries_source_parent
+               ON external_media_entries(source_id,parent_relative_path,filename)""",
+            """CREATE UNIQUE INDEX IF NOT EXISTS uq_external_media_entries_current_path
+               ON external_media_entries(source_id,relative_path) WHERE availability='available'""",
+            """CREATE INDEX IF NOT EXISTS idx_external_media_entries_media
+               ON external_media_entries(media_id)""",
+            """CREATE TABLE IF NOT EXISTS external_media_scan_runs (
+                id TEXT PRIMARY KEY,
+                source_id TEXT NOT NULL REFERENCES external_media_sources(id) ON DELETE CASCADE,
+                trigger_type TEXT NOT NULL CHECK (trigger_type IN ('manual','scheduled')),
+                status TEXT NOT NULL CHECK (status IN ('running','succeeded','failed')),
+                discovered_count INTEGER NOT NULL DEFAULT 0 CHECK (discovered_count >= 0),
+                added_count INTEGER NOT NULL DEFAULT 0 CHECK (added_count >= 0),
+                changed_count INTEGER NOT NULL DEFAULT 0 CHECK (changed_count >= 0),
+                missing_count INTEGER NOT NULL DEFAULT 0 CHECK (missing_count >= 0),
+                enqueued_count INTEGER NOT NULL DEFAULT 0 CHECK (enqueued_count >= 0),
+                error_code TEXT,
+                started_at INTEGER NOT NULL,
+                finished_at INTEGER
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_external_media_scan_runs_source_started ON external_media_scan_runs(source_id,started_at DESC)",
+            "ALTER TABLE media_assets ADD COLUMN storage_kind TEXT NOT NULL DEFAULT 'managed' CHECK (storage_kind IN ('managed','external'))",
+        ),
+    ),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -1177,6 +1247,9 @@ CONTENT_TRASH_LIFECYCLE_TABLES = frozenset(
 )
 TRANSCRIPTION_SCHEME_TABLES = frozenset({"transcription_bases", "transcription_schemes", "transcription_scheme_audit_events"})
 CATEGORY_FORCE_DELETE_TABLES = frozenset({"category_force_delete_runs"})
+EXTERNAL_MEDIA_SOURCE_TABLES = frozenset(
+    {"external_media_sources", "external_media_entries", "external_media_scan_runs"}
+)
 
 
 def validate_system_content_permission_groups(
@@ -1356,6 +1429,8 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
         raise RuntimeError("migration_schema_mismatch")
     if any(version == 20 for version, _name in applied) and not CONTENT_TRASH_LIFECYCLE_TABLES.issubset(tables):
         raise RuntimeError("migration_schema_mismatch")
+    if any(version == 28 for version, _name in applied) and not EXTERNAL_MEDIA_SOURCE_TABLES.issubset(tables):
+        raise RuntimeError("migration_schema_mismatch")
     if any(version == 10 for version, _name in applied):
         conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
         try:
@@ -1441,6 +1516,8 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
         if 20 in applied_versions and not CONTENT_TRASH_LIFECYCLE_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         if 25 in applied_versions and not CATEGORY_FORCE_DELETE_TABLES.issubset(tables):
+            raise RuntimeError("migration_schema_mismatch")
+        if 28 in applied_versions and not EXTERNAL_MEDIA_SOURCE_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         if 21 in applied_versions and not TRANSCRIPTION_SCHEME_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")

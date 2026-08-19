@@ -8,7 +8,7 @@ import uuid
 import wave
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, Sequence
+from typing import Callable, Protocol, Sequence
 
 from src.transcription.runtime_ports import InputPart
 from src.transcription.types import (
@@ -82,6 +82,7 @@ class FfmpegMediaAudioPreparer:
     executable: str
     timeout_seconds: int
     runner: CommandRunner = SubprocessCommandRunner()
+    source_resolver: Callable[[str], Path] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.media_root, Path) or not self.media_root.is_absolute():
@@ -96,7 +97,7 @@ class FfmpegMediaAudioPreparer:
         media_dir = (root / media_id).resolve(strict=False)
         if media_dir.parent != root:
             raise ContractValidationError("media_path_escape", "media_id")
-        source = media_dir / "original.mp4"
+        source = self.source_resolver(media_id) if self.source_resolver is not None else media_dir / "original.mp4"
         final = media_dir / "prepared-audio-v1.wav"
         if final.exists():
             if final.is_symlink() or not final.is_file():
@@ -104,6 +105,7 @@ class FfmpegMediaAudioPreparer:
             return _validated_audio(final, media_id)
         if not source.is_file() or source.is_symlink():
             raise ContractValidationError("media_input_unavailable", "media_id")
+        media_dir.mkdir(parents=True, exist_ok=True)
 
         temporary = media_dir / f".prepared-audio-{uuid.uuid4()}.tmp.wav"
         args = (

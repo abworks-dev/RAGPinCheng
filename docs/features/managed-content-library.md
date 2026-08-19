@@ -46,6 +46,8 @@ media_assets + transcript_versions
 -> content_items(media_transcript) 目录壳 -> 资料库联合列表
 ```
 
+只读外部媒体源使用独立虚拟目录树，不直接创建受管目录壳。共享视频完成现有审核、索引和发布事务后才作为 `media_transcript` 出现在本资料库；源扫描、缺失和不可达状态见 [外部媒体源](external-media-sources.md)。
+
 Schema 16 为历史上已有正式 head 的未归档视频补建目录壳。目录壳只保存 `media_id`、标题和 `category_id`，不创建 `content_versions`、`content_publications`、`content_index_jobs`、`content_item_heads` 或对象副本，因此不会重复文件、发布状态、索引任务或 Qdrant points。新发布的视频转录稿在正式 head 切换事务内同步登记目录壳，失败时整笔发布回滚。
 
 Schema 19 增加 `media_metadata_revisions` 和 `media_replacements`。媒体标题/源文件名修订复用当前正式 Markdown 创建待审核候选；替换视频作为新的媒体、转录和索引候选处理。两类候选都在审核、索引和发布成功前保留旧 `media_transcript_heads`、目录壳和检索可见内容；最终激活在一个 SQLite 事务内切换 head 与目录关联，失败整笔回滚。旧视频只在替换成功后标记归档，物理文件不在该事务中删除。

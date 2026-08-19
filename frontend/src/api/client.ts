@@ -22,6 +22,11 @@ import type {
   Health,
   LlmHealth,
   MediaAsset,
+  ExternalMediaRoot,
+  ExternalMediaSource,
+  ExternalMediaEntryList,
+  ExternalMediaScan,
+  ExternalMediaEnqueueResult,
   MediaUploadPreflightResponse,
   ManagedCategory,
   CategoryDeletePreview,
@@ -974,6 +979,15 @@ export const api = {
     return multipartFetch<MediaAsset>("/api/admin/media", fd, callbacks);
   },
   listMediaAssets: () => jsonFetch<MediaAsset[]>("/api/admin/media"),
+  listExternalMediaRoots: () => jsonFetch<ExternalMediaRoot[]>("/api/admin/external-media/roots"),
+  listExternalMediaSources: () => jsonFetch<ExternalMediaSource[]>("/api/admin/external-media/sources"),
+  createExternalMediaSource: (body: { name: string; root_alias: string; relative_path: string; target_category_id: string; default_scheme_id: string; auto_enqueue: boolean; scan_interval_seconds: number }) =>
+    jsonFetch<ExternalMediaSource>("/api/admin/external-media/sources", { method: "POST", body: JSON.stringify(body) }),
+  updateExternalMediaSource: (sourceId: string, body: { name: string; target_category_id: string; default_scheme_id: string; auto_enqueue: boolean; scan_interval_seconds: number; enabled: boolean; expected_version: number }) =>
+    jsonFetch<ExternalMediaSource>(`/api/admin/external-media/sources/${encodeURIComponent(sourceId)}`, { method: "PATCH", body: JSON.stringify(body) }),
+  scanExternalMediaSource: (sourceId: string) => jsonFetch<ExternalMediaScan>(`/api/admin/external-media/sources/${encodeURIComponent(sourceId)}/scan`, { method: "POST", body: JSON.stringify({}) }),
+  listExternalMediaEntries: (sourceId: string, parent = "") => jsonFetch<ExternalMediaEntryList>(`/api/admin/external-media/sources/${encodeURIComponent(sourceId)}/entries?parent=${encodeURIComponent(parent)}`),
+  enqueueExternalMedia: (sourceId: string, entryIds?: string[]) => jsonFetch<ExternalMediaEnqueueResult>(`/api/admin/external-media/sources/${encodeURIComponent(sourceId)}/enqueue`, { method: "POST", body: JSON.stringify({ entry_ids: entryIds ?? null }) }),
   preflightMediaUpload: (body: {
     category_id: string;
     items: Array<{ client_id: string; title: string; original_filename: string }>;

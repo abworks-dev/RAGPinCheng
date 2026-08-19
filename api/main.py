@@ -17,7 +17,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
-from src.config import CONTENT_MANAGEMENT_ENABLED, RERANK_ENABLED
+from src.config import CONTENT_MANAGEMENT_ENABLED, RERANK_ENABLED, EXTERNAL_MEDIA_SCAN_POLL_SECONDS
 from src.config import ASR_ENABLED, ASR_SERVICE_TOKEN
 
 from .auth import bootstrap_admin_from_env
@@ -50,6 +50,7 @@ from .routes_chat import router as chat_router
 from .routes_content import router as content_router
 from .routes_media import router as media_router
 from .routes_media_transcript import router as media_transcript_router
+from .routes_external_media import router as external_media_router, run_due_external_scans
 from .routes_transcription import (
     build_transcription_service,
     recover_publications_on_boot,
@@ -103,6 +104,17 @@ async def _trash_cleanup_loop() -> None:
             break
         except Exception:
             logger.exception("automatic trash cleanup iteration failed (non-fatal)")
+
+
+async def _external_media_scan_loop() -> None:
+    while True:
+        try:
+            await asyncio.sleep(EXTERNAL_MEDIA_SCAN_POLL_SECONDS)
+            await asyncio.to_thread(run_due_external_scans)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.exception("external media scan iteration failed (non-fatal)")
 
 
 @asynccontextmanager
@@ -159,6 +171,7 @@ async def lifespan(app: FastAPI):
 
     sweeper_task = asyncio.create_task(_sweeper_loop())
     trash_cleanup_task = asyncio.create_task(_trash_cleanup_loop())
+    external_media_scan_task = asyncio.create_task(_external_media_scan_loop())
     # Indexing worker: started before resuming pending jobs so the queue
     # has a consumer ready when resume_pending_on_boot enqueues them.
     configure_publication_runner(run_publication_index_job)
@@ -195,6 +208,11 @@ async def lifespan(app: FastAPI):
             await trash_cleanup_task
         except (asyncio.CancelledError, Exception):
             pass
+        external_media_scan_task.cancel()
+        try:
+            await external_media_scan_task
+        except (asyncio.CancelledError, Exception):
+            pass
         if transcription_runtime_ready:
             await stop_transcription_worker()
         await stop_worker()
@@ -229,6 +247,7 @@ app.include_router(admin_asr_router, prefix="/api")
 app.include_router(media_router, prefix="/api")
 app.include_router(media_transcript_router, prefix="/api")
 app.include_router(transcription_router, prefix="/api")
+app.include_router(external_media_router, prefix="/api")
 
 
 # ── React SPA hosting ──────────────────────────────────────────────────────

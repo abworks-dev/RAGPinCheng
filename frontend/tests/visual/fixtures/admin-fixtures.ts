@@ -580,6 +580,7 @@ export async function installAdminRoutes(
       path.startsWith("/api/admin/content/")
       || isIndexRead
       || path.startsWith("/api/admin/media")
+      || path.startsWith("/api/admin/external-media/")
       || path.startsWith("/api/admin/transcription/")
       || path.startsWith("/api/admin/asr")
       || path.startsWith("/api/admin/feedback")
@@ -764,6 +765,11 @@ export async function installAdminRoutes(
       if (scenario === "media_progress") return json(route, [{ ...mediaAssets[2], status: "transcribing" }]);
       if (scenario === "media_library") return json(route, [mediaLibraryAsset]);
       return json(route, mediaAssets);
+    }
+    if (request.method() === "GET" && path === "/api/admin/external-media/roots") return json(route, []);
+    if (request.method() === "GET" && path === "/api/admin/external-media/sources") return json(route, []);
+    if (request.method() === "GET" && /^\/api\/admin\/external-media\/sources\/[^/]+\/entries$/.test(path)) {
+      return json(route, { source_id: "", parent_relative_path: "", entries: [] });
     }
     if (request.method() === "GET" && path === "/api/admin/transcription/profiles") return json(route, transcriptionProfiles);
     if (request.method() === "GET" && path === "/api/admin/transcription/schemes") return json(route, scenario === "empty" ? [] : transcriptionSchemeOptions);

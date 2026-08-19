@@ -69,6 +69,7 @@ from .indexing import create_job, enqueue
 from .routes_transcription import build_transcription_service
 from .transcription_schemes import get_scheme, resolve_scheme_runtime
 from .routes_media import safe_join, stream_media_file
+from .media_storage import MediaStorageError, resolve_media_path
 from .media_transcript_catalog import DEFAULT_MEDIA_TRANSCRIPT_CATEGORY_ID
 from .media_upload_conflicts import (
     find_media_upload_conflicts,
@@ -1729,6 +1730,8 @@ def list_media_assets(
         """
         SELECT m.media_id, m.title, m.original_filename, m.mime_type, m.file_size,
                m.transcript_origin, m.status, m.created_at, m.updated_at, m.error,
+               m.storage_kind, e.source_id AS external_source_id,
+               e.relative_path AS external_relative_path, e.availability AS external_availability,
                COALESCE(i.category_id,m.target_category_id) AS category_id,
                i.id AS catalog_item_id,h.current_version_id,
                v.review_status, v.publication_status,
@@ -1750,6 +1753,7 @@ def list_media_assets(
                 WHERE r.candidate_media_id=m.media_id OR r.source_media_id=m.media_id
                 ORDER BY r.created_at DESC,r.id DESC LIMIT 1) AS replacement_status
         FROM media_assets m
+        LEFT JOIN external_media_entries e ON e.media_id=m.media_id
         LEFT JOIN content_items i ON i.media_id=m.media_id AND i.archived_at IS NULL
         LEFT JOIN transcript_versions v ON v.id=(
             SELECT v2.id FROM transcript_versions v2
@@ -1786,6 +1790,10 @@ def list_media_assets(
             category_id=r["category_id"],
             catalog_item_id=r["catalog_item_id"],
             current_version_id=r["current_version_id"],
+            storage_kind=r["storage_kind"],
+            external_source_id=r["external_source_id"],
+            external_relative_path=r["external_relative_path"],
+            external_availability=r["external_availability"],
         )
         for r in rows
     ]
@@ -1822,14 +1830,12 @@ def preview_media_asset(
         raise HTTPException(status_code=404, detail="媒体不可预览")
 
     try:
-        file_path = safe_join(MEDIA_DIR, row["storage_rel_path"])
-    except ValueError:
-        raise HTTPException(status_code=404, detail="媒体不存在")
-    if not file_path.exists() or not file_path.is_file():
+        resolved = resolve_media_path(conn, media_id, media_root=MEDIA_DIR)
+    except MediaStorageError:
         raise HTTPException(status_code=404, detail="媒体文件缺失")
 
     return stream_media_file(
-        file_path,
+        resolved.path,
         row["mime_type"],
         request.headers.get("range"),
         cache_control="private, no-store",
@@ -1864,12 +1870,14 @@ def delete_failed_media_asset(
     except ContractValidationError:
         raise HTTPException(status_code=404, detail="媒体不存在")
     row = conn.execute(
-        "SELECT status FROM media_assets WHERE media_id=?", (media_id,)
+        "SELECT status,storage_kind FROM media_assets WHERE media_id=?", (media_id,)
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="媒体不存在")
     if row["status"] != "failed":
         raise HTTPException(status_code=409, detail="仅可完整删除失败且未进入转录流程的媒体")
+    if row["storage_kind"] == "external":
+        raise HTTPException(status_code=409, detail="共享目录视频由外部媒体源管理，不能在此删除")
     if conn.execute(
         "SELECT 1 FROM transcription_jobs WHERE media_id=?", (media_id,)
     ).fetchone() is not None:

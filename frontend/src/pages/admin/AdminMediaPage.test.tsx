@@ -18,6 +18,13 @@ const mocks = vi.hoisted(() => ({
   managedCategories: vi.fn(),
   preflightMediaUpload: vi.fn(),
   moveManagedContent: vi.fn(),
+  listExternalMediaRoots: vi.fn(),
+  listExternalMediaSources: vi.fn(),
+  createExternalMediaSource: vi.fn(),
+  updateExternalMediaSource: vi.fn(),
+  scanExternalMediaSource: vi.fn(),
+  listExternalMediaEntries: vi.fn(),
+  enqueueExternalMedia: vi.fn(),
 }));
 
 vi.mock("../../api/client", () => ({ api: mocks }));
@@ -151,6 +158,70 @@ describe("AdminMediaPage wizard", () => {
       entries: body.items.map((item) => ({ client_id: item.client_id, status: "ready", suggested_title: null, suggested_filename: null, conflicts: [] })),
     }));
     mocks.moveManagedContent.mockResolvedValue({});
+    mocks.listExternalMediaRoots.mockResolvedValue([]);
+    mocks.listExternalMediaSources.mockResolvedValue([]);
+    mocks.listExternalMediaEntries.mockResolvedValue({ source_id: "", parent_relative_path: "", entries: [] });
+    mocks.scanExternalMediaSource.mockResolvedValue({ run_id: "scan-1", source_id: "source-1", discovered_count: 2, added_count: 2, changed_count: 0, missing_count: 0, enqueued_count: 0, enqueue_failures: 0 });
+    mocks.enqueueExternalMedia.mockResolvedValue({ requested: 1, enqueued: 1, failed: 0, failures: {} });
+  });
+
+  it("keeps external media disabled when the server has no configured root aliases", async () => {
+    render(<AdminMediaPage />);
+    expect(await screen.findByText("未配置共享目录根")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /登记共享目录/ })).toBeDisabled();
+  });
+
+  it("shows a recoverable error when shared media cannot be loaded", async () => {
+    mocks.listExternalMediaRoots.mockRejectedValue(new Error("共享资料源服务不可用"));
+    render(<AdminMediaPage />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("共享资料源服务不可用");
+    expect(screen.getByRole("button", { name: "刷新" })).toBeEnabled();
+  });
+
+  it("browses a shared folder and explicitly enqueues selected videos", async () => {
+    mocks.listExternalMediaRoots.mockResolvedValue([{ alias: "training-share" }]);
+    mocks.listExternalMediaSources.mockResolvedValue([{
+      id: "source-1", name: "培训归档", root_alias: "training-share", relative_path: "2026",
+      target_category_id: "cat-05", default_scheme_id: availableProfile.scheme_id,
+      auto_enqueue: false, scan_interval_seconds: 900, enabled: true, status: "available",
+      total_files: 2, available_files: 2, missing_files: 0, last_scan_at: 100,
+      last_successful_scan_at: 100, last_error_code: null, created_at: 1, updated_at: 100, version: 2,
+    }]);
+    mocks.listExternalMediaEntries.mockResolvedValue({
+      source_id: "source-1", parent_relative_path: "", entries: [
+        { id: "folder:课程", kind: "folder", name: "课程", relative_path: "课程" },
+        { id: "entry-1", kind: "video", name: "intro.mp4", relative_path: "intro.mp4", file_size: 1024, availability: "available", media_id: "external-media-1", media_status: "uploaded", transcription_job_id: null, transcription_job_status: null, review_status: null, publication_status: null, index_status: null },
+      ],
+    });
+    render(<AdminMediaPage />);
+    expect((await screen.findAllByText("培训归档")).length).toBeGreaterThan(0);
+    fireEvent.click(await screen.findByLabelText("选择 intro.mp4"));
+    fireEvent.click(screen.getByRole("button", { name: "加入转录（1）" }));
+    await waitFor(() => expect(mocks.enqueueExternalMedia).toHaveBeenCalledWith("source-1", ["entry-1"]));
+    expect(await screen.findByText("已加入 1 个转录任务。" )).toBeInTheDocument();
+  });
+
+  it("requires confirmation before enqueueing all pending shared videos", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+    mocks.listExternalMediaRoots.mockResolvedValue([{ alias: "training-share" }]);
+    mocks.listExternalMediaSources.mockResolvedValue([{
+      id: "source-1", name: "培训归档", root_alias: "training-share", relative_path: "",
+      target_category_id: "cat-05", default_scheme_id: availableProfile.scheme_id,
+      auto_enqueue: false, scan_interval_seconds: 900, enabled: true, status: "available",
+      total_files: 501, available_files: 501, missing_files: 0, last_scan_at: 100,
+      last_successful_scan_at: 100, last_error_code: null, created_at: 1, updated_at: 100, version: 2,
+    }]);
+    mocks.listExternalMediaEntries.mockResolvedValue({ source_id: "source-1", parent_relative_path: "", entries: [] });
+    mocks.enqueueExternalMedia.mockResolvedValue({ requested: 500, enqueued: 500, failed: 0, failures: {} });
+    render(<AdminMediaPage />);
+
+    const enqueueAll = await screen.findByRole("button", { name: "全部待转录视频" });
+    fireEvent.click(enqueueAll);
+    expect(mocks.enqueueExternalMedia).not.toHaveBeenCalled();
+    fireEvent.click(enqueueAll);
+    await waitFor(() => expect(mocks.enqueueExternalMedia).toHaveBeenCalledWith("source-1"));
+    expect(await screen.findByText(/如仍有待处理视频，可再次执行/)).toBeInTheDocument();
+    confirm.mockRestore();
   });
 
   it("shows the three-step entry and keeps lifecycle states separate", async () => {

@@ -1075,7 +1075,53 @@ export type MediaAsset = {
   category_path?: string | null;
   catalog_item_id?: string | null;
   current_version_id?: string | null;
+  storage_kind?: "managed" | "external";
+  external_source_id?: string | null;
+  external_relative_path?: string | null;
+  external_availability?: "available" | "missing" | "superseded" | null;
 };
+
+export type ExternalMediaRoot = { alias: string };
+export type ExternalMediaSource = {
+  id: string;
+  name: string;
+  root_alias: string;
+  relative_path: string;
+  target_category_id: string;
+  default_scheme_id: string;
+  auto_enqueue: boolean;
+  scan_interval_seconds: number;
+  enabled: boolean;
+  status: "never_scanned" | "scanning" | "available" | "unavailable" | "scan_failed";
+  total_files: number;
+  available_files: number;
+  missing_files: number;
+  last_scan_at: number | null;
+  last_successful_scan_at: number | null;
+  last_error_code: string | null;
+  created_at: number;
+  updated_at: number;
+  version: number;
+};
+export type ExternalMediaEntry = {
+  id: string;
+  kind: "folder" | "video";
+  name: string;
+  relative_path: string;
+  file_size?: number | null;
+  modified_ns?: number | null;
+  availability?: "available" | "missing" | "superseded" | null;
+  media_id?: string | null;
+  media_status?: string | null;
+  transcription_job_id?: string | null;
+  transcription_job_status?: string | null;
+  review_status?: string | null;
+  publication_status?: string | null;
+  index_status?: string | null;
+};
+export type ExternalMediaEntryList = { source_id: string; parent_relative_path: string; entries: ExternalMediaEntry[] };
+export type ExternalMediaScan = { run_id: string; source_id: string; discovered_count: number; added_count: number; changed_count: number; missing_count: number; enqueued_count: number; enqueue_failures: number };
+export type ExternalMediaEnqueueResult = { requested: number; enqueued: number; failed: number; failures: Record<string, string> };
 
 export type MediaUploadConflict = {
   media_id: string;

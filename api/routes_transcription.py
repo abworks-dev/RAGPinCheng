@@ -55,6 +55,7 @@ from .schemas import (
     TranscriptionSchemeOptionDTO,
 )
 from .transcription_schemes import available_schemes
+from .media_storage import MediaStorageError, resolve_media_path
 from .transcription_artifacts import LocalTranscriptionArtifactStore
 from .transcription_publication import TranscriptionPublicationApplicationService
 from .indexing import enqueue_publication
@@ -113,11 +114,21 @@ def build_transcription_service() -> TranscriptionApplicationService:
             WHISPERX_PROVIDER_KEY,
         )
     )
+    def resolve_source(media_id: str):
+        conn = connect()
+        try:
+            return resolve_media_path(conn, media_id).path
+        except MediaStorageError as exc:
+            raise ContractValidationError("media_input_unavailable", "media_id") from exc
+        finally:
+            conn.close()
+
     return TranscriptionApplicationService(
         profiles=profiles,
         providers=ProviderRegistry(factories),
         preparer=FfmpegMediaAudioPreparer(
-            MEDIA_DIR.resolve(), ASR_FFMPEG_PATH, ASR_MEDIA_PREP_TIMEOUT_SECONDS
+            MEDIA_DIR.resolve(), ASR_FFMPEG_PATH, ASR_MEDIA_PREP_TIMEOUT_SECONDS,
+            source_resolver=resolve_source,
         ),
         artifacts=LocalTranscriptionArtifactStore(TRANSCRIPTION_ARTIFACT_DIR),
         job_timeout_ms=ASR_JOB_TIMEOUT_SECONDS * 1000,
