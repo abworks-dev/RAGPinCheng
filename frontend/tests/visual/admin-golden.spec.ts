@@ -214,12 +214,7 @@ test("资料管理移入回收站确认 accepted golden", async ({ page }) => {
   await openRootFolder(page);
   const title = page.getByText("建筑信息模型交付标准（合成长文件名用于响应式检查）", { exact: true }).filter({ visible: true });
   const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
-  if (page.viewportSize()!.width >= 1440) {
-    await item.getByRole("button", { name: "删除“建筑信息模型交付标准（合成长文件名用于响应式检查）”", exact: true }).click();
-  } else {
-    await item.getByRole("button", { name: `更多“建筑信息模型交付标准（合成长文件名用于响应式检查）”的操作`, exact: true }).click();
-    await page.getByRole("menu", { name: "“建筑信息模型交付标准（合成长文件名用于响应式检查）”的更多操作" }).getByRole("menuitem", { name: "移至回收站" }).click();
-  }
+  await item.getByRole("button", { name: "删除“建筑信息模型交付标准（合成长文件名用于响应式检查）”", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "将资料移入回收站？" })).toBeVisible();
   const viewport = page.viewportSize()!;
   await expect(page).toHaveScreenshot(`managed-content-delete-confirm-${viewport.width}x${viewport.height}.png`);

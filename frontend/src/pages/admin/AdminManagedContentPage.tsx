@@ -2334,33 +2334,14 @@ export function AdminManagedContentPage() {
             : "当前账号没有删除草稿或已退回资料的权限");
     return <div className="ml-auto flex w-full flex-col items-stretch gap-2 lg:w-auto lg:flex-row lg:items-center lg:justify-end">
       {workflow && <Button size="sm" className="w-full shrink-0 max-sm:h-10 lg:w-auto" disabled={disabled} onClick={workflow.action}>{workflow.label}</Button>}
-      <div className="ml-auto flex min-h-10 w-[13.5rem] max-w-full items-center justify-end gap-1 lg:ml-0 lg:w-auto">
-        <IconButton label={`查看“${item.title}”的详细信息`} tooltip={unavailableReason || "查看资料详情"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => setDetail(item)}><Info className="size-4" /></IconButton>
+      <div className="ml-auto flex min-h-10 max-w-full flex-wrap items-center justify-end gap-1 lg:ml-0 lg:w-auto lg:flex-nowrap">
         <IconButton label={`预览“${item.title}”`} tooltip={previewTooltip} className="border border-border max-sm:size-10" disabled={disabled || !previewable} onClick={() => openDocumentPreview(item.preview_parent_id!, item.title, item.doc_type, 1, {}, null)}><Eye className="size-4" /></IconButton>
-        <IconButton label={`下载“${item.title}”`} tooltip={unavailableReason || (downloadable ? "下载文件" : "当前账号没有下载文件的权限")} className="border border-border max-sm:size-10" disabled={disabled || !downloadable} onClick={() => void downloadContent(item)}><Download className="size-4" /></IconButton>
+        <IconButton label={`查看“${item.title}”的详细信息`} tooltip={unavailableReason || "查看资料详情"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => setDetail(item)}><Info className="size-4" /></IconButton>
+        <IconButton label={`重命名“${item.title}”`} tooltip={revisionTooltip} className="border border-border max-sm:size-10" disabled={disabled || !revisionAllowed} onClick={() => openRenameDialog(item)}><Pencil className="size-4" /></IconButton>
+        <IconButton label={`更新“${item.title}”`} tooltip={updateTooltip} className="border border-border max-sm:size-10" disabled={disabled || !revisionAllowed} onClick={() => openUpdateDialog(item)}><FileUp className="size-4" /></IconButton>
         <IconButton label={item.has_published_head ? `调整“${item.title}”的分类` : `移动“${item.title}”`} tooltip={moveTooltip} className="border border-border max-sm:size-10" disabled={disabled || !movable} onClick={() => { setMoveTarget(item); setMoveFolderId(""); setMoveError(null); }}><FolderInput className="size-4" /></IconButton>
-        <span className="hidden min-[1440px]:contents">
-          <IconButton label={`重命名“${item.title}”`} tooltip={revisionTooltip} className="border border-border" disabled={disabled || !revisionAllowed} onClick={() => openRenameDialog(item)}><Pencil className="size-4" /></IconButton>
-        </span>
-        <span className="hidden min-[1440px]:contents">
-          <IconButton label={`更新“${item.title}”`} tooltip={updateTooltip} className="border border-border" disabled={disabled || !revisionAllowed} onClick={() => openUpdateDialog(item)}><FileUp className="size-4" /></IconButton>
-        </span>
-        <span className="hidden min-[1440px]:contents">
-          <IconButton label={`删除“${item.title}”`} tooltip={deleteTooltip} className="border border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={disabled || !deletable} onClick={() => openDeleteDialog([item])}><Trash2 className="size-4" /></IconButton>
-        </span>
-        <span className="contents min-[1440px]:hidden">
-          <ActionsMenu
-            compact
-            disabled={disabled}
-            triggerLabel={`更多“${item.title}”的操作`}
-            menuLabel={`“${item.title}”的更多操作`}
-            options={[
-              { key: "rename", label: "重命名", icon: <Pencil className="size-4" />, disabled: !revisionAllowed, disabledReason: revisionTooltip, onSelect: () => openRenameDialog(item) },
-              { key: "update", label: "更新资料", icon: <FileUp className="size-4" />, disabled: !revisionAllowed, disabledReason: updateTooltip, onSelect: () => openUpdateDialog(item) },
-              { key: "archive", label: "移至回收站", icon: <Trash2 className="size-4" />, destructive: true, disabled: !deletable, disabledReason: deleteTooltip, onSelect: () => openDeleteDialog([item]) },
-            ]}
-          />
-        </span>
+        <IconButton label={`下载“${item.title}”`} tooltip={unavailableReason || (downloadable ? "下载文件" : "当前账号没有下载文件的权限")} className="border border-border max-sm:size-10" disabled={disabled || !downloadable} onClick={() => void downloadContent(item)}><Download className="size-4" /></IconButton>
+        <IconButton label={`删除“${item.title}”`} tooltip={deleteTooltip} className="border border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive max-sm:size-10" disabled={disabled || !deletable} onClick={() => openDeleteDialog([item])}><Trash2 className="size-4" /></IconButton>
       </div>
     </div>;
   };
@@ -2383,15 +2364,15 @@ export function AdminManagedContentPage() {
           ? "文件夹内没有可下载的资料"
           : "打包下载整个文件夹");
     return <div className="ml-auto flex min-h-10 shrink-0 items-center justify-end gap-1" onClick={(event) => event.stopPropagation()}>
+      <IconButton label={`打开文件夹“${folderLabel}”`} tooltip={unavailableReason || "打开文件夹"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => setCurrentFolderId(folder.id)}><ChevronRight className="size-4" /></IconButton>
       <IconButton label={`查看文件夹“${folderLabel}”的详细信息`} tooltip={unavailableReason || "查看文件夹详情"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => setFolderDetailTarget(folder)}><Info className="size-4" /></IconButton>
       {can("category.manage") && <>
+        <IconButton label={`重命名文件夹“${folderLabel}”`} tooltip={unavailableReason || "重命名文件夹"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => openFolderRename(folder)}><Pencil className="size-4" /></IconButton>
         <IconButton label={`调整文件夹“${folderLabel}”的编号`} tooltip={unavailableReason || "调整文件夹编号"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => openFolderNumber(folder)}><ListOrdered className="size-4" /></IconButton>
         <IconButton label={`移动文件夹“${folderLabel}”`} tooltip={unavailableReason || "移动文件夹位置"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => openFolderMove(folder)}><FolderInput className="size-4" /></IconButton>
-        <IconButton label={`重命名文件夹“${folderLabel}”`} tooltip={unavailableReason || "重命名文件夹"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => openFolderRename(folder)}><Pencil className="size-4" /></IconButton>
-        <IconButton label={`删除文件夹“${folderLabel}”`} tooltip={unavailableReason || "删除文件夹"} className="border border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive max-sm:size-10" disabled={disabled} onClick={() => setFolderDeleteTarget(folder)}><Trash2 className="size-4" /></IconButton>
       </>}
       <IconButton label={`打包下载文件夹“${folderLabel}”`} tooltip={downloadTooltip} className="border border-border max-sm:size-10" disabled={disabled || !can("item.download") || (folder.total_item_count ?? folder.item_count) < 1 || folderDownloading} onClick={() => void downloadFolder(folder)}><Download className={folderDownloading ? "size-4 animate-pulse" : "size-4"} /></IconButton>
-      <IconButton label={`打开文件夹“${folderLabel}”`} tooltip={unavailableReason || "打开文件夹"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => setCurrentFolderId(folder.id)}><ChevronRight className="size-4" /></IconButton>
+      {can("category.manage") && <IconButton label={`删除文件夹“${folderLabel}”`} tooltip={unavailableReason || "删除文件夹"} className="border border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive max-sm:size-10" disabled={disabled} onClick={() => setFolderDeleteTarget(folder)}><Trash2 className="size-4" /></IconButton>}
     </div>;
   };
 
