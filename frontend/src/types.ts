@@ -459,6 +459,18 @@ export type ManagedPreview = {
   preview_status: "ready";
 };
 
+export type XMindTopic = {
+  id: string;
+  title: string;
+  notes: string | null;
+  children: XMindTopic[];
+};
+
+export type XMindPreview = {
+  version_id: string;
+  sheets: Array<{ id: string; title: string; root_topic: XMindTopic }>;
+};
+
 export type ContentTrashAuditEvent = {
   event_type: "content.archived" | "content.restored";
   actor_name: string | null;

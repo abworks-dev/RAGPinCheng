@@ -270,7 +270,7 @@ CONTENT_LIBRARY_STATEMENTS = (
         object_sha256 TEXT REFERENCES content_objects(sha256) ON DELETE RESTRICT,
         transcript_version_id TEXT UNIQUE REFERENCES transcript_versions(id) ON DELETE RESTRICT,
         original_filename TEXT NOT NULL,
-        doc_type TEXT NOT NULL CHECK (doc_type IN ('pdf','markdown','docx','xlsx','pptx','transcript')),
+        doc_type TEXT NOT NULL CHECK (doc_type IN ('pdf','markdown','docx','xlsx','pptx','xmind','transcript')),
         source_origin TEXT NOT NULL CHECK (source_origin IN ('web','server','legacy','transcription')),
         source_batch_id TEXT REFERENCES upload_batches(id) ON DELETE RESTRICT,
         source_rel_path TEXT,
@@ -1194,6 +1194,7 @@ MIGRATIONS = (
             "ALTER TABLE media_assets ADD COLUMN storage_kind TEXT NOT NULL DEFAULT 'managed' CHECK (storage_kind IN ('managed','external'))",
         ),
     ),
+    Migration(29, "xmind_managed_content", ("RELAX_CONTENT_VERSION_DOC_TYPE_XMIND",)),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -1299,6 +1300,11 @@ def validate_content_version_metadata(conn: sqlite3.Connection) -> None:
         raise RuntimeError("migration_schema_mismatch")
     if conn.execute("SELECT 1 FROM content_versions WHERE title IS NULL LIMIT 1").fetchone():
         raise RuntimeError("migration_schema_mismatch")
+    schema = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='content_versions'"
+    ).fetchone()
+    if schema is None or "'xmind'" not in str(schema[0]):
+        raise RuntimeError("migration_schema_mismatch")
 
 
 def validate_answer_policy_schema(conn: sqlite3.Connection) -> None:
@@ -1327,6 +1333,27 @@ def split_sql_statements(script: str) -> tuple[str, ...]:
 
 
 def execute_migration_statement(conn: sqlite3.Connection, statement: str) -> None:
+    if statement == "RELAX_CONTENT_VERSION_DOC_TYPE_XMIND":
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='content_versions'"
+        ).fetchone()
+        if row is None or not row[0]:
+            raise RuntimeError("migration_schema_mismatch")
+        old = "'pdf','markdown','docx','xlsx','pptx','transcript'"
+        new = "'pdf','markdown','docx','xlsx','pptx','xmind','transcript'"
+        if new in row[0]:
+            return
+        if old not in row[0]:
+            raise RuntimeError("migration_schema_mismatch")
+        conn.execute("PRAGMA writable_schema=ON")
+        try:
+            conn.execute(
+                "UPDATE sqlite_master SET sql=? WHERE type='table' AND name='content_versions'",
+                (row[0].replace(old, new),),
+            )
+        finally:
+            conn.execute("PRAGMA writable_schema=RESET")
+        return
     match = re.fullmatch(
         r"ALTER TABLE ([A-Za-z_][A-Za-z0-9_]*) ADD COLUMN ([A-Za-z_][A-Za-z0-9_]*) .+",
         statement.strip(),

@@ -41,6 +41,7 @@ from src.indexing_pipeline import (
     list_managed_version_index_summaries,
 )
 from src.office_convert import convert_pptx_to_pdf, is_valid_pdf_file
+from src.xmind_parser import XMindParseError, XMindTopic, parse_xmind
 
 from .auth import CurrentUser, require_admin, require_csrf, require_csrf_admin, require_user
 from .maintenance import get_settings
@@ -155,6 +156,7 @@ from .schemas import (
     ManagedIndexJobListResponse,
     ManagedPublicationDTO,
     ManagedPreviewDTO,
+    XMindPreviewDTO,
     ManagedUploadEntryDTO,
     ManagedUploadConflictAction,
     ManagedUploadFilenameConflictDTO,
@@ -188,6 +190,7 @@ _DOC_TYPES = {
     ".docx": "docx",
     ".xlsx": "xlsx",
     ".pptx": "pptx",
+    ".xmind": "xmind",
 }
 _CONTENT_READ = CONTENT_PERMISSIONS
 
@@ -1312,6 +1315,13 @@ async def upload_managed_documents(
                     if stored.created:
                         stored.absolute_path.unlink(missing_ok=True)
                     raise ValueError(package_issue)
+            if doc_type == "xmind":
+                try:
+                    parse_xmind(stored.absolute_path)
+                except XMindParseError as exc:
+                    if stored.created:
+                        stored.absolute_path.unlink(missing_ok=True)
+                    raise ValueError(str(exc)) from exc
             source_parts = relative_path.split("/") if relative_path else [filename]
             source_parts[-1] = final_filename
             source_rel_path = "/".join(source_parts)
@@ -1374,6 +1384,14 @@ async def upload_managed_documents(
                 "office_external_link": "Office 文件包含外部链接，已拒绝处理",
                 "office_embedded_object": "Office 文件包含嵌入对象，已拒绝处理",
                 "office_package_invalid": "Office 文件格式无效",
+                "xmind_file_unavailable": "XMind 文件不可用",
+                "xmind_archive_invalid": "XMind 文件格式无效",
+                "xmind_archive_limits_exceeded": "XMind 文件内容超过安全限制",
+                "xmind_archive_path_invalid": "XMind 文件包含不安全路径",
+                "xmind_content_missing": "XMind 文件缺少主题内容",
+                "xmind_content_invalid": "XMind 主题内容无效",
+                "xmind_topic_structure_invalid": "XMind 主题结构无效或层级过深",
+                "xmind_topic_limits_exceeded": "XMind 主题数量超过安全限制",
             }.get(reason_code, reason_code)
             entries.append(ManagedUploadEntryDTO(
                 filename=final_filename, status="skipped", reason=reason,
@@ -1490,9 +1508,9 @@ def _content_item_dto(
     )
     preview_status: Literal["ready", "pending", "missing", "not_applicable"] = "not_applicable"
     preview_parent_id: str | None = None
-    if row["doc_type"] in {"pdf", "docx", "xlsx", "pptx"}:
-        preview_status = "pending"
-        if summary and summary.preview_parent_id:
+    if row["doc_type"] in {"pdf", "docx", "xlsx", "pptx", "xmind"}:
+        preview_status = "ready" if row["doc_type"] == "xmind" else "pending"
+        if row["doc_type"] != "xmind" and summary and summary.preview_parent_id:
             if row["doc_type"] == "pptx":
                 source_path = _storage.published_source_path(
                     content_item_id=row["item_id"],
@@ -1504,7 +1522,7 @@ def _content_item_dto(
                 preview_status = "ready"
             if preview_status == "ready":
                 preview_parent_id = summary.preview_parent_id
-        elif row["lifecycle_status"] in {"published", "superseded"}:
+        elif row["doc_type"] != "xmind" and row["lifecycle_status"] in {"published", "superseded"}:
             preview_status = "missing"
 
     return ManagedContentItemDTO(
@@ -1593,7 +1611,7 @@ def get_content_items_page(
     lifecycle_status: str | None = None,
     source_origin: str | None = None,
     content_kind: Literal["document", "media_transcript"] | None = None,
-    doc_type: Literal["pdf", "docx", "xlsx", "pptx", "markdown", "transcript", "other"] | None = None,
+    doc_type: Literal["pdf", "docx", "xlsx", "pptx", "xmind", "markdown", "transcript", "other"] | None = None,
     sort_by: Literal["doc_type"] | None = None,
     sort_direction: Literal["asc", "desc"] = "asc",
     limit: int = Query(25, ge=1, le=100),
@@ -2204,6 +2222,13 @@ async def update_managed_content_item(
         stored = await _storage.ingest_upload(
             file, batch_id=batch_id, max_bytes=settings.upload_max_file_mb * 1024 * 1024
         )
+        if doc_type == "xmind":
+            try:
+                parse_xmind(stored.absolute_path)
+            except XMindParseError as exc:
+                if stored.created:
+                    stored.absolute_path.unlink(missing_ok=True)
+                raise ValueError(str(exc)) from exc
         create_content_revision(
             conn,
             item_id,
@@ -2260,6 +2285,55 @@ def get_content_version_file(
     if disposition == "attachment" and not has_content_permission(conn, user, "item.download"):
         raise HTTPException(status_code=403, detail="当前账号没有下载资料的权限")
     return FileResponse(path, filename=row["original_filename"], content_disposition_type=disposition)
+
+
+def _xmind_topic_payload(topic: XMindTopic) -> dict[str, object]:
+    return {
+        "id": topic.id,
+        "title": topic.title,
+        "notes": topic.notes,
+        "children": [_xmind_topic_payload(child) for child in topic.children],
+    }
+
+
+@router.get("/versions/{version_id}/xmind-preview", response_model=XMindPreviewDTO)
+def get_xmind_preview(
+    version_id: str,
+    _user: CurrentUser = Depends(require_content_permission("item.view")),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> XMindPreviewDTO:
+    row = conn.execute(
+        """SELECT v.doc_type,o.storage_rel_path
+           FROM content_versions v
+           JOIN content_items i ON i.id=v.item_id
+           JOIN content_objects o ON o.sha256=v.object_sha256
+           WHERE v.id=? AND i.archived_at IS NULL""",
+        (version_id,),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="资料文件不存在")
+    if row["doc_type"] != "xmind":
+        raise HTTPException(status_code=400, detail="该资料不是 XMind 文件")
+    try:
+        path = _storage.resolve_object(row["storage_rel_path"])
+        document = parse_xmind(path)
+    except (FileNotFoundError, ValueError, XMindParseError) as exc:
+        logger.warning("XMind preview unavailable for version %s: %s", version_id, exc)
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "xmind_preview_unavailable", "message": "XMind 文件无法解析或内容超过安全限制"},
+        ) from exc
+    return XMindPreviewDTO.model_validate({
+        "version_id": version_id,
+        "sheets": [
+            {
+                "id": sheet.id,
+                "title": sheet.title,
+                "root_topic": _xmind_topic_payload(sheet.root_topic),
+            }
+            for sheet in document.sheets
+        ],
+    })
 
 
 @router.post("/versions/{version_id}/preview", response_model=ManagedPreviewDTO)

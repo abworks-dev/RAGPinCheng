@@ -35,6 +35,7 @@ import type {
   FolderRequest,
   ManagedContentItem,
   ManagedPreview,
+  XMindPreview,
   ContentTrashAuditEvent,
   ContentReclassificationJob,
   ManagedContentList,
@@ -556,7 +557,7 @@ export const api = {
     lifecycle_status?: string;
     source_origin?: string;
     content_kind?: "document" | "media_transcript";
-    doc_type?: "pdf" | "docx" | "xlsx" | "pptx" | "markdown" | "transcript" | "other";
+    doc_type?: "pdf" | "docx" | "xlsx" | "pptx" | "xmind" | "markdown" | "transcript" | "other";
     sort_by?: "doc_type";
     sort_direction?: "asc" | "desc";
     limit?: number;
@@ -832,6 +833,10 @@ export const api = {
     jsonFetch<ManagedPreview>(
       `/api/admin/content/versions/${encodeURIComponent(versionId)}/preview`,
       { method: "POST", body: JSON.stringify({}) },
+    ),
+  managedContentXMindPreview: (versionId: string) =>
+    jsonFetch<XMindPreview>(
+      `/api/admin/content/versions/${encodeURIComponent(versionId)}/xmind-preview`,
     ),
   bulkReviewManagedContent: (versionIds: string[], approved: boolean, note?: string) =>
     jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-review", {

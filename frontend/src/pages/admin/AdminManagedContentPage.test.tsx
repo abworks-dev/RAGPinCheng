@@ -60,8 +60,9 @@ const mocks = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
   openPreview: vi.fn(),
+  openXMind: vi.fn(),
   openVideo: vi.fn(),
-  previewState: { parentId: null as string | null },
+  previewState: { parentId: null as string | null, versionId: null as string | null },
 }));
 
 const REVIEWER_PERMISSIONS = ["item.review", "item.move_review", "folder.review", "trash.view", "trash.restore", "item.download"];
@@ -72,7 +73,7 @@ const CATEGORY_MANAGER_PERMISSIONS = ["category.manage", "folder.review"];
 vi.mock("../../components/PdfPreview", () => ({ PdfPreview: () => null }));
 vi.mock("../../hooks/usePdfPreview", () => ({
   PdfPreviewProvider: ({ children }: { children: React.ReactNode }) => children,
-  usePdfPreview: () => ({ open: mocks.openPreview, state: { ...mocks.previewState } }),
+  usePdfPreview: () => ({ open: mocks.openPreview, openXMind: mocks.openXMind, state: { ...mocks.previewState } }),
 }));
 
 vi.mock("../../hooks/useVideoPlayer", () => ({
@@ -1474,7 +1475,7 @@ describe("AdminManagedContentPage", () => {
 
     fireEvent.dragEnter(folderList, { dataTransfer });
     expect(screen.getByTestId("managed-content-drop-overlay")).toHaveTextContent("松开以上传文件到“03 公司内部标准”");
-    expect(screen.getByTestId("managed-content-drop-overlay")).toHaveTextContent("支持 PDF、Markdown、Word、Excel 和 PPT 文件");
+    expect(screen.getByTestId("managed-content-drop-overlay")).toHaveTextContent("支持 PDF、Markdown、Word、Excel、PPT 和 XMind 文件");
 
     fireEvent.dragLeave(folderList, { dataTransfer });
     expect(screen.queryByTestId("managed-content-drop-overlay")).not.toBeInTheDocument();
@@ -1493,7 +1494,7 @@ describe("AdminManagedContentPage", () => {
     fireEvent.drop(folderList, { dataTransfer });
 
     expect(screen.queryByTestId("managed-content-drop-overlay")).not.toBeInTheDocument();
-    expect(mocks.error).toHaveBeenCalledWith("没有可上传的支持格式，仅支持 PDF、Markdown、Word、Excel 和 PPT 文件");
+    expect(mocks.error).toHaveBeenCalledWith("没有可上传的支持格式，仅支持 PDF、Markdown、Word、Excel、PPT 和 XMind 文件");
   });
 
   it("does not upload files when a folder drop is cancelled", async () => {

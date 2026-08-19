@@ -14,14 +14,15 @@ from .content_storage import StoredContentObject
 _CATEGORY_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{1,62}$")
 _DISPLAY_CODE_RE = re.compile(r"^[0-9A-Za-z_-]{1,12}$")
 _MAX_CATEGORY_SORT_ORDER = 999_999
-_KNOWN_LIBRARY_DOC_TYPES = ("pdf", "docx", "xlsx", "pptx", "markdown", "transcript")
+_KNOWN_LIBRARY_DOC_TYPES = ("pdf", "docx", "xlsx", "pptx", "xmind", "markdown", "transcript")
 _DOC_TYPE_SORT_ORDER = {
     "pdf": 1,
     "docx": 2,
     "xlsx": 3,
     "pptx": 4,
-    "markdown": 5,
-    "transcript": 6,
+    "xmind": 5,
+    "markdown": 6,
+    "transcript": 7,
 }
 
 

@@ -22,6 +22,7 @@ SUPPORTED_TYPES = {
     ".docx": "docx",
     ".xlsx": "xlsx",
     ".pptx": "pptx",
+    ".xmind": "xmind",
 }
 
 
