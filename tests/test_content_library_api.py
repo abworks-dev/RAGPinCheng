@@ -1423,6 +1423,70 @@ def test_managed_pptx_upload_accepts_case_sensitive_relationship_paths(content_a
         conn.close()
 
 
+def test_managed_xmind_upload_and_draft_preview(content_api):
+    client, sessions, _queued, db_path = content_api
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("content.json", json.dumps([{
+            "id": "sheet-1",
+            "title": "实施计划",
+            "rootTopic": {
+                "id": "root",
+                "title": "资料平台",
+                "children": {"attached": [{"id": "child", "title": "上传与预览"}]},
+            },
+        }], ensure_ascii=False))
+
+    response = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("plan.xmind", payload.getvalue(), "application/x-xmind"))],
+        **_auth(sessions, "admin", csrf=True),
+    )
+
+    assert response.status_code == 200
+    entry = response.json()["entries"][0]
+    assert entry["status"] == "accepted"
+    conn = connect(db_path)
+    try:
+        assert conn.execute(
+            "SELECT doc_type FROM content_versions WHERE id=?", (entry["version_id"],)
+        ).fetchone()["doc_type"] == "xmind"
+    finally:
+        conn.close()
+
+    preview = client.get(
+        f"/api/admin/content/versions/{entry['version_id']}/xmind-preview",
+        **_auth(sessions, "admin"),
+    )
+    assert preview.status_code == 200
+    assert preview.json()["sheets"][0]["root_topic"]["children"][0]["title"] == "上传与预览"
+    assert client.get(
+        f"/api/admin/content/versions/{entry['version_id']}/xmind-preview"
+    ).status_code == 401
+
+
+def test_managed_xmind_upload_rejects_invalid_archive(content_api):
+    client, sessions, _queued, db_path = content_api
+
+    response = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("broken.xmind", b"not-a-zip", "application/x-xmind"))],
+        **_auth(sessions, "admin", csrf=True),
+    )
+
+    assert response.status_code == 200
+    entry = response.json()["entries"][0]
+    assert entry["status"] == "skipped"
+    assert entry["reason_code"] == "xmind_archive_invalid"
+    conn = connect(db_path)
+    try:
+        assert conn.execute("SELECT count(*) FROM content_versions WHERE doc_type='xmind'").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
 def test_managed_upload_skips_office_but_accepts_markdown_when_disabled(content_api, monkeypatch):
     client, sessions, _queued, db_path = content_api
     monkeypatch.setattr(routes_content, "OFFICE_PROCESSING_ENABLED", False)

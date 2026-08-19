@@ -932,6 +932,24 @@ class ManagedPreviewDTO(BaseModel):
     preview_status: Literal["ready"] = "ready"
 
 
+class XMindTopicDTO(BaseModel):
+    id: str
+    title: str
+    notes: str | None = None
+    children: list["XMindTopicDTO"] = Field(default_factory=list)
+
+
+class XMindSheetDTO(BaseModel):
+    id: str
+    title: str
+    root_topic: XMindTopicDTO
+
+
+class XMindPreviewDTO(BaseModel):
+    version_id: str
+    sheets: list[XMindSheetDTO]
+
+
 class ContentReclassificationJobDTO(BaseModel):
     id: str
     item_id: str

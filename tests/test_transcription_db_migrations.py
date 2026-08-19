@@ -92,6 +92,23 @@ def test_repeated_init_is_noop_and_does_not_create_second_backup(tmp_path):
     assert list((tmp_path / "backups").glob("*.sqlite")) == first
 
 
+def test_schema_26_relaxes_managed_content_doc_type_for_xmind(tmp_path, monkeypatch):
+    path = tmp_path / "app.sqlite"
+    migrations = db_migrations.MIGRATIONS
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 26))
+    init_db(path, backup_dir=tmp_path / "backups")
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
+
+    init_db(path, backup_dir=tmp_path / "backups")
+
+    conn = sqlite3.connect(path)
+    schema = conn.execute("SELECT sql FROM sqlite_master WHERE name='content_versions'").fetchone()[0]
+    assert "'xmind'" in schema
+    assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
+    conn.close()
+
+
 def test_schema_10_database_migrates_manual_revision_columns_and_index(tmp_path, monkeypatch):
     path = tmp_path / "app.sqlite"
     original = db_migrations.MIGRATIONS

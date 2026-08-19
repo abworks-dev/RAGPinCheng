@@ -59,6 +59,7 @@ from .office_convert import (
     convert_xlsx_to_markdown,
     recalculate_xlsx,
 )
+from .xmind_parser import parse_xmind, xmind_to_markdown
 
 StatusFn = Callable[[str], None]
 
@@ -230,6 +231,26 @@ def _build_markdown_doc(source_path: Path) -> ParsedDoc:
     )
 
 
+def _build_xmind_doc(
+    source_path: Path, on_status: StatusFn, *, parsed_dir: Path = PARSED_DIR
+) -> ParsedDoc:
+    """Parse a bounded XMind archive and cache its topic hierarchy as Markdown."""
+    parsed_dir.mkdir(parents=True, exist_ok=True)
+    md_path = parsed_dir / "document.md"
+    on_status("parsing")
+    markdown = xmind_to_markdown(parse_xmind(source_path))
+    _write_text_atomic(md_path, markdown)
+    category, company = _derive_category_and_company(source_path)
+    return ParsedDoc(
+        source_path=source_path,
+        category=category,
+        doc_title=source_path.stem,
+        markdown_path=md_path,
+        doc_type="xmind",
+        company=company,
+    )
+
+
 def _build_docx_doc(
     source_path: Path, on_status: StatusFn, *, parsed_dir: Path = PARSED_DIR
 ) -> ParsedDoc:
@@ -375,7 +396,7 @@ def index_single(
     transcript videos). When set, the Parent dataclass carries media_id
     through the pipeline so Sources can resolve playback URLs.
     """
-    if doc_type not in ("pdf", "transcript", "docx", "xlsx", "pptx"):
+    if doc_type not in ("pdf", "transcript", "docx", "xlsx", "pptx", "xmind"):
         raise ValueError(f"unsupported doc_type: {doc_type!r}")
 
     if doc_type == "transcript":
@@ -390,6 +411,8 @@ def index_single(
         doc = _build_xlsx_doc(source_path, on_status)
     elif doc_type == "pptx":
         doc = _build_pptx_doc(source_path, on_status)
+    elif doc_type == "xmind":
+        doc = _build_xmind_doc(source_path, on_status)
     else:
         doc = _build_pdf_doc(source_path, on_status)
 
@@ -447,7 +470,7 @@ def index_managed_content(
     on_status: StatusFn = lambda _s: None,
 ) -> IndexResult:
     """Build a versioned candidate without deriving identity from its folder."""
-    if doc_type not in ("pdf", "markdown", "docx", "xlsx", "pptx"):
+    if doc_type not in ("pdf", "markdown", "docx", "xlsx", "pptx", "xmind"):
         raise ValueError(f"unsupported managed doc_type: {doc_type!r}")
     if not source_path.is_file() or source_path.is_symlink():
         raise ValueError("managed_source_unavailable")
@@ -464,6 +487,8 @@ def index_managed_content(
         doc = _build_pptx_doc(
             source_path, on_status, parsed_dir=parsed_dir, write_preview=True
         )
+    elif doc_type == "xmind":
+        doc = _build_xmind_doc(source_path, on_status, parsed_dir=parsed_dir)
     else:
         doc = _build_pdf_doc(
             source_path,
