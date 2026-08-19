@@ -119,15 +119,15 @@ test("资料管理视频转录稿 accepted golden", async ({ page }) => {
   await page.getByRole("button", { name: `更多“${title}”的操作` }).filter({ visible: true }).click();
   await expect(page.getByRole("menuitem", { name: "编辑转录稿" })).toHaveAttribute(
     "href",
-    "/admin/media?media_id=media-library-1&workbench=1&action=edit-current",
+    "/admin/content?view=transcription&media_id=media-library-1&workbench=1&action=edit-current",
   );
   await expect(page.getByRole("menuitem", { name: "替换视频" })).toHaveAttribute(
     "href",
-    "/admin/media?media_id=media-library-1&action=replace",
+    "/admin/content?view=transcription&media_id=media-library-1&action=replace",
   );
-  await expect(page.getByRole("menuitem", { name: "进入视频管理" })).toHaveAttribute(
+  await expect(page.getByRole("menuitem", { name: "进入转录任务" })).toHaveAttribute(
     "href",
-    "/admin/media?media_id=media-library-1&workbench=1",
+    "/admin/content?view=transcription&media_id=media-library-1&workbench=1",
   );
   await page.keyboard.press("Escape");
 

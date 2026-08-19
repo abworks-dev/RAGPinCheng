@@ -788,7 +788,7 @@ test.describe("资料管理", () => {
     await more.click();
     const replacementLink = page.getByRole("menu", { name: `“${title}”的更多操作` }).getByRole("menuitem", { name: "替换视频" });
     await replacementLink.click();
-    await expect(page).toHaveURL(/\/admin\/media\?media_id=media-library-1&action=replace$/);
+    await expect(page).toHaveURL(/\/admin\/content\?view=transcription&media_id=media-library-1&action=replace$/);
     const replacementDialog = page.getByRole("dialog", { name: "替换视频" });
     await expect(replacementDialog).toContainText(title);
     await expect(replacementDialog).toContainText("bim-project-delivery-training-long-responsive-name.mp4");
@@ -800,10 +800,11 @@ test.describe("资料管理", () => {
   });
 });
 
-test.describe("视频管理", () => {
+test.describe("转录任务", () => {
   test("media records keep duplicate submissions and recovery actions readable", async ({ page }) => {
-    await openTab(page, "视频管理");
-    await expect(page.getByRole("heading", { name: "视频管理" })).toBeVisible();
+    await openTab(page, "资料管理");
+    await page.getByRole("tab", { name: "转录任务", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "转录任务" })).toBeVisible();
     await expect(page.getByText("同名记录 2 条").first()).toBeVisible();
     await expect(page.getByRole("button", { name: "全部 3" })).toBeVisible();
     await expect(page.getByRole("button", { name: "失败 2" })).toBeVisible();
