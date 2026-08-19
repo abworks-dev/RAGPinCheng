@@ -70,7 +70,10 @@ from .routes_transcription import build_transcription_service
 from .transcription_schemes import get_scheme, resolve_scheme_runtime
 from .routes_media import safe_join, stream_media_file
 from .media_storage import MediaStorageError, resolve_media_path
-from .media_transcript_catalog import DEFAULT_MEDIA_TRANSCRIPT_CATEGORY_ID
+from .media_transcript_catalog import (
+    DEFAULT_MEDIA_TRANSCRIPT_CATEGORY_ID,
+    ensure_media_transcript_catalog_item,
+)
 from .media_upload_conflicts import (
     find_media_upload_conflicts,
     normalize_media_title,
@@ -1389,6 +1392,7 @@ async def upload_media(
     scheme_id: Annotated[str | None, Form()] = None,
     category_id: Annotated[str | None, Form()] = None,
     original_filename: Annotated[str | None, Form()] = None,
+    defer_transcription: Annotated[bool, Form()] = False,
 ) -> MediaAssetDTO:
     """Upload one MP4 with either a manual transcript or a trusted Profile."""
     import uuid
@@ -1401,8 +1405,11 @@ async def upload_media(
     except ValueError:
         raise HTTPException(status_code=400, detail="视频标题或源文件名不合法")
     automatic = transcript is None
+    deferred = automatic and defer_transcription
 
-    if automatic:
+    transcript_filename = None
+    transcript_path = None
+    if automatic and not deferred:
         # Legacy clients sent a seeded Scheme ID in profile_id. Resolve it as a
         # Scheme while keeping custom Scheme UUIDs immediately usable.
         if scheme_id is None and profile_id is not None and get_scheme(conn, profile_id):
@@ -1433,7 +1440,7 @@ async def upload_media(
     if not video_name or Path(video_name).suffix.lower() not in _ALLOWED_VIDEO_EXTS:
         raise HTTPException(status_code=400, detail="只支持 .mp4 视频文件")
 
-    if automatic:
+    if automatic and not deferred:
         if not profile_id or request_idempotency_key is None:
             raise HTTPException(status_code=400, detail="自动转录必须提供 scheme_id/profile_id 和幂等键")
         try:
@@ -1441,7 +1448,7 @@ async def upload_media(
         except ContractValidationError:
             raise HTTPException(status_code=400, detail="自动转录幂等键不合法")
         transcript_bytes = None
-    else:
+    elif not automatic:
         if profile_id is not None or scheme_id is not None or request_idempotency_key is not None:
             raise HTTPException(status_code=400, detail="人工转录不得同时指定自动转录参数")
         if not transcript_name.lower().endswith(".md"):
@@ -1482,14 +1489,14 @@ async def upload_media(
                 detail={"code": "media_upload_conflict_changed", "message": "待替换资料已变化，请重新检查。"},
             )
 
-    if not automatic:
+    if deferred or not automatic:
         validate_current_conflicts()
 
     # A repeated automatic request must resolve before creating another media row
     # or writing another permanent media directory.  The uploaded bytes are read
     # only to verify the request identity bound to the existing key.
     MAX_VIDEO_BYTES = MAX_VIDEO_UPLOAD_MB * 1024 * 1024
-    if automatic:
+    if automatic and not deferred:
         existing = conn.execute(
             """
             SELECT j.id AS job_id,j.profile_id,j.scheme_id,j.created_by,
@@ -1649,7 +1656,7 @@ async def upload_media(
         _cleanup_media_upload(media_dir, video_path=video_path)
         raise HTTPException(status_code=400, detail="视频文件不能为空")
 
-    if automatic:
+    if automatic and not deferred:
         try:
             await asyncio.to_thread(
                 build_transcription_service().preparer.prepare,
@@ -1683,7 +1690,7 @@ async def upload_media(
             ) from exc
         transcript_filename = None
         transcript_path = None
-    else:
+    elif not automatic:
         safe_title = re.sub(r"[\\/:*?\"<>|]", "_", clean_title)[:60]
         transcript_filename = f"{safe_title}__{media_id[:8]}.md"
         transcript_dir = DOCS_DIR / TRANSCRIPT_CATEGORY
@@ -1731,6 +1738,8 @@ async def upload_media(
                 None if replacement_source_media_id is not None else normalize_content_filename(video_name)[1],
             ),
         )
+        if deferred:
+            ensure_media_transcript_catalog_item(conn, media_id=media_id, now=now)
         conn.commit()
     except sqlite3.IntegrityError:
         conn.rollback()
@@ -1771,7 +1780,7 @@ async def upload_media(
             raise HTTPException(status_code=409, detail="无法创建替换任务，请刷新后重试")
 
     transcription_job_id = None
-    if automatic:
+    if automatic and not deferred:
         try:
             transcription_job = build_transcription_service().create_pending_job(
                 media_id=media_id,
@@ -1820,7 +1829,7 @@ async def upload_media(
                     "retryable": True,
                 },
             )
-    else:
+    elif not automatic:
         try:
             job_id = create_job(
                 user_id=admin.id,

@@ -10,9 +10,9 @@
 
 ## 决策
 
-资料管理是新资料的唯一用户可见上传入口。系统管理员可以在普通文件或文件夹批次中加入 MP4，并为批次中的视频选择转录方案；普通账号继续只上传文档。上传任务明细记录每项是文档还是视频，以及视频的 `media_id`、`transcription_job_id` 和失败码。
+资料管理是新资料的唯一用户可见上传入口。系统管理员可以在普通文件或文件夹批次中加入 MP4；上传阶段不选择方案，视频先以“待转录”状态写入资料库目录壳。管理员随后可对单项、选中视频、最近上传批次或目录递归范围选择转录方案并启动任务；普通账号继续只上传文档。上传任务明细记录每项是文档还是视频，以及视频的 `media_id`、`transcription_job_id` 和失败码。
 
-统一只发生在选择、目录预检、冲突处理、传输进度和批次追踪层。普通文档继续创建 `content_objects`、`content_items` 和 `content_versions`，发布后进入 `content_index_jobs`；视频只创建 `media_assets` 和 `transcription_jobs`，转录稿审核发布后进入 `transcript_publication_index_jobs` 和 `media_transcript_heads`。视频不会创建普通资料版本或普通索引任务，正式发布后才登记 `content_items(media_transcript)` 目录壳。
+统一只发生在选择、目录预检、冲突处理、传输进度和批次追踪层。普通文档继续创建 `content_objects`、`content_items` 和 `content_versions`，发布后进入 `content_index_jobs`；视频上传先创建 `media_assets` 和 `content_items(media_transcript)` 目录壳，管理员选择方案后才创建 `transcription_jobs`，转录稿审核发布后进入 `transcript_publication_index_jobs` 和 `media_transcript_heads`。视频不会创建普通资料版本或普通索引任务，待转录状态也能直接在资料列表中管理。
 
 “转录任务”作为资料管理的系统管理员子页签，展示视频、转录、审核、发布和专属索引阶段。后端为每条媒体记录返回可用动作和禁用原因，前端据此控制取消、重试、替换、归档和失败记录删除。旧 `/admin/media` 只作为保留查询参数的兼容重定向，不再提供独立上传入口。
 
@@ -25,7 +25,7 @@
 ## 影响
 
 - `upload_batch_entries` 以添加式 Schema 31 保存视频关联；旧行默认是文档，不需要数据回填或索引 Reset。
-- 混合批次按文件独立提交，允许部分成功；视频落盘和转录任务创建仍复用既有媒体接口的幂等与清理逻辑。
+- 混合批次按文件独立提交，允许部分成功；视频落盘复用既有媒体接口，转录任务延迟到管理员选择方案后创建，批量预检逐项返回可启动或跳过原因。
 - 文档与视频分别保留大小上限、冲突规则、状态机、索引队列和正式 head；前端不能用文档状态推断视频动作。
 - 首期 MP4 选择、上传和转录任务操作由后端强制系统管理员权限，前端显隐只是交互层保障。
 

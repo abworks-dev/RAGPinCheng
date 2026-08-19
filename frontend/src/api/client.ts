@@ -54,6 +54,8 @@ import type {
   ManagedUploadTaskList,
   MediaTranscript,
   TranscriptionJob,
+  BulkTranscriptionPreflight,
+  BulkTranscriptionResult,
   TranscriptionProfile,
   TranscriptionBase,
   TranscriptionScheme,
@@ -1067,6 +1069,31 @@ export const api = {
     jsonFetch<TranscriptionJob[]>(
       `/api/admin/transcription/jobs?latest_per_media=${latestPerMedia}&limit=${limit}`,
     ),
+  startMediaTranscription: (mediaId: string, schemeId: string, requestIdempotencyKey: string) =>
+    jsonFetch<TranscriptionJob>(`/api/admin/transcription/media/${encodeURIComponent(mediaId)}/start`, {
+      method: "POST",
+      body: JSON.stringify({ scheme_id: schemeId, request_idempotency_key: requestIdempotencyKey }),
+    }),
+  preflightBulkStartTranscription: (body: {
+    scheme_id: string;
+    request_idempotency_key: string;
+    media_ids?: string[];
+    upload_batch_id?: string;
+    category_id?: string;
+    recursive?: boolean;
+  }) => jsonFetch<BulkTranscriptionPreflight>("/api/admin/transcription/bulk-start/preflight", {
+    method: "POST", body: JSON.stringify(body),
+  }),
+  bulkStartTranscription: (body: {
+    scheme_id: string;
+    request_idempotency_key: string;
+    media_ids?: string[];
+    upload_batch_id?: string;
+    category_id?: string;
+    recursive?: boolean;
+  }) => jsonFetch<BulkTranscriptionResult>("/api/admin/transcription/bulk-start", {
+    method: "POST", body: JSON.stringify(body),
+  }),
   getTranscriptionJob: (jobId: string) =>
     jsonFetch<TranscriptionJob>(`/api/admin/transcription/jobs/${jobId}`),
   cancelTranscriptionJob: (jobId: string) =>

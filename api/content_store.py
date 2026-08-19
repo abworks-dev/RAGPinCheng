@@ -1732,7 +1732,11 @@ _CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
                   AS reclassification_job_id,
                 (SELECT r.status FROM content_reclassification_jobs r
                  WHERE r.item_id=i.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1)
-                  AS reclassification_status
+                 AS reclassification_status,
+                NULL AS media_status,NULL AS transcription_job_id,
+                NULL AS transcription_job_status,NULL AS transcription_stage,
+                NULL AS transcription_failure_classification,
+                NULL AS review_status,NULL AS publication_status
         FROM content_items i
         JOIN category_nodes c ON c.id=i.category_id
         JOIN paths ON paths.id=i.category_id
@@ -1754,22 +1758,53 @@ _CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
         )
         LEFT JOIN users archive_user ON archive_user.id=archive_event.actor_user_id
         WHERE i.content_kind='document'
+    ), latest_media_versions AS (
+        SELECT v.* FROM transcript_versions v
+        WHERE v.id=COALESCE(
+            (SELECT h.current_version_id FROM media_transcript_heads h
+             WHERE h.media_id=v.media_id),
+            (SELECT v2.id FROM transcript_versions v2
+             WHERE v2.media_id=v.media_id
+             ORDER BY v2.created_at DESC,v2.id DESC LIMIT 1)
+        )
+    ), latest_media_jobs AS (
+        SELECT j.* FROM transcription_jobs j
+        WHERE j.attempt_number=(SELECT max(j2.attempt_number)
+                                FROM transcription_jobs j2 WHERE j2.media_id=j.media_id)
     ), media_rows AS (
         SELECT i.id AS item_id,i.title,i.content_kind,i.category_id,i.media_id,
                i.created_at,i.updated_at,c.category_key,c.display_code,c.display_name,
                paths.full_path AS category_path,tv.id AS version_id,
-               (SELECT count(*) FROM transcript_versions numbered
+               COALESCE((SELECT count(*) FROM transcript_versions numbered
                 WHERE numbered.media_id=tv.media_id AND (
                     numbered.created_at<tv.created_at OR
                     (numbered.created_at=tv.created_at AND numbered.id<=tv.id)
-                )) AS version_number,
-               m.original_filename,'transcript' AS doc_type,'published' AS lifecycle_status,
+                )),0) AS version_number,
+               m.original_filename,'video' AS doc_type,
+               CASE
+                 WHEN m.status='failed' THEN 'transcription_failed'
+                 WHEN mj.status IN ('pending','running') THEN 'transcribing'
+                 WHEN mj.status='failed' THEN 'transcription_failed'
+                 WHEN tv.review_status='awaiting_review' THEN 'awaiting_review'
+                 WHEN tv.review_status='review_rejected' THEN 'rejected'
+                 WHEN tv.publication_status='publishing' THEN 'publishing'
+                 WHEN tv.publication_status='publication_failed' THEN 'publication_failed'
+                 WHEN h.current_version_id=tv.id AND tv.publication_status='published' THEN 'published'
+                 WHEN tv.review_status='review_approved' THEN 'approved'
+                 WHEN tv.id IS NOT NULL THEN 'transcript_ready'
+                 ELSE 'awaiting_transcription'
+               END AS lifecycle_status,
                NULL AS object_sha256,'transcription' AS source_origin,
-               NULL AS source_batch_id,m.original_filename AS source_rel_path,
+               (SELECT e.batch_id FROM upload_batch_entries e
+                WHERE e.media_id=m.media_id ORDER BY e.created_at DESC,e.sequence DESC LIMIT 1) AS source_batch_id,
+               COALESCE((SELECT e.relative_path FROM upload_batch_entries e
+                         WHERE e.media_id=m.media_id ORDER BY e.created_at DESC,e.sequence DESC LIMIT 1),m.original_filename) AS source_rel_path,
                h.current_version_id,j.status AS latest_publication_status,
                j.error_code AS latest_publication_error_code,
-               NULL AS latest_reviewed_by_name,NULL AS latest_reviewed_at,
-               NULL AS latest_review_decision,NULL AS latest_review_note,
+               review_user.real_name AS latest_reviewed_by_name,tv.reviewed_at AS latest_reviewed_at,
+               CASE WHEN tv.review_status='review_approved' THEN 'approved'
+                    WHEN tv.review_status='review_rejected' THEN 'rejected' ELSE NULL END AS latest_review_decision,
+               tv.review_note AS latest_review_note,
                (SELECT count(*) FROM transcript_publication_index_jobs attempts
                 WHERE attempts.transcript_version_id=tv.id) AS publication_attempt_count,
                i.archived_at,archive_user.real_name AS archived_by_name,
@@ -1781,19 +1816,24 @@ _CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
                m.file_size AS media_file_size,
                EXISTS(
                    SELECT 1 FROM transcript_versions pending
-                   WHERE pending.media_id=tv.media_id AND pending.id<>tv.id
+                   WHERE pending.media_id=m.media_id AND (tv.id IS NULL OR pending.id<>tv.id)
                      AND pending.publication_status<>'published'
-                     AND (pending.created_at>tv.created_at OR
+                     AND (tv.id IS NULL OR pending.created_at>tv.created_at OR
                           (pending.created_at=tv.created_at AND pending.id>tv.id))
                 ) AS has_pending_revision,
-                NULL AS reclassification_job_id,NULL AS reclassification_status
+                NULL AS reclassification_job_id,NULL AS reclassification_status,
+                m.status AS media_status,mj.id AS transcription_job_id,
+                mj.status AS transcription_job_status,mj.stage AS transcription_stage,
+                mj.failure_classification AS transcription_failure_classification,
+                tv.review_status,tv.publication_status
         FROM content_items i
         JOIN category_nodes c ON c.id=i.category_id
         JOIN paths ON paths.id=i.category_id
         JOIN media_assets m ON m.media_id=i.media_id
-        JOIN media_transcript_heads h ON h.media_id=m.media_id
-        JOIN transcript_versions tv
-          ON tv.id=h.current_version_id AND tv.media_id=m.media_id
+        LEFT JOIN media_transcript_heads h ON h.media_id=m.media_id
+        LEFT JOIN latest_media_versions tv ON tv.media_id=m.media_id
+        LEFT JOIN latest_media_jobs mj ON mj.media_id=m.media_id
+        LEFT JOIN users review_user ON review_user.id=tv.reviewed_by
         LEFT JOIN transcript_publication_index_jobs j ON j.id=(
             SELECT j2.id FROM transcript_publication_index_jobs j2
             WHERE j2.transcript_version_id=tv.id
@@ -1805,7 +1845,8 @@ _CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
             ORDER BY ae.created_at DESC,ae.id DESC LIMIT 1
         )
         LEFT JOIN users archive_user ON archive_user.id=archive_event.actor_user_id
-        WHERE i.content_kind='media_transcript' AND tv.publication_status='published'
+        WHERE i.content_kind='media_transcript'
+          AND (m.status<>'archived' OR i.archived_at IS NOT NULL)
     ), library_rows AS (
         SELECT * FROM document_rows
         UNION ALL

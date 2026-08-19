@@ -1,4 +1,4 @@
-import { Captions, FileCode2, FileSpreadsheet, FileText, FileType2, Folder, Network, Presentation } from "lucide-react";
+import { Captions, FileCode2, FileSpreadsheet, FileText, FileType2, Film, Folder, Network, Presentation } from "lucide-react";
 
 export function ManagedItemType({ docType, folder = false, compact = false }: { docType?: string | null; folder?: boolean; compact?: boolean }) {
   const widthClass = compact ? "w-16" : "w-20";
@@ -14,6 +14,7 @@ export function ManagedItemType({ docType, folder = false, compact = false }: { 
     xmind: ["XMind", Network, "text-primary"],
     markdown: ["Markdown", FileCode2, "text-foreground"],
     transcript: ["视频转录稿", Captions, "text-primary"],
+    video: ["视频", Film, "text-primary"],
   } as const)[docType || ""] || (["其他", FileText, "text-muted-foreground"] as const);
   const [label, Icon, color] = definition;
 

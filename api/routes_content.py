@@ -1358,15 +1358,6 @@ async def upload_managed_documents(
                     reason=reason, entry_kind="video", failure_code="conflict_skipped",
                 )
                 continue
-            if not video_scheme_id:
-                reason = "上传视频前请选择转录方案"
-                entries.append(ManagedUploadEntryDTO(filename=filename, kind="video", status="skipped", reason=reason, reason_code="video_scheme_required"))
-                record_upload_batch_entry(
-                    conn, batch_id=batch_id, sequence=index + 1, filename=filename,
-                    relative_path=relative_path, size_bytes=size_bytes, status="skipped",
-                    reason=reason, entry_kind="video", failure_code="video_scheme_required",
-                )
-                continue
             video_limit = min(
                 settings.upload_max_file_mb * 1024 * 1024,
                 MAX_VIDEO_UPLOAD_MB * 1024 * 1024,
@@ -1433,6 +1424,7 @@ async def upload_managed_documents(
                     scheme_id=video_scheme_id,
                     category_id=upload_category_id,
                     original_filename=final_filename,
+                    defer_transcription=True,
                 )
                 source_parts = relative_path.split("/") if relative_path else [final_filename]
                 source_parts[-1] = final_filename
@@ -1809,6 +1801,9 @@ def _content_item_dto(
         elif row["doc_type"] != "xmind" and row["lifecycle_status"] in {"published", "superseded"}:
             preview_status = "missing"
 
+    media_version_id = row["version_id"] or (
+        f"media-pending-{row['media_id']}" if row["media_id"] else None
+    )
     return ManagedContentItemDTO(
         item_id=row["item_id"],
         title=row["title"],
@@ -1820,8 +1815,8 @@ def _content_item_dto(
         media_id=row["media_id"],
         preview_parent_id=preview_parent_id,
         preview_status=preview_status,
-        version_id=row["version_id"],
-        version_number=row["version_number"],
+        version_id=media_version_id,
+        version_number=int(row["version_number"] or 0),
         original_filename=row["original_filename"],
         doc_type=row["doc_type"],
         lifecycle_status=row["lifecycle_status"],
@@ -1857,6 +1852,13 @@ def _content_item_dto(
         reclassification_status=row["reclassification_status"]
         if "reclassification_status" in row.keys()
         else None,
+        media_status=row["media_status"] if "media_status" in row.keys() else None,
+        transcription_job_id=row["transcription_job_id"] if "transcription_job_id" in row.keys() else None,
+        transcription_job_status=row["transcription_job_status"] if "transcription_job_status" in row.keys() else None,
+        transcription_stage=row["transcription_stage"] if "transcription_stage" in row.keys() else None,
+        transcription_failure_classification=row["transcription_failure_classification"] if "transcription_failure_classification" in row.keys() else None,
+        review_status=row["review_status"] if "review_status" in row.keys() else None,
+        publication_status=row["publication_status"] if "publication_status" in row.keys() else None,
     )
 
 

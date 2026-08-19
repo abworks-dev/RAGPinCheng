@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现。普通文档经过上传、提交、确认和发布后进入检索；系统管理员上传的 MP4 从同一资料上传入口分流到独立转录链路，正式发布后的转录稿以视频条目出现在受管目录中。资料管理页按当前受控目录展示两类资料，支持上传、拖放确认、新建和删除目录、搜索、状态/来源/类型筛选、状态驱动的单项流程操作、批量流程操作，以及与资料类型匹配的单项操作。“上传任务”集中展示上传历史和当前浏览器内的传输进度；“转录任务”作为资料管理的管理员子页签承载视频后续处理。
+已实现。普通文档经过上传、提交、确认和发布后进入检索；系统管理员上传的 MP4 从同一资料上传入口进入资料库，初始状态为“待转录”，不会在上传时创建转录任务。管理员在资料列表单项、当前选择、最近上传批次或当前目录及全部子目录范围内选择转录方案后，视频才进入独立转录链路；正式发布后的转录稿继续绑定同一视频条目。资料管理页按当前受控目录展示两类资料，支持上传、拖放确认、新建和删除目录、搜索、状态/来源/类型筛选、状态驱动的单项流程操作、批量流程操作，以及与资料类型匹配的单项操作。“上传任务”集中展示上传历史和当前浏览器内的传输进度；“转录任务”作为资料管理的管理员子页签承载视频后续处理。
 
 ## 入口与调用链
 
@@ -47,7 +47,7 @@ multipart 上传 -> upload_batches + upload_batch_entries
 - 上传前调用 `POST /api/admin/content/uploads/preflight` 检查文件名、大小写规范化后的同名资料和文件夹根目录冲突。冲突保留在当前处理窗口，不自动跳转上传任务页；无冲突文件会与处理后的文件一起提交，任务页继续提供历史记录和逐文件失败明细。
 - 文件冲突默认选择跳过，也可另存为新资料（默认建议追加 ` (1)` 等后缀），或在已有资料没有活动发布/整理任务时作为其新草稿版本。文件夹根目录冲突默认不合并，支持合并到现有目录或整体重命名后重新预检；重命名不会改变文件夹内的相对层级。
 - 批量上传按文件独立处理：跳过或处理冲突不会阻断同批无冲突文件；全部文件被跳过时批次标记为失败并保留原因。服务端上传阶段会再次校验冲突和版本，预检后发生变化的资料会跳过并返回 `content_upload_conflict_changed`。
-- 系统管理员的文件选择、拖放和文件夹上传额外接受 MP4；普通账号的支持格式文案、文件选择和服务端接口均不开放 MP4。包含视频的批次必须选择一个当前可用的转录方案，并按原文件序号提交稳定幂等键；同一次部分失败重试沿用原键，空的文档位置仍保留以防 multipart 序号错位。
+- 系统管理员的文件选择、拖放和文件夹上传额外接受 MP4；普通账号的支持格式文案、文件选择和服务端接口均不开放 MP4。视频上传不再要求上传时选择方案，成功后在资料列表显示为“待转录”；上传批次仍记录视频的稳定幂等键和文件明细。
 - Schema 31 为 `upload_batch_entries` 增加 `entry_kind`、`media_id`、`transcription_job_id` 和 `failure_code`。上传任务详情因此可区分普通文档和视频，并关联各自的后续对象；旧记录通过默认值继续视为普通文档。
 
 统一入口只统一选择、目录预检、冲突处理、进度和上传任务记录，不合并两条领域流水线：
@@ -56,12 +56,13 @@ multipart 上传 -> upload_batches + upload_batch_entries
 普通文件 -> content_objects + content_items + content_versions
 -> 提交确认 -> content_index_jobs -> content_item_heads
 
-MP4 -> media_assets + transcription_jobs
+MP4 -> media_assets + media_transcript 目录壳（待转录）
+-> 管理员选择方案 -> transcription_jobs
 -> transcript_versions -> transcript_publication_index_jobs -> media_transcript_heads
 -> content_items(media_transcript) 目录壳
 ```
 
-视频上传不会创建普通 `content_versions`、`content_index_jobs` 或 `content_item_heads`；只有转录稿正式发布后才登记目录壳并进入资料列表。混合批次不是跨文件事务：每个文件独立提交并在上传任务中保留结果，已成功文件不会因同批后续失败回滚。
+视频上传不会创建普通 `content_versions`、`content_index_jobs` 或 `content_item_heads`，但会立即登记带有 `media_id` 的资料库目录壳，因此“待转录”视频不会丢失在列表外。选择方案后才创建 `transcription_jobs`；转录失败、取消和重试都继续更新同一视频条目。混合批次不是跨文件事务：每个文件独立提交并在上传任务中保留结果，已成功文件不会因同批后续失败回滚。
 
 ```text
 上传文件 -> content_objects + content_items + content_versions
@@ -79,7 +80,7 @@ media_assets + transcript_versions
 
 只读外部媒体源使用独立虚拟目录树，不直接创建受管目录壳。共享视频完成现有审核、索引和发布事务后才作为 `media_transcript` 出现在本资料库；源扫描、缺失和不可达状态见 [外部媒体源](external-media-sources.md)。
 
-Schema 16 为历史上已有正式 head 的未归档视频补建目录壳。目录壳只保存 `media_id`、标题和 `category_id`，不创建 `content_versions`、`content_publications`、`content_index_jobs`、`content_item_heads` 或对象副本，因此不会重复文件、发布状态、索引任务或 Qdrant points。新发布的视频转录稿在正式 head 切换事务内同步登记目录壳，失败时整笔发布回滚。
+Schema 16 为历史上已有正式 head 的未归档视频补建目录壳。目录壳只保存 `media_id`、标题和 `category_id`，不创建 `content_versions`、`content_publications`、`content_index_jobs`、`content_item_heads` 或对象副本，因此不会重复文件、发布状态、索引任务或 Qdrant points。现行统一上传在视频落盘后立即登记同类目录壳；正式 head 切换时更新同一条目录壳，失败时整笔事务回滚。
 
 Schema 19 增加 `media_metadata_revisions` 和 `media_replacements`。媒体标题/源文件名修订复用当前正式 Markdown 创建待审核候选；替换视频作为新的媒体、转录和索引候选处理。两类候选都在审核、索引和发布成功前保留旧 `media_transcript_heads`、目录壳和检索可见内容；最终激活在一个 SQLite 事务内切换 head 与目录关联，失败整笔回滚。旧视频只在替换成功后标记归档，物理文件不在该事务中删除。
 
@@ -98,6 +99,7 @@ Schema 26 为媒体记录增加目标归档目录和规范化标题/源文件名
 - 普通资料上传、文件夹上传和版本更新支持 `.xmind`。服务端在创建版本前校验 ZIP 路径、条目数、解压总量、压缩比、主题数、主题深度和文本长度，并兼容现代 `content.json` 与旧版 `content.xml`；不满足限制的文件按逐项失败返回且不创建资料版本。XMind 发布时按画布、中心主题和子主题转换为 Markdown 后复用普通文档 Parent/Child 索引流程，不修改已有索引。
 - XMind 预览使用版本级 `item.view` 接口读取受管对象，返回受限的画布与主题树；资料列表、详情和审核入口均复用 `ResourcePreviewShell`，与 PDF、Office 和视频预览保持同一抽屉动效、焦点恢复和移动端全屏行为。主题树由本地只读思维导图画布渲染为中心主题、双向分支和连线，支持画布切换、平移、缩放与适配视图；原始资料不会发送到第三方渲染服务。预览不依赖发布后的 `parent_id`，因此草稿、待确认和已发布版本均可查看。
 - PPTX 预览生成失败仍不阻断资料索引与发布。PDF 预览窗口显示中文失败原因；系统概览实际探测 LibreOffice `/health`，区分“运行正常”“服务异常”和“已停用”。
+- 视频条目按独立生命周期展示“待转录、转录中、转录失败、转录稿待审核、审核通过、发布中、发布失败、已发布”等状态。待转录或可恢复失败状态显示“开始转录”，转录中只允许进入详情并由转录任务页取消，转录稿和发布状态沿用转录任务页的审核、发布和重试边界；播放、下载在正式 head 发布前保持禁用。资料列表支持选中视频批量选择方案，也支持“最近上传批次”和“当前目录及全部子目录”批量预检，预检逐项显示可启动与跳过原因，部分成功后保留失败项供重试。
 - 视频转录稿固定展示详情、播放、下载和移动目录；下载窗口可选择原始 MP4、当前正式 Markdown 或两者的 ZIP。系统管理员可从“更多”菜单直接进入“转录任务”编辑当前正式转录稿、创建媒体信息修订或替换视频；普通发布负责人不会看到可进入管理员转录任务的伪入口。已正式发布的视频可先移入共享回收站，再由具备 `trash.purge` 权限的管理员永久删除；视频条目不显示普通文档的状态流程按钮。
 - 编辑媒体信息不会立即修改正式条目。候选稿必须重新审核、索引并发布，成功后标题、源文件名、目录壳和正式 head 同时生效；审核拒绝或索引/事务失败时旧名称和旧 head 保持不变。
 - 替换视频必须从“转录任务”选择新的 MP4 和当前可用的服务端转录方案。重复请求以幂等键同时绑定上传者、标题、文件名、文件内容、方案和源视频；转录或发布失败不会归档旧视频。候选正式发布后，原目录壳原地关联新媒体并保留目录位置。
@@ -111,6 +113,9 @@ Schema 26 为媒体记录增加目标归档目录和规范化标题/源文件名
 
 - `POST /api/admin/content/uploads/preflight`
 - `POST /api/admin/content/uploads`（普通资料与管理员 MP4 的统一上传入口）
+- `POST /api/admin/transcription/media/{media_id}/start`
+- `POST /api/admin/transcription/bulk-start/preflight`
+- `POST /api/admin/transcription/bulk-start`（支持 `media_ids`、`upload_batch_id`、`category_id + recursive` 三种范围）
 - `POST /api/admin/content/bulk-move`
 - `POST /api/admin/content/bulk-archive`
 - `POST /api/admin/content/bulk-restore`

@@ -5,7 +5,7 @@
 
 ## 用户可观察能力
 
-教学视频转录稿可以被索引和检索，回答能够显示带时间戳的视频引用；点击引用定位到来源卡片，引用悬浮卡和来源详情中的独立播放按钮可打开视频播放器并跳到引用时间点。系统管理员从资料管理的统一上传入口选择 MP4 和转录方案，视频随后进入同页的“转录任务”子页签；该页继续提供转写工作台、取消/恢复、审核、发布、替换、归档和失败记录处理。
+教学视频转录稿可以被索引和检索，回答能够显示带时间戳的视频引用；点击引用定位到来源卡片，引用悬浮卡和来源详情中的独立播放按钮可打开视频播放器并跳到引用时间点。系统管理员从资料管理的统一上传入口选择 MP4；视频立即以“待转录”状态进入资料列表，不在上传阶段创建任务。管理员可对单个视频、选中视频、最近上传批次或当前目录及全部子目录批量选择转录方案并启动任务，视频随后进入同页的“转录任务”子页签；该页继续提供转写工作台、取消/恢复、审核、发布、替换、归档和失败记录处理。
 
 系统管理员可在 `/admin/asr` 的“转录配置”页比较三个服务器固定的 WhisperX v2 分段 Profile，查看固定工程词、Prompt 资产和应用/服务配置哈希，并提交只写审计记录的发布申请。页面不接受自由 Prompt、模型路径或任意解码参数；发布申请不持有部署凭据，也不直接触发生产 workflow。
 
@@ -30,16 +30,16 @@ Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审�
 - 播放器下方提供交互式转录稿，按播放进度高亮当前分段并自动跟随；点击分段可跳转，用户主动滚动时暂停跟随并可一键回到当前进度；
 - 资料管理页的视频转写行在存在唯一 `media_id` 时复用同一播放器抽屉，从视频起点打开上方视频与下方转写稿；
 - 正式 head 切换成功时在同一 SQLite 事务中创建或更新视频目录壳；历史正式视频由 Schema 16 幂等回填到 `05 培训资料`，之后可由具备发布权限的人员只调整资料库目录；
-- 资料库只列出未归档媒体的当前正式 head。较新的待审核或待发布稿不会替换旧条目，只显示待处理提醒；媒体归档或正式 head 移除后条目从资料库和分类计数中消失；
+- 资料库列出未归档媒体目录壳；没有转录版本时显示“待转录”，有运行任务时显示“转录中”，失败时显示“转录失败”。有正式 head 后仍只展示当前正式版本；较新的待审核或待发布稿不会替换旧条目，只显示待处理提醒；媒体归档后条目从资料库和分类计数中消失；
 - 普通登录用户可通过只读接口读取当前已发布转录版本；无版本头的既有人工上传媒体兼容读取其已登记、受控且完成索引的人工稿；
 - 具备 `media_id` 的引用在悬浮卡中显示独立播放按钮，并跳转对应时间点；
 - 来源卡片显示”从 HH:MM:SS 播放”按钮；
 - 旧会话和未关联转录正常降级（无播放按钮，不报错）；
-- 资料管理的文件选择、拖放和文件夹上传对系统管理员接受 MP4；混合批次复用目录、同名冲突、上传进度与任务明细流程，并要求选择服务端可用转录方案；普通账号不会获得 MP4 入口，后端也返回 403；
-- 新视频上传成功后只创建 `media_assets` 和 `transcription_jobs`，不会创建普通 `content_versions` 或 `content_index_jobs`；视频与转录稿的绑定从上传开始保持 `media_id` / `transcription_job_id` 关联，正式发布后才产生资料库目录壳；
+- 资料管理的文件选择、拖放和文件夹上传对系统管理员接受 MP4；混合批次复用目录、同名冲突、上传进度与任务明细流程，上传时不要求转录方案；普通账号不会获得 MP4 入口，后端也返回 403；
+- 新视频上传成功后创建 `media_assets` 和 `content_items(content_kind=media_transcript)` 目录壳，状态为 `awaiting_transcription`，不会创建 `transcription_jobs`、普通 `content_versions` 或 `content_index_jobs`；管理员选择方案后才创建 `transcription_jobs`，视频与后续转录稿始终通过 `media_id` 绑定；
 - “转录任务”位于 `/admin/content?view=transcription`，复用原媒体工作台但隐藏旧上传向导；旧 `/admin/media` 保留为带查询参数的兼容重定向；
-- 旧式人工 MP4+Markdown API 保持兼容，但统一上传入口首期只创建自动转录任务；自动模式只提交服务端准入的转录方案，experimental Profile 强制审核策略不由前端放宽；
-- 媒体列表分别展示媒体、转录、审核、发布和索引状态，并保留快捷筛选与转写版本工作台。
+- 旧式人工 MP4+Markdown API 保持兼容；统一上传入口先创建待转录媒体目录壳，只有管理员在资料列表选择方案后才创建自动转录任务，experimental Profile 强制审核策略不由前端放宽；
+- 媒体列表分别展示媒体、转录、审核、发布和索引状态，并保留快捷筛选与转写版本工作台；资料库视频状态投影为“待转录、转录中、转录失败、转录稿待审核、审核通过、发布中、发布失败、已发布”，播放和下载在正式 head 产生前禁用。
 - 转写工作台支持桌面双栏 Markdown 编辑/渲染预览，移动端使用“编辑/预览”切换；关闭、收起或切换版本前会保护未保存内容；不启用 raw HTML、自动保存或 WYSIWYG。
 - 管理员在转写工作台展开“校对内容”后可同时查看视频和指定转录版本的同步时间轴；点击时间戳跳转视频，播放时自动高亮当前段落，时间轴支持自动跟随和手动暂停跟随。
 - 管理员显式“保存为新草稿”时，服务端统一 LF、校验 UTF-8 编码后的 2 MiB 上限、说话人时间戳和非空正文，并以基础版本 SHA-256 与请求幂等键防止并发误写。
@@ -193,10 +193,13 @@ candidate manifest 和 promotion workflow evidence 为准，不能把代码就�
 ## 入口与调用链
 
 ```text
-管理端上传 MP4 + .md 或文件系统
-→ POST /api/admin/media (校验、落盘、登记)
-→ media_assets (app.sqlite) + docs/教学视频/ + media/<media_id>/
-→ index_jobs (media_id 关联)
+资料库统一上传 MP4
+→ POST /api/admin/content/uploads (管理员权限、目录预检、落盘、登记)
+→ media_assets (app.sqlite) + media/<media_id>/ + media_transcript 目录壳
+→ 资料列表显示 awaiting_transcription
+→ 管理员选择 scheme_id（单项或批量）
+→ POST /api/admin/transcription/media/{media_id}/start 或 /bulk-start
+→ transcription_jobs / audio preparation / ASR worker
 → _build_transcript_doc(media_id)
 → chunk_transcript
 → Parent/Child(doc_type, start_time, media_id)
@@ -213,7 +216,7 @@ candidate manifest 和 promotion workflow evidence 为准，不能把代码就�
 自动转录与版本发布结果流：
 
 ```text
-资料统一上传中的 MP4 + scheme_id + 幂等键
+资料统一上传后的待转录 MP4 + scheme_id + 幂等键
 → 应用转录任务/worker
 → audio preparation port
 → independent asr_service create/upload/start/poll/result
