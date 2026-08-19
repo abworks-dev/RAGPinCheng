@@ -69,24 +69,49 @@ jobs:
               "admitted_profile_ids": sorted(TRANSCRIPTION_ADMITTED_PROFILE_IDS),
               "capabilities": None,
               "capabilities_error_type": None,
+              "diagnostics": None,
+              "diagnostics_error_type": None,
+              "profile_identities": None,
+              "profile_identities_error_type": None,
               "profile_states": None,
           }
           capabilities = None
           if ASR_ENABLED and ASR_SERVICE_TOKEN:
+              factory = RemoteAsrProviderFactory(
+                  ASR_SERVICE_URL,
+                  ASR_SERVICE_TOKEN,
+                  ASR_CONNECT_TIMEOUT_SECONDS,
+                  ASR_REQUEST_TIMEOUT_SECONDS,
+                  FUNASR_SENSEVOICE_PROVIDER_KEY,
+              )
               try:
-                  capabilities = RemoteAsrProviderFactory(
-                      ASR_SERVICE_URL,
-                      ASR_SERVICE_TOKEN,
-                      ASR_CONNECT_TIMEOUT_SECONDS,
-                      ASR_REQUEST_TIMEOUT_SECONDS,
-                      FUNASR_SENSEVOICE_PROVIDER_KEY,
-                  ).capabilities()
+                  capabilities = factory.capabilities()
                   payload["capabilities"] = {
                       "api_version": capabilities.api_version,
                       "service_profiles": sorted(capabilities.service_profiles),
                   }
               except Exception as exc:
                   payload["capabilities_error_type"] = type(exc).__name__
+              try:
+                  diagnostics = factory.diagnostics()
+                  payload["diagnostics"] = {
+                      "enabled": diagnostics.get("enabled"),
+                      "queue_depth": diagnostics.get("queue_depth"),
+                      "queue_limit": diagnostics.get("queue_limit"),
+                      "pause_reason": diagnostics.get("pause_reason"),
+                  }
+              except Exception as exc:
+                  payload["diagnostics_error_type"] = type(exc).__name__
+              try:
+                  identities = factory.profile_identities()
+                  payload["profile_identities"] = {
+                      "schema_version": identities.schema_version,
+                      "service_profiles": [
+                          item.service_profile_id for item in identities.profiles
+                      ],
+                  }
+              except Exception as exc:
+                  payload["profile_identities_error_type"] = type(exc).__name__
           entries = build_phase4_profile_catalog(
               service_enabled=ASR_ENABLED,
               service_healthy=capabilities is not None,

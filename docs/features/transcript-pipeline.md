@@ -45,6 +45,7 @@ Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审�
 - WhisperX v2 提供自然、均衡和细分三个只读 Profile：自然分段不强制时长，均衡/细分最长分别为 30/15 秒，字符上限分别为 500/240/120，短段合并间隔分别为 1000/750/500 ms；超限段按换行、句末标点、逗号、空格和字符边界确定性切分，段内时间按字符比例计算。
 - v2 固定工程词包括 `Revit`、`Navisworks`、`AutoCAD`、`BIM`、`BIM-2026-0805`、`12.5`、`208`、`95%`；`Auto CAD`、`B I M`、大小写、标准编号空格/连字符、小数和百分号仅按明确模式做确定性校正，不做模糊替换。
 - schema 17 添加 `asr_profile_release_requests` 与 `asr_profile_audit_events`。读取要求管理员，创建要求管理员 CSRF、UUID 幂等键、实时 capability 和受认证 `/v1/profile-identities` 服务配置哈希匹配；申请与审计在同一 SQLite 事务写入。
+- 管理端分别读取 capability、运行 diagnostics 与 Profile identity：capability 决定转录服务是否可用，diagnostics 缺失只降级运行状态，identity 缺失只禁用发布申请并提示兼容升级，不得把辅助发布校验失败误报为整个转录服务不可用。发布写接口继续要求实时 identity 与配置哈希匹配并失败关闭。
 
 ### 未实现（第二阶段）
 
@@ -74,6 +75,7 @@ Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审�
 - 静态目录同时保留三个 `qualification_approved` WhisperX v2 Profile，默认均为 disabled；只有实时服务暴露 `whisperx-large-v3-zh-align-v2` 且运行身份哈希与仓库固定配置一致时，管理页才允许创建发布申请。`/v1/diagnostics` 继续只返回有界运行状态，不承载 Prompt 或配置身份。标准应用部署动作只准入作为固定运行身份的均衡 Profile。
 - ASR service 注册四个固定 service Profile；faster-whisper、Qwen3-ASR 或 WhisperX
   缓存/依赖缺失时仅相应 Profile 不可用，不阻止现有 SenseVoice 服务启动；
+- Windows ASR candidate promotion 的 Ubuntu 跨节点门禁严格验证 `/health`、`/v1/capabilities`、`/v1/diagnostics` 与 `/v1/profile-identities`；管理页依赖的身份契约不得只由基础 health 或 capability 代替。
 - faster-whisper adapter 固定
   `dropbox-dash/faster-whisper-large-v3-turbo@0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf`
   与 CUDA FP16 参数；生产资格只接受

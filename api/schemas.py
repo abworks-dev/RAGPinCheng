@@ -1167,6 +1167,11 @@ class AsrServiceStatusDTO(BaseModel):
     pause_reason: str | None = None
 
 
+class AsrReleaseValidationDTO(BaseModel):
+    status: Literal["disabled", "ready", "unavailable"]
+    reason_code: Literal["asr_disabled", "profile_identity_unavailable"] | None = None
+
+
 class AsrProfileReleaseRequestDTO(BaseModel):
     request_id: str
     profile_id: str
@@ -1190,6 +1195,7 @@ class AsrProfileAuditEventDTO(BaseModel):
 
 class AsrSettingsResponse(BaseModel):
     service: AsrServiceStatusDTO
+    release_validation: AsrReleaseValidationDTO
     profiles: list[AsrManagedProfileDTO]
     release_requests: list[AsrProfileReleaseRequestDTO]
     audit_events: list[AsrProfileAuditEventDTO]

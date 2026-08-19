@@ -1,6 +1,6 @@
 import type { Page, Route } from "@playwright/test";
 
-export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "publication_failure" | "media_progress" | "media_upload" | "media_conflict" | "media_library";
+export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "asr_identity_unavailable" | "publication_failure" | "media_progress" | "media_upload" | "media_conflict" | "media_library";
 export type WorkspaceUser = "admin" | "bim_engineer" | "member";
 
 const admin = {
@@ -768,15 +768,22 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && path === "/api/admin/asr/schemes") return json(route, scenario === "empty" ? [] : transcriptionSchemes);
     if (request.method() === "GET" && path === "/api/admin/asr") {
       if (scenario === "empty") {
-        return json(route, { service: { status: "healthy", queue_depth: 0, queue_limit: 8, pause_reason: null }, profiles: [], release_requests: [], audit_events: [] });
+        return json(route, { service: { status: "healthy", queue_depth: 0, queue_limit: 8, pause_reason: null }, release_validation: { status: "ready", reason_code: null }, profiles: [], release_requests: [], audit_events: [] });
       }
       const service = scenario === "disabled"
         ? { status: "disabled", queue_depth: null, queue_limit: null, pause_reason: null }
         : { status: "healthy", queue_depth: 1, queue_limit: 8, pause_reason: null };
       const profiles = scenario === "disabled"
         ? asrProfiles.map((profile) => ({ ...profile, release_eligible: false, availability: "unavailable", unavailable_reason_code: "asr_service_disabled" }))
-        : asrProfiles;
-      return json(route, { service, profiles, release_requests: [], audit_events: [] });
+        : scenario === "asr_identity_unavailable"
+          ? asrProfiles.map((profile) => ({ ...profile, release_eligible: false }))
+          : asrProfiles;
+      const releaseValidation = scenario === "disabled"
+        ? { status: "disabled", reason_code: "asr_disabled" }
+        : scenario === "asr_identity_unavailable"
+          ? { status: "unavailable", reason_code: "profile_identity_unavailable" }
+          : { status: "ready", reason_code: null };
+      return json(route, { service, release_validation: releaseValidation, profiles, release_requests: [], audit_events: [] });
     }
     if (request.method() === "POST" && path === "/api/admin/asr/release-requests") {
       await new Promise((resolve) => setTimeout(resolve, 800));
