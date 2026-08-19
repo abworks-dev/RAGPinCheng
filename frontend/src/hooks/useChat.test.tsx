@@ -127,4 +127,37 @@ describe("useChat persisted message identity", () => {
       query: "原问题",
     });
   });
+
+  it("restores the previous answer as a non-error state when regeneration is aborted", async () => {
+    mocks.getConversation.mockResolvedValue({
+      id: "conversation-1",
+      title: "测试",
+      user_id: 1,
+      created_at: 1,
+      updated_at: 1,
+      turn_index: 1,
+      messages: [
+        { id: 10, role: "user", content: "原问题" },
+        { id: 11, role: "assistant", content: "原回答", sources_for_ui: [] },
+      ],
+    });
+    mocks.streamChat.mockImplementation(async function* () {
+      throw new DOMException("The operation was aborted", "AbortError");
+    });
+    const { result } = renderHook(() => useChat({ conversationId: "conversation-1" }));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.regenerate("11");
+    });
+
+    expect(result.current.messages[1]).toMatchObject({
+      id: "11",
+      content: "原回答",
+      regenerationStopped: true,
+      streaming: false,
+      stage: "done",
+    });
+    expect(result.current.messages[1].error).toBeUndefined();
+  });
 });

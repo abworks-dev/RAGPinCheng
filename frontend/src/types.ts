@@ -88,6 +88,7 @@ export type ChatMessage = {
   done?: DoneData;
   streaming?: boolean;
   stopped?: boolean;
+  regenerationStopped?: boolean;
   stage?: ChatStage;
   error?: string;
   answerVersions?: AnswerVersion[];
