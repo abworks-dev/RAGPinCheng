@@ -55,6 +55,19 @@ _PURE_NOISE_RE = re.compile(r"^\s*[\d\W_]+\s*$")
 # "222" matches; "11.1" and "那 22 呢" do not.
 _PURE_DIGITS_ONLY_RE = re.compile(r"^\s*\d[\d\s]*\s*$")
 
+_INSUFFICIENT_QUERY_MESSAGE = (
+    "当前问题信息不足，暂无法检索到明确内容。"
+    "请补充具体的查询对象，例如规范名称、章节号、构件名称、材料型号或项目资料名称。"
+)
+_SECTION_WITHOUT_DOCUMENT_MESSAGE = (
+    "当前章节号缺少所属文档，暂无法检索到明确内容。"
+    "请补充对应的规范或文档名称，例如“GB 50017 第 8 节的要求是什么？”。"
+)
+_TOO_SHORT_QUERY_MESSAGE = (
+    "当前问题过于简短，暂无法检索到明确内容。"
+    "请补充具体的构件、材料、规范、软件操作或项目资料名称。"
+)
+
 
 @dataclass
 class QueryValidation:
@@ -152,18 +165,11 @@ def validate_search_query(search_query: str, *, has_history: bool) -> QueryValid
         if not has_history:
             return QueryValidation.reject(
                 reason="numeric_only",
-                message=(
-                    f'你的问题"{stripped}"信息不足。请补充要查询的对象，'
-                    '例如 "GB 50327 第 11 节讲了什么？" 或 '
-                    '"11 号构件的要求是什么？"'
-                ),
+                message=_INSUFFICIENT_QUERY_MESSAGE,
             )
         return QueryValidation.reject(
             reason="numeric_only",
-            message=(
-                f'你的问题"{stripped}"信息不足。请补充具体的查询对象，'
-                '例如 "在上个规范中第 22 节的要求是什么？"'
-            ),
+            message=_INSUFFICIENT_QUERY_MESSAGE,
         )
 
     # Isolated section number with no surrounding document context.
@@ -173,10 +179,7 @@ def validate_search_query(search_query: str, *, has_history: bool) -> QueryValid
         if not has_history:
             return QueryValidation.reject(
                 reason="section_only",
-                message=(
-                    f'章节号"{stripped}"缺少所属文档。请补充对应的规范或文档名称，'
-                    '例如 "GB 50017 第 8 节的要求是什么？"'
-                ),
+                message=_SECTION_WITHOUT_DOCUMENT_MESSAGE,
             )
         return QueryValidation.ok()
 
@@ -190,10 +193,7 @@ def validate_search_query(search_query: str, *, has_history: bool) -> QueryValid
     if _PURE_NOISE_RE.match(stripped):
         return QueryValidation.reject(
             reason="too_short",
-            message=(
-                f'你的问题"{stripped}"过于简短。请补充具体的构件、材料或规范名称，'
-                '以便准确检索相关资料。'
-            ),
+            message=_TOO_SHORT_QUERY_MESSAGE,
         )
 
     # A first-turn query dominated by digits but lacking a recognized object
@@ -203,11 +203,7 @@ def validate_search_query(search_query: str, *, has_history: bool) -> QueryValid
         if not has_history:
             return QueryValidation.reject(
                 reason="numeric_dominant",
-                message=(
-                    f'你的问题"{stripped}"信息不足，主要为数字。请补充具体上下文，'
-                    '例如 "第 22 节讲了什么内容？" 或 '
-                    '"22 号构件的构造要求是什么？"'
-                ),
+                message=_INSUFFICIENT_QUERY_MESSAGE,
             )
         return QueryValidation.ok()
 
@@ -223,10 +219,7 @@ def validate_search_query(search_query: str, *, has_history: bool) -> QueryValid
         if not has_real_content:
             return QueryValidation.reject(
                 reason="too_short",
-                message=(
-                    f'你的问题"{stripped}"过于简短。请补充具体的构件、材料或规范名称，'
-                    '以便准确检索相关资料。'
-                ),
+                message=_TOO_SHORT_QUERY_MESSAGE,
             )
 
     return QueryValidation.ok()
