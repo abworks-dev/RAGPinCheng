@@ -449,10 +449,25 @@ describe("AdminMediaPage wizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "关闭" }));
 
     const prompt = await screen.findByRole("dialog", { name: "暂时关闭上传流程？" });
-    expect(within(prompt).getByText(/关闭后未提交的视频和填写内容会保留/)).toBeInTheDocument();
+    expect(within(prompt).getByText(/可保留未提交的视频和填写内容供下次继续/)).toBeInTheDocument();
     fireEvent.click(within(prompt).getByRole("button", { name: "关闭并保留" }));
     expect(screen.queryByRole("dialog", { name: "上传视频与转写" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /继续上传/ })).toBeInTheDocument();
+  });
+
+  it("can close and discard an unfinished batch from the close prompt", async () => {
+    render(<AdminMediaPage />);
+    await addVideosAndOpenMode([video("close-and-discard.mp4")], "自动转录");
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+
+    const prompt = await screen.findByRole("dialog", { name: "暂时关闭上传流程？" });
+    expect(within(prompt).getByRole("button", { name: "继续操作" })).toBeInTheDocument();
+    expect(within(prompt).getByRole("button", { name: "关闭并保留" })).toBeInTheDocument();
+    fireEvent.click(within(prompt).getByRole("button", { name: "关闭并放弃" }));
+    expect(screen.queryByRole("dialog", { name: "上传视频与转写" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /继续上传/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "上传视频" })).toBeInTheDocument();
   });
 
   it("makes abandoning the local upload draft a visible destructive action", async () => {

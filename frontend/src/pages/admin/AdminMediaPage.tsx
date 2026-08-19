@@ -903,7 +903,7 @@ export function AdminMediaPage() {
             <DialogDescription>
               {discardPromptMode === "cancel"
                 ? "已提交的任务不会被撤回；未提交的视频将从当前浏览器流程中清除。"
-                : "关闭后未提交的视频和填写内容会保留，下次点击“继续上传”即可恢复。"}
+                : "可保留未提交的视频和填写内容供下次继续，也可放弃并清空本次上传。"}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex-col-reverse sm:flex-row">
@@ -911,7 +911,10 @@ export function AdminMediaPage() {
             {discardPromptMode === "cancel" ? (
               <Button variant="destructive" className="w-full sm:w-auto" onClick={confirmDiscardUpload}>放弃并清空</Button>
             ) : (
-              <Button className="w-full sm:w-auto" onClick={() => { setDiscardPromptOpen(false); setUploadDialogOpen(false); }}>关闭并保留</Button>
+              <>
+                <Button variant="destructive" className="w-full sm:w-auto" onClick={confirmDiscardUpload}>关闭并放弃</Button>
+                <Button className="w-full sm:w-auto" onClick={() => { setDiscardPromptOpen(false); setUploadDialogOpen(false); }}>关闭并保留</Button>
+              </>
             )}
           </DialogFooter>
         </DialogContent>

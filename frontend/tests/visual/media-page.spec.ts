@@ -107,6 +107,35 @@ test.describe("视频媒体", () => {
     await page.screenshot({ path: testInfo.outputPath(`media-upload-complete-${viewport.width}x${viewport.height}.png`) });
   });
 
+  test("关闭未完成上传时可选择保留或放弃", async ({ page }, testInfo) => {
+    await installAdminRoutes(page, "media_upload");
+    await page.goto("/admin/media");
+    await page.getByRole("button", { name: "上传视频" }).click();
+    await page.getByLabel("选择视频文件").setInputFiles({
+      name: "unfinished-close.mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.alloc(128, 1),
+    });
+    await page.getByRole("button", { name: "关闭" }).click();
+
+    const prompt = page.getByRole("dialog", { name: "暂时关闭上传流程？" });
+    await expect(prompt).toBeVisible();
+    await expect(prompt.getByRole("button", { name: "继续操作" })).toBeVisible();
+    await expect(prompt.getByRole("button", { name: "关闭并放弃" })).toBeVisible();
+    await expect(prompt.getByRole("button", { name: "关闭并保留" })).toBeVisible();
+    const heights = await Promise.all([
+      prompt.getByRole("button", { name: "继续操作" }),
+      prompt.getByRole("button", { name: "关闭并放弃" }),
+      prompt.getByRole("button", { name: "关闭并保留" }),
+    ].map(async (button) => (await button.boundingBox())?.height));
+    expect(new Set(heights).size).toBe(1);
+    await expectInViewport(prompt);
+    await expectNoBodyOverflow(page);
+
+    const viewport = page.viewportSize()!;
+    await page.screenshot({ path: testInfo.outputPath(`media-upload-close-options-${viewport.width}x${viewport.height}.png`) });
+  });
+
   test("上传配置控件等高且底部操作栏不随内容滚动", async ({ page }, testInfo) => {
     await installAdminRoutes(page, "media_upload");
     await page.goto("/admin/media");
