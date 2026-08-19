@@ -520,6 +520,13 @@ export type ManagedContentItem = {
   has_pending_revision: boolean;
   reclassification_job_id: string | null;
   reclassification_status: string | null;
+  media_status?: string | null;
+  transcription_job_id?: string | null;
+  transcription_job_status?: string | null;
+  transcription_stage?: string | null;
+  transcription_failure_classification?: string | null;
+  review_status?: string | null;
+  publication_status?: string | null;
 };
 
 export type ManagedPreview = {
@@ -1067,6 +1074,31 @@ export type TranscriptionJob = {
   started_at: number | null;
   finished_at: number | null;
   updated_at: number;
+};
+
+export type BulkTranscriptionItem = {
+  media_id: string;
+  title: string;
+  original_filename: string;
+  category_path: string | null;
+  status: "ready" | "started" | "already_started" | "unavailable" | "failed";
+  reason: string | null;
+  transcription_job_id: string | null;
+};
+
+export type BulkTranscriptionPreflight = {
+  scheme_id: string;
+  items: BulkTranscriptionItem[];
+  ready_count: number;
+  blocked_count: number;
+};
+
+export type BulkTranscriptionResult = {
+  scheme_id: string;
+  items: BulkTranscriptionItem[];
+  requested: number;
+  started: number;
+  failed: number;
 };
 
 export type TranscriptReviewStatus =

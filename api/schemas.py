@@ -679,6 +679,13 @@ class ManagedContentItemDTO(BaseModel):
     has_pending_revision: bool = False
     reclassification_job_id: str | None = None
     reclassification_status: str | None = None
+    media_status: str | None = None
+    transcription_job_id: str | None = None
+    transcription_job_status: str | None = None
+    transcription_stage: str | None = None
+    transcription_failure_classification: str | None = None
+    review_status: str | None = None
+    publication_status: str | None = None
 
 
 class ManagedContentListResponse(BaseModel):
@@ -1666,6 +1673,49 @@ class RetryTranscriptionRequest(BaseModel):
 
     profile_id: str
     request_idempotency_key: str
+
+
+class StartTranscriptionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scheme_id: str = Field(min_length=1, max_length=100)
+    request_idempotency_key: str = Field(min_length=36, max_length=36)
+
+
+class BulkStartTranscriptionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scheme_id: str = Field(min_length=1, max_length=100)
+    request_idempotency_key: str = Field(min_length=36, max_length=36)
+    media_ids: list[str] | None = Field(default=None, max_length=100)
+    upload_batch_id: str | None = Field(default=None, max_length=100)
+    category_id: str | None = Field(default=None, max_length=100)
+    recursive: bool = False
+
+
+class BulkTranscriptionItemDTO(BaseModel):
+    media_id: str
+    title: str
+    original_filename: str
+    category_path: str | None = None
+    status: Literal["ready", "started", "already_started", "unavailable", "failed"]
+    reason: str | None = None
+    transcription_job_id: str | None = None
+
+
+class BulkTranscriptionPreflightResponse(BaseModel):
+    scheme_id: str
+    items: list[BulkTranscriptionItemDTO]
+    ready_count: int
+    blocked_count: int
+
+
+class BulkTranscriptionResponse(BaseModel):
+    scheme_id: str
+    items: list[BulkTranscriptionItemDTO]
+    requested: int
+    started: int
+    failed: int
 
 
 class AnswerVersionDTO(BaseModel):

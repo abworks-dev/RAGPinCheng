@@ -1760,15 +1760,15 @@ def test_upload_task_history_persists_partial_results_and_scopes_users(content_a
     assert [entry["status"] for entry in partial.json()["entries"]] == ["accepted", "skipped"]
     partial_batch_id = partial.json()["batch_id"]
 
-    failed = client.post(
+    video_upload = client.post(
         "/api/admin/content/uploads",
         data={"category_id": "cat-04"},
         files=[("files", ("unsupported.mp4", b"synthetic", "video/mp4"))],
         **_auth(sessions, "admin", csrf=True),
     )
-    assert failed.status_code == 200
-    assert failed.json()["entries"][0]["status"] == "skipped"
-    failed_batch_id = failed.json()["batch_id"]
+    assert video_upload.status_code == 200
+    assert video_upload.json()["entries"][0]["status"] == "accepted"
+    video_batch_id = video_upload.json()["batch_id"]
 
     assert client.get("/api/admin/content/upload-tasks", **_auth(sessions, "plain")).status_code == 403
     organizer_tasks = client.get(
@@ -1779,7 +1779,7 @@ def test_upload_task_history_persists_partial_results_and_scopes_users(content_a
     assert organizer_tasks.json()["tasks"][0]["status"] == "partial_success"
     assert organizer_tasks.json()["status_counts"] == {"partial_success": 1}
     assert client.get(
-        f"/api/admin/content/upload-tasks/{failed_batch_id}", **_auth(sessions, "organizer")
+        f"/api/admin/content/upload-tasks/{video_batch_id}", **_auth(sessions, "organizer")
     ).status_code == 404
 
     admin_tasks = client.get(
@@ -1787,14 +1787,14 @@ def test_upload_task_history_persists_partial_results_and_scopes_users(content_a
     )
     assert admin_tasks.status_code == 200
     assert admin_tasks.json()["total"] == 2
-    assert admin_tasks.json()["tasks"][0]["batch_id"] == failed_batch_id
-    assert admin_tasks.json()["status_counts"] == {"failed": 1, "partial_success": 1}
+    assert admin_tasks.json()["tasks"][0]["batch_id"] == video_batch_id
+    assert admin_tasks.json()["status_counts"] == {"completed": 1, "partial_success": 1}
     filtered = client.get(
-        "/api/admin/content/upload-tasks?status=failed&query=unsupported.mp4",
+        "/api/admin/content/upload-tasks?status=completed&query=unsupported.mp4",
         **_auth(sessions, "admin"),
     )
     assert filtered.status_code == 200
-    assert [task["batch_id"] for task in filtered.json()["tasks"]] == [failed_batch_id]
+    assert [task["batch_id"] for task in filtered.json()["tasks"]] == [video_batch_id]
 
     detail = client.get(
         f"/api/admin/content/upload-tasks/{partial_batch_id}", **_auth(sessions, "admin")
@@ -1805,6 +1805,14 @@ def test_upload_task_history_persists_partial_results_and_scopes_users(content_a
     assert detail.json()["skipped_files"] == 1
     assert [entry["status"] for entry in detail.json()["entries"]] == ["accepted", "skipped"]
     assert detail.json()["entries"][1]["reason"] == "当前目录下已存在同名资料"
+    video_detail = client.get(
+        f"/api/admin/content/upload-tasks/{video_batch_id}", **_auth(sessions, "admin")
+    )
+    assert video_detail.status_code == 200
+    assert video_detail.json()["status"] == "completed"
+    assert video_detail.json()["entries"][0]["kind"] == "video"
+    assert video_detail.json()["entries"][0]["media_id"]
+    assert video_detail.json()["entries"][0]["transcription_job_id"] is None
 
     conn = connect(db_path)
     try:
