@@ -136,4 +136,44 @@ test.describe("聊天工作台", () => {
       contentType: "image/png",
     });
   });
+
+  test("剪贴板权限被拒绝时来源复制自动降级", async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: async () => {
+            throw new DOMException("Permission denied", "NotAllowedError");
+          },
+        },
+      });
+    });
+    await installChatRoutes(page, "source-location");
+    await page.goto("/");
+    await page.evaluate(() => {
+      document.execCommand = (command: string) => {
+        if (command !== "copy") return false;
+        const target = document.activeElement;
+        const text = target instanceof HTMLTextAreaElement ? target.value : "";
+        (window as typeof window & { __sourceCopyFallbacks?: string[] }).__sourceCopyFallbacks ??= [];
+        (window as typeof window & { __sourceCopyFallbacks: string[] }).__sourceCopyFallbacks.push(text);
+        return true;
+      };
+    });
+    await page.getByPlaceholder("向企业知识库提问").fill("合成来源复制问题");
+    await page.getByRole("button", { name: "发送问题" }).click();
+    await page.getByRole("button", { name: "查看 3 个来源" }).click();
+
+    await page.getByRole("button", { name: "复制全部来源" }).click();
+    await expect(page.getByText("已复制 3 项来源", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "复制来源" }).click();
+    await expect(page.getByText("已复制", { exact: true })).toBeVisible();
+
+    const fallbackCopies = await page.evaluate(() =>
+      (window as typeof window & { __sourceCopyFallbacks?: string[] }).__sourceCopyFallbacks ?? [],
+    );
+    expect(fallbackCopies).toHaveLength(2);
+    expect(fallbackCopies[0]).toContain("## 1. BIM机电地下室管综审核要点");
+    expect(fallbackCopies[1]).toContain("[BIM机电地下室管综审核要点]");
+  });
 });
