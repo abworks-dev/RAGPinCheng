@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   move: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
+  role: "admin" as "admin" | "user",
 }));
 
 vi.mock("../../api/client", () => ({
@@ -24,6 +25,10 @@ vi.mock("../../api/client", () => ({
 
 vi.mock("../../components/ui/toast", () => ({
   toast: { success: mocks.success, error: mocks.error },
+}));
+
+vi.mock("../../context/AuthContext", () => ({
+  useAuth: () => ({ state: { status: "authed", user: { role: mocks.role, content_permissions: ["category.manage"] } } }),
 }));
 
 const category = {
@@ -57,6 +62,7 @@ const child = {
 describe("AdminCategoriesPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.role = "admin";
     mocks.categories.mockResolvedValue([category, child]);
     mocks.update.mockResolvedValue({ ...category, version: 4, display_name: "行业规范" });
     mocks.create.mockResolvedValue({ ...category, id: "cat-new", display_code: "09", display_name: "新分类", full_path: "09 新分类" });
@@ -102,6 +108,19 @@ describe("AdminCategoriesPage", () => {
     expect(screen.queryByText("排序序号")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "调整结构" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "资料权限" })).not.toBeInTheDocument();
+  });
+
+  it("puts structure actions at the top and hides top-level delete from category managers", async () => {
+    mocks.role = "user";
+    render(<AdminCategoriesPage />);
+    const structure = await screen.findByRole("heading", { name: "目录结构" });
+    const basics = screen.getByRole("heading", { name: "基本信息" });
+    expect(structure.compareDocumentPosition(basics) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "删除文件夹" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开行业规范与标准" }));
+    fireEvent.click(screen.getByTestId("category-tree-item-cat-01-child"));
+    expect(await screen.findByRole("button", { name: "删除文件夹" })).toBeVisible();
   });
 
   it("guards a parent category with active children from being disabled", async () => {

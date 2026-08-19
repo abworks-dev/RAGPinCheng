@@ -874,8 +874,8 @@ def create_category(
         conn.execute(
             """INSERT INTO category_nodes
                (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,
-                created_by,created_at,updated_at,version)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,1)""",
+                chat_search_enabled,chat_filter_selectable,created_by,created_at,updated_at,version)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1)""",
             (
                 category_id,
                 key,
@@ -885,6 +885,8 @@ def create_category(
                 insert_sort_order,
                 level,
                 1,
+                1,
+                1 if level == 1 else 0,
                 actor_user_id,
                 now,
                 now,
