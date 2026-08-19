@@ -86,6 +86,27 @@ test.describe("视频媒体", () => {
     await page.screenshot({ path: testInfo.outputPath(`media-upload-preparing-${viewport.width}x${viewport.height}.png`) });
   });
 
+  test("上传完成态只保留完成并关闭主操作", async ({ page }, testInfo) => {
+    await installAdminRoutes(page, "media_upload");
+    await page.goto("/admin/media");
+    await page.getByRole("button", { name: "上传视频" }).click();
+    await page.getByLabel("选择视频文件").setInputFiles({
+      name: "completed-upload.mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.alloc(128 * 1024, 1),
+    });
+    await page.getByRole("button", { name: "下一步：选择转写方式" }).click();
+    await page.getByRole("button", { name: /^自动转录/ }).click();
+    await page.getByRole("button", { name: "上传并创建自动转录任务" }).click();
+
+    await expect(page.getByText("已提交", { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("button", { name: "完成并关闭" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "放弃本次上传" })).toHaveCount(0);
+    await expectNoBodyOverflow(page);
+    const viewport = page.viewportSize()!;
+    await page.screenshot({ path: testInfo.outputPath(`media-upload-complete-${viewport.width}x${viewport.height}.png`) });
+  });
+
   test("同名视频可逐项选择重命名且窗口保持可读", async ({ page }, testInfo) => {
     await installAdminRoutes(page, "media_conflict");
     await page.goto("/admin/media");
