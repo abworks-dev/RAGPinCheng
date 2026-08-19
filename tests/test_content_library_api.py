@@ -301,6 +301,48 @@ def test_unified_upload_routes_documents_and_videos_to_independent_pipelines(
     assert len(calls) == 1
 
 
+def test_unified_video_upload_converts_storage_failure_to_failed_task(
+    content_api, monkeypatch: pytest.MonkeyPatch
+):
+    client, sessions, _queued, db_path = content_api
+
+    async def unavailable_upload(**_kwargs):
+        raise OSError("media root is read-only")
+
+    monkeypatch.setattr(routes_admin, "upload_media", unavailable_upload)
+    response = client.post(
+        "/api/admin/content/uploads",
+        data={
+            "category_id": "cat-03",
+            "video_scheme_id": "scheme-synthetic",
+            "video_idempotency_keys": "123e4567-e89b-42d3-a456-426614174310",
+        },
+        files=[("files", ("training.mp4", b"synthetic-mp4", "video/mp4"))],
+        **_auth(sessions, "admin", csrf=True),
+    )
+
+    assert response.status_code == 200, response.text
+    entry = response.json()["entries"][0]
+    assert entry["status"] == "skipped"
+    assert entry["reason_code"] == "media_storage_unavailable"
+    assert entry["reason"] == "服务器暂时无法保存视频，请稍后重试"
+
+    conn = connect(db_path)
+    try:
+        batch = conn.execute(
+            "SELECT status,error_summary FROM upload_batches WHERE id=?",
+            (response.json()["batch_id"],),
+        ).fetchone()
+        assert tuple(batch) == ("failed", "没有可接收的文件")
+        stored_entry = conn.execute(
+            "SELECT status,failure_code FROM upload_batch_entries WHERE batch_id=?",
+            (response.json()["batch_id"],),
+        ).fetchone()
+        assert tuple(stored_entry) == ("skipped", "media_storage_unavailable")
+    finally:
+        conn.close()
+
+
 def _insert_published_media(
     conn: sqlite3.Connection,
     *,

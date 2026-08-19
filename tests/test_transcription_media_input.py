@@ -52,6 +52,26 @@ def test_fake_ffmpeg_produces_fixed_audio_identity_and_is_reused(tmp_path):
     assert runner.calls == 1
 
 
+def test_new_upload_can_prepare_audio_before_media_row_exists(tmp_path):
+    runner = FakeRunner()
+    root = (tmp_path / "media").resolve()
+    media_dir = root / MEDIA_ID
+    media_dir.mkdir(parents=True)
+    source = media_dir / "original.mp4"
+    source.write_bytes(b"fake-mp4")
+
+    def media_lookup(_media_id: str):
+        raise AssertionError("new uploads must use their staged source path")
+
+    preparer = FfmpegMediaAudioPreparer(
+        root, "ffmpeg-test", 10, runner, source_resolver=media_lookup
+    )
+    prepared = preparer.prepare(MEDIA_ID, source_path=source)
+
+    assert prepared.path.exists()
+    assert runner.calls == 1
+
+
 def test_file_input_source_streams_ordered_parts_and_checks_full_identity(tmp_path):
     prepared = make_preparer(tmp_path).prepare(MEDIA_ID)
     parts = tuple(FileTranscriptionInputSource(prepared).iter_parts(prepared.input_ref, 1024))
