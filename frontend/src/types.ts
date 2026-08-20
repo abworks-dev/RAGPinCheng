@@ -132,6 +132,7 @@ export type ContentPermission =
   | "item.download"
   | "category.view"
   | "item.upload"
+  /** Historical values accepted only when rendering legacy records. */
   | "item.submit"
   | "item.move_draft"
   | "item.archive_draft"

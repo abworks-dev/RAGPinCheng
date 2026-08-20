@@ -47,6 +47,7 @@ from src.xmind_parser import XMindParseError, XMindTopic, parse_xmind
 from .auth import CurrentUser, require_admin, require_csrf, require_csrf_admin, require_user
 from .maintenance import get_settings
 from .content_permissions import (
+    LEGACY_CONTENT_PERMISSION_KEYS,
     has_content_permission,
     require_content_permission,
 )
@@ -525,6 +526,7 @@ def _permission_group_dto(conn: sqlite3.Connection, row: sqlite3.Row) -> Content
             "SELECT permission FROM content_permission_group_items WHERE group_id=? ORDER BY permission",
             (row["id"],),
         ).fetchall()
+        if str(item[0]) not in LEGACY_CONTENT_PERMISSION_KEYS
     ]
     return ContentPermissionGroupDTO(
         id=row["id"], group_key=row["group_key"], display_name=row["display_name"],
@@ -535,7 +537,7 @@ def _permission_group_dto(conn: sqlite3.Connection, row: sqlite3.Row) -> Content
 
 def _validate_permissions(permissions: list[str]) -> set[str]:
     requested = set(permissions)
-    if len(requested) != len(permissions) or not requested.issubset(CONTENT_PERMISSIONS):
+    if len(requested) != len(permissions) or not requested.issubset(CONTENT_PERMISSIONS | LEGACY_CONTENT_PERMISSION_KEYS):
         raise HTTPException(status_code=400, detail="包含重复或未知资料权限")
     missing = missing_content_permission_dependencies(requested)
     if missing:
@@ -1309,6 +1311,7 @@ async def upload_managed_documents(
     allow_folder_merge: bool = Form(False),
     video_scheme_id: str | None = Form(None),
     video_idempotency_keys: list[str] | None = Form(None),
+    publish: list[str] | None = Form(None),
     conflict_actions: list[str] | None = Form(None),
     user: CurrentUser = Depends(require_content_permission("item.upload", csrf=True)),
     conn: sqlite3.Connection = Depends(get_db),
@@ -1329,6 +1332,11 @@ async def upload_managed_documents(
     if video_idempotency_keys is not None and len(video_idempotency_keys) != len(files):
         raise HTTPException(status_code=400, detail="文件和视频幂等键数量不一致")
     actions = _parse_upload_actions(conflict_actions, len(files))
+    publish_intents = [str(value).lower() in {"1", "true", "yes"} for value in (publish or [])]
+    if len(publish_intents) < len(files):
+        publish_intents.extend([False] * (len(files) - len(publish_intents)))
+    if any(publish_intents) and not has_content_permission(conn, user, "item.publish"):
+        raise HTTPException(status_code=403, detail="缺少发布资料权限")
     upload_sizes = [_upload_size(upload) for upload in files]
     batch_id = create_web_batch(
         conn,
@@ -1638,6 +1646,11 @@ async def upload_managed_documents(
                 relative_path=source_rel_path, size_bytes=size_bytes, status="accepted",
                 item_id=item_id, version_id=version_id,
             )
+            if publish_intents[index]:
+                _publication_id, index_job_id = create_publication_job(
+                    conn, version_id, actor_user_id=user.id
+                )
+                enqueue_content_publication(index_job_id)
         except (ValueError, sqlite3.IntegrityError) as exc:
             conn.rollback()
             _discard_unreferenced_upload(conn, stored)
@@ -2314,7 +2327,7 @@ def move_managed_content_item(
             expected_version_id=body.expected_version_id,
             actor_user_id=user.id,
             can_move_draft=has_content_permission(conn, user, "item.move_draft"),
-            can_move_review=has_content_permission(conn, user, "item.move_review"),
+            can_move_review=False,
             can_move_published=has_content_permission(conn, user, "item.publish"),
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
@@ -2956,9 +2969,9 @@ def _bulk_permissions(conn: sqlite3.Connection, user: CurrentUser) -> set[str]:
 
 def _bulk_operation_permission(operation: str) -> str:
     return {
-        "submit": "item.submit",
-        "approve": "item.review",
-        "reject": "item.review",
+        "submit": "item.publish",
+        "approve": "item.publish",
+        "reject": "item.publish",
         "publish": "item.publish",
         "download": "item.download",
         "move": "category.view",
@@ -3246,7 +3259,7 @@ def execute_bulk_operation(
                                 conn, item_id, target_category_id=str(body.target_category_id),
                                 expected_version_id=version_id, actor_user_id=user.id,
                                 can_move_draft=has_content_permission(conn, user, "item.move_draft"),
-                                can_move_review=has_content_permission(conn, user, "item.move_review"),
+                                can_move_review=False,
                             )
                     mark_item_result(conn, run_id, item_id, status="succeeded", index_job_id=index_job_id)
                     conn.commit()
@@ -3452,7 +3465,7 @@ def bulk_move_content_items(
 ) -> BulkManagedContentResponse:
     _require_feature()
     can_move_draft = has_content_permission(conn, user, "item.move_draft")
-    can_move_review = has_content_permission(conn, user, "item.move_review")
+    can_move_review = False
     can_move_published = has_content_permission(conn, user, "item.publish")
     if not (can_move_draft or can_move_review or can_move_published):
         raise HTTPException(status_code=403, detail="当前账号没有移动资料的权限")

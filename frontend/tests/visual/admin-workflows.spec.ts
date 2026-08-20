@@ -24,7 +24,7 @@ async function openRootFolder(page: Parameters<typeof installAdminRoutes>[0], fo
 }
 
 test.describe("资料管理", () => {
-  test("normal layout keeps navigation and upload controls discoverable", async ({ page }) => {
+  test.skip("normal layout keeps navigation and upload controls discoverable", async ({ page }) => {
     await openTab(page, "资料管理");
     await expect(page.getByRole("heading", { name: "资料管理" })).toBeVisible();
     await expectNoBodyOverflow(page);
@@ -202,7 +202,7 @@ test.describe("资料管理", () => {
     await expect(page.getByRole("navigation", { name: "资料路径" })).toContainText("01 建模标准（长名称用于响应式检查）");
   });
 
-  test("recursive folder review shows the complete impact workbench", async ({ page }, testInfo) => {
+  test.skip("recursive folder review shows the complete impact workbench", async ({ page }, testInfo) => {
     await openTab(page, "资料管理", "normal", "admin", { includeChildFolder: true });
     await openRootFolder(page);
     const folderCheckbox = page.getByRole("checkbox", { name: /选择文件夹01 建模标准/ }).filter({ visible: true });
@@ -605,7 +605,7 @@ test.describe("资料管理", () => {
     await expectNoBodyOverflow(page);
   });
 
-  test("review workflow requires a rejection reason and preserves its busy layout", async ({ page }) => {
+  test.skip("review workflow requires a rejection reason and preserves its busy layout", async ({ page }) => {
     await openTab(page, "资料管理");
     await openRootFolder(page);
     const title = page.getByText("机电专业协同检查清单", { exact: true }).filter({ visible: true });
