@@ -33,7 +33,6 @@ from .content_store import (
 from .db import connect
 
 
-MAX_SOURCE_REFS = 20
 MAX_SCOPE_FILES = 5000
 _PROGRESS_CHUNK = 8 * 1024 * 1024
 _storage = ContentStorage(CONTENT_ROOT)
@@ -210,8 +209,6 @@ def create_preflight(
 ) -> dict[str, object]:
     if not category_refs and not item_refs:
         raise ValueError("bulk_scope_empty")
-    if len(category_refs) + len(item_refs) > MAX_SOURCE_REFS:
-        raise ValueError("bulk_source_limit_exceeded")
     if operation in {"delete", "force_delete"} and item_refs:
         raise ValueError("folder_delete_requires_categories")
 

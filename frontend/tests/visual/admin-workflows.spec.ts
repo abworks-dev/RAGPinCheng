@@ -55,7 +55,7 @@ test.describe("资料管理", () => {
     await expect(searchFilters.getByRole("combobox", { name: "来源", exact: true })).toHaveValue("");
     await expect(searchFilters.getByRole("combobox", { name: "分类", exact: true })).toHaveCount(0);
     await page.keyboard.press("Escape");
-    await expect(page.getByText("未选择资料，单次最多 20 份")).toBeVisible();
+    await expect(page.getByText("未选择资料")).toBeVisible();
     await expect(page.getByRole("button", { name: "新建目录" })).toBeVisible();
     await expect(page.getByRole("button", { name: "批量操作" })).toHaveCount(0);
 
@@ -85,7 +85,7 @@ test.describe("资料管理", () => {
     if (page.viewportSize()!.width === 390) await expectTouchTarget(trailingAction);
 
     await page.getByRole("checkbox", { name: `选择${longTitle}` }).check();
-    await expect(page.getByText(/已选择\s*1\s*份，单次最多\s*20\s*份/)).toBeVisible();
+    await expect(page.getByText(/已选择(?:\s*0 个文件夹、)?\s*1 份(?:资料)?/)).toBeVisible();
     await expect(page.getByRole("button", { name: "新建目录" })).toBeVisible();
     await page.getByRole("checkbox", { name: "选择机电专业协同检查清单" }).check();
     const batchButton = page.getByRole("button", { name: "批量操作" });
@@ -272,7 +272,7 @@ test.describe("资料管理", () => {
     await page.getByRole("button", { name: "批量操作" }).click();
     await page.getByRole("menuitem", { name: "批量移动" }).click();
     const moveDialog = page.getByRole("dialog", { name: "批量移动资料" });
-    await expect(moveDialog).toContainText("已选择 2 份资料");
+    await expect(moveDialog).toContainText(/已选择(?: 0 个文件夹、)? 2 份资料/);
     await moveDialog.getByTestId("category-picker-item-cat-project").click();
     await expect(moveDialog.getByRole("button", { name: "确认执行" })).toBeEnabled();
     await moveDialog.getByRole("button", { name: "取消" }).click();
@@ -317,7 +317,7 @@ test.describe("资料管理", () => {
     await expect(page.getByRole("checkbox", { name: "选择恢复“企业知识库使用规范”" })).toBeVisible();
     await expect(page.getByRole("checkbox", { name: "选择恢复“项目交付检查清单”" })).toBeVisible();
     await page.getByRole("checkbox", { name: "选择恢复“企业知识库使用规范”" }).check();
-    await expect(page.getByRole("status")).toContainText("已选择 1 份");
+    await expect(page.getByRole("status")).toContainText(/已选择(?: 0 个文件夹、)? 1 份(?:资料)?/);
     await page.getByRole("checkbox", { name: "选择恢复“项目交付检查清单”" }).check();
     await expect(page.getByRole("button", { name: "恢复所选（2）" })).toBeVisible();
     await page.getByRole("button", { name: "恢复所选（2）" }).click();
