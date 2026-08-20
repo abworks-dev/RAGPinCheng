@@ -118,6 +118,7 @@ import { ManagedContentBulkOperationDialog } from "../../components/admin/Manage
 import { ManagedItemType } from "../../components/admin/ManagedItemType";
 import { compareManagedCategories } from "../../lib/category-tree";
 import { AdminTranscriptionTasksPage } from "./AdminTranscriptionTasksPage";
+import { useManagedContentLiveRefresh } from "../../hooks/useManagedContentLiveRefresh";
 import {
   collectDroppedUpload,
   folderSelectionFromFiles,
@@ -780,6 +781,11 @@ function UploadTasksPanel({
     }
   }, [page, pageSize, query, statusFilter]);
 
+  useManagedContentLiveRefresh({
+    active: tasks.some((task) => task.status === "processing"),
+    refresh: loadTasks,
+    enabled: true,
+  });
   useEffect(() => {
     void loadTasks();
   }, [loadTasks]);
@@ -2500,13 +2506,15 @@ export function AdminManagedContentPage() {
   const hasActiveReclassification = items.some((item) =>
     ACTIVE_RECLASSIFICATION_STATUSES.has(item.reclassification_status || ""),
   );
-  useEffect(() => {
-    if (!hasActiveReclassification || view !== "library") return undefined;
-    const timer = window.setInterval(() => {
-      void load();
-    }, 2000);
-    return () => window.clearInterval(timer);
-  }, [hasActiveReclassification, load, view]);
+  const hasActivePublication = items.some((item) =>
+    item.lifecycle_status === "publishing"
+    || ACTIVE_RECLASSIFICATION_STATUSES.has(item.latest_publication_status || ""),
+  );
+  useManagedContentLiveRefresh({
+    active: hasActiveReclassification || hasActivePublication,
+    enabled: view === "library",
+    refresh: load,
+  });
 
   const loadTrash = useCallback(async () => {
     if (!can("trash.view")) return;
