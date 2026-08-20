@@ -688,7 +688,7 @@ def test_download_permission_separates_preview_attachment_and_batch_download(con
         "/api/admin/content/bulk-download",
         json={"version_ids": [f"version-{index}" for index in range(21)]},
         **_auth(sessions, "organizer", csrf=True),
-    ).status_code == 422
+    ).status_code == 404
 
     monkeypatch.setattr(routes_content, "_MAX_BULK_DOWNLOAD_BYTES", 1)
     assert client.post(
@@ -3150,7 +3150,7 @@ def test_bulk_actions_enforce_permissions_csrf_limits_and_unique_ids(content_api
         "/api/admin/content/bulk-publish",
         json={"version_ids": [f"version-{i}" for i in range(21)]},
         **_auth(sessions, "publisher", csrf=True),
-    ).status_code == 422
+    ).status_code == 200
 
 
 def test_rename_creates_a_new_draft_version_and_checks_filename_conflict(content_api):

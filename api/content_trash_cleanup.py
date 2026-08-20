@@ -550,7 +550,7 @@ def purge_items(
     conn: sqlite3.Connection, items: list[tuple[str, str]], *, actor_user_id: int | None,
     trigger_type: str = "manual", overdue_only: bool = False,
 ) -> dict[str, Any]:
-    if not 1 <= len(items) <= 20:
+    if not items:
         raise ValueError("invalid_purge_batch")
     preflight = preflight_purge(conn, items, overdue_only=overdue_only)
     settings = get_trash_settings(conn)
