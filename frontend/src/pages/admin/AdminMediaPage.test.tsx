@@ -614,6 +614,52 @@ describe("AdminMediaPage wizard", () => {
     expect(screen.queryByRole("button", { name: /上传视频/ })).not.toBeInTheDocument();
   });
 
+  it("does not list managed videos before a transcription job is created", async () => {
+    mocks.listMediaAssets.mockResolvedValue([
+      {
+        ...assets[0],
+        media_id: "media-awaiting-transcription",
+        title: "待转录视频",
+        status: "uploaded",
+        transcription_job_id: null,
+        transcription_job_status: null,
+      },
+      {
+        ...assets[0],
+        media_id: "media-with-job",
+        title: "已进入转录任务",
+        transcription_job_id: succeededJob.job_id,
+        transcription_job_status: succeededJob.status,
+      },
+    ]);
+    mocks.listTranscriptionJobs.mockResolvedValue([
+      { ...succeededJob, media_id: "media-with-job" },
+    ]);
+
+    render(<AdminMediaPage embedded />);
+
+    expect(await screen.findByText("已进入转录任务")).toBeInTheDocument();
+    expect(screen.queryByText("待转录视频")).not.toBeInTheDocument();
+    expect(screen.getByText(/当前显示 1 \/ 1 条记录/)).toBeInTheDocument();
+  });
+
+  it("shows the transcription-task empty state when the library only has pending videos", async () => {
+    mocks.listMediaAssets.mockResolvedValue([{
+      ...assets[0],
+      media_id: "media-awaiting-transcription",
+      title: "待转录视频",
+      status: "uploaded",
+      transcription_job_id: null,
+      transcription_job_status: null,
+    }]);
+    mocks.listTranscriptionJobs.mockResolvedValue([]);
+
+    render(<AdminMediaPage embedded />);
+
+    expect(await screen.findByText("暂无转录任务")).toBeInTheDocument();
+    expect(screen.getByText("共 0 个任务")).toBeInTheDocument();
+  });
+
   it("keeps a permanent transcription failure retry button disabled from server capabilities", async () => {
     const failed = {
       ...succeededJob,

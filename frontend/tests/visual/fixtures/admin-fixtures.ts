@@ -272,6 +272,7 @@ const mediaAssets = [
     review_status: "awaiting_review", publication_status: "not_published", publication_index_status: "pending",
     current_phase: "review", transcription_job_id: null, transcription_job_status: null, transcription_stage: null,
     available_actions: ["review_transcript"], disabled_actions: {},
+    transcription_job_id: "media-ready-job", transcription_job_status: "succeeded",
     created_at: 1700000200, updated_at: 1700000200, error: null,
   },
 ];
