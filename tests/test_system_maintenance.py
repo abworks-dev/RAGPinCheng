@@ -46,6 +46,9 @@ def test_default_policy_and_preview_are_read_only(maintenance_db):
 
     assert settings.conversation_cleanup_enabled is True
     assert settings.conversation_retention_days == 30
+    assert settings.upload_max_file_mb == 2000
+    assert settings.upload_max_batch_files == 5000
+    assert settings.upload_max_batch_mb == 10240
     assert settings.updated_at is None
     assert (preview.conversations, preview.messages, preview.auth_sessions) == (1, 2, 1)
     conn = connect(maintenance_db)
@@ -54,16 +57,30 @@ def test_default_policy_and_preview_are_read_only(maintenance_db):
 
 
 def test_saved_policy_validates_bounds_and_does_not_delete(maintenance_db):
-    saved = maintenance.save_settings(enabled=True, retention_days=90, updated_by=1)
+    saved = maintenance.save_settings(
+        enabled=True, retention_days=90, upload_max_file_mb=2000,
+        upload_max_batch_files=5000, upload_max_batch_mb=10240, updated_by=1,
+    )
     assert saved.conversation_retention_days == 90
     assert saved.updated_by == 1
     with pytest.raises(ValueError, match="invalid_retention_days"):
-        maintenance.save_settings(enabled=True, retention_days=6, updated_by=1)
+        maintenance.save_settings(
+            enabled=True, retention_days=6, upload_max_file_mb=2000,
+            upload_max_batch_files=5000, upload_max_batch_mb=10240, updated_by=1,
+        )
+    with pytest.raises(ValueError, match="invalid_upload_max_batch_mb"):
+        maintenance.save_settings(
+            enabled=True, retention_days=90, upload_max_file_mb=2000,
+            upload_max_batch_files=5000, upload_max_batch_mb=1999, updated_by=1,
+        )
 
 
 def test_permanent_retention_skips_conversations_but_clears_auth(maintenance_db):
     seed_expired(maintenance_db)
-    saved = maintenance.save_settings(enabled=True, retention_days=None, updated_by=1)
+    saved = maintenance.save_settings(
+        enabled=True, retention_days=None, upload_max_file_mb=2000,
+        upload_max_batch_files=5000, upload_max_batch_mb=10240, updated_by=1,
+    )
     assert saved.conversation_retention_days is None
     preview = maintenance.preview_cleanup(now=4_000_000)
     assert (preview.conversations, preview.messages, preview.auth_sessions) == (0, 0, 1)
@@ -77,7 +94,10 @@ def test_permanent_retention_skips_conversations_but_clears_auth(maintenance_db)
 
 def test_automatic_cleanup_respects_disabled_conversations_but_clears_auth(maintenance_db):
     seed_expired(maintenance_db)
-    maintenance.save_settings(enabled=False, retention_days=30, updated_by=1)
+    maintenance.save_settings(
+        enabled=False, retention_days=30, upload_max_file_mb=2000,
+        upload_max_batch_files=5000, upload_max_batch_mb=10240, updated_by=1,
+    )
 
     result = maintenance.run_cleanup(trigger_source="automatic", now=4_000_000)
 
@@ -92,7 +112,10 @@ def test_automatic_cleanup_respects_disabled_conversations_but_clears_auth(maint
 
 def test_manual_cleanup_uses_saved_policy_and_cascades_messages(maintenance_db):
     seed_expired(maintenance_db)
-    maintenance.save_settings(enabled=False, retention_days=30, updated_by=1)
+    maintenance.save_settings(
+        enabled=False, retention_days=30, upload_max_file_mb=2000,
+        upload_max_batch_files=5000, upload_max_batch_mb=10240, updated_by=1,
+    )
 
     result = maintenance.run_cleanup(trigger_source="manual", now=4_000_000)
 

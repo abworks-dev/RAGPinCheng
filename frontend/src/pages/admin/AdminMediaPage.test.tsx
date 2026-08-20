@@ -18,6 +18,13 @@ const mocks = vi.hoisted(() => ({
   managedCategories: vi.fn(),
   preflightMediaUpload: vi.fn(),
   moveManagedContent: vi.fn(),
+  listExternalMediaRoots: vi.fn(),
+  listExternalMediaSources: vi.fn(),
+  createExternalMediaSource: vi.fn(),
+  updateExternalMediaSource: vi.fn(),
+  scanExternalMediaSource: vi.fn(),
+  listExternalMediaEntries: vi.fn(),
+  enqueueExternalMedia: vi.fn(),
 }));
 
 vi.mock("../../api/client", () => ({ api: mocks }));
@@ -151,6 +158,70 @@ describe("AdminMediaPage wizard", () => {
       entries: body.items.map((item) => ({ client_id: item.client_id, status: "ready", suggested_title: null, suggested_filename: null, conflicts: [] })),
     }));
     mocks.moveManagedContent.mockResolvedValue({});
+    mocks.listExternalMediaRoots.mockResolvedValue([]);
+    mocks.listExternalMediaSources.mockResolvedValue([]);
+    mocks.listExternalMediaEntries.mockResolvedValue({ source_id: "", parent_relative_path: "", entries: [] });
+    mocks.scanExternalMediaSource.mockResolvedValue({ run_id: "scan-1", source_id: "source-1", discovered_count: 2, added_count: 2, changed_count: 0, missing_count: 0, enqueued_count: 0, enqueue_failures: 0 });
+    mocks.enqueueExternalMedia.mockResolvedValue({ requested: 1, enqueued: 1, failed: 0, failures: {} });
+  });
+
+  it("keeps external media disabled when the server has no configured root aliases", async () => {
+    render(<AdminMediaPage />);
+    expect(await screen.findByText("未配置共享目录根")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /登记共享目录/ })).toBeDisabled();
+  });
+
+  it("shows a recoverable error when shared media cannot be loaded", async () => {
+    mocks.listExternalMediaRoots.mockRejectedValue(new Error("共享资料源服务不可用"));
+    render(<AdminMediaPage />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("共享资料源服务不可用");
+    expect(screen.getByRole("button", { name: "刷新" })).toBeEnabled();
+  });
+
+  it("browses a shared folder and explicitly enqueues selected videos", async () => {
+    mocks.listExternalMediaRoots.mockResolvedValue([{ alias: "training-share" }]);
+    mocks.listExternalMediaSources.mockResolvedValue([{
+      id: "source-1", name: "培训归档", root_alias: "training-share", relative_path: "2026",
+      target_category_id: "cat-05", default_scheme_id: availableProfile.scheme_id,
+      auto_enqueue: false, scan_interval_seconds: 900, enabled: true, status: "available",
+      total_files: 2, available_files: 2, missing_files: 0, last_scan_at: 100,
+      last_successful_scan_at: 100, last_error_code: null, created_at: 1, updated_at: 100, version: 2,
+    }]);
+    mocks.listExternalMediaEntries.mockResolvedValue({
+      source_id: "source-1", parent_relative_path: "", entries: [
+        { id: "folder:课程", kind: "folder", name: "课程", relative_path: "课程" },
+        { id: "entry-1", kind: "video", name: "intro.mp4", relative_path: "intro.mp4", file_size: 1024, availability: "available", media_id: "external-media-1", media_status: "uploaded", transcription_job_id: null, transcription_job_status: null, review_status: null, publication_status: null, index_status: null },
+      ],
+    });
+    render(<AdminMediaPage />);
+    expect((await screen.findAllByText("培训归档")).length).toBeGreaterThan(0);
+    fireEvent.click(await screen.findByLabelText("选择 intro.mp4"));
+    fireEvent.click(screen.getByRole("button", { name: "加入转录（1）" }));
+    await waitFor(() => expect(mocks.enqueueExternalMedia).toHaveBeenCalledWith("source-1", ["entry-1"]));
+    expect(await screen.findByText("已加入 1 个转录任务。" )).toBeInTheDocument();
+  });
+
+  it("requires confirmation before enqueueing all pending shared videos", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+    mocks.listExternalMediaRoots.mockResolvedValue([{ alias: "training-share" }]);
+    mocks.listExternalMediaSources.mockResolvedValue([{
+      id: "source-1", name: "培训归档", root_alias: "training-share", relative_path: "",
+      target_category_id: "cat-05", default_scheme_id: availableProfile.scheme_id,
+      auto_enqueue: false, scan_interval_seconds: 900, enabled: true, status: "available",
+      total_files: 501, available_files: 501, missing_files: 0, last_scan_at: 100,
+      last_successful_scan_at: 100, last_error_code: null, created_at: 1, updated_at: 100, version: 2,
+    }]);
+    mocks.listExternalMediaEntries.mockResolvedValue({ source_id: "source-1", parent_relative_path: "", entries: [] });
+    mocks.enqueueExternalMedia.mockResolvedValue({ requested: 500, enqueued: 500, failed: 0, failures: {} });
+    render(<AdminMediaPage />);
+
+    const enqueueAll = await screen.findByRole("button", { name: "全部待转录视频" });
+    fireEvent.click(enqueueAll);
+    expect(mocks.enqueueExternalMedia).not.toHaveBeenCalled();
+    fireEvent.click(enqueueAll);
+    await waitFor(() => expect(mocks.enqueueExternalMedia).toHaveBeenCalledWith("source-1"));
+    expect(await screen.findByText(/如仍有待处理视频，可再次执行/)).toBeInTheDocument();
+    confirm.mockRestore();
   });
 
   it("shows the three-step entry and keeps lifecycle states separate", async () => {
@@ -357,6 +428,59 @@ describe("AdminMediaPage wizard", () => {
     await waitFor(() => expect(screen.getByText("已提交")).toBeInTheDocument());
   });
 
+  it("closes a completed batch without treating it as an unfinished draft", async () => {
+    render(<AdminMediaPage />);
+    await addVideosAndOpenMode([video("completed.mp4")], "自动转录");
+
+    fireEvent.click(screen.getByRole("button", { name: "上传并创建自动转录任务" }));
+    await waitFor(() => expect(screen.getByText("已提交")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "完成并关闭" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "完成并关闭" }));
+    expect(screen.queryByText("暂时关闭上传流程？")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "上传视频与转写" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "上传视频" })).toBeInTheDocument();
+  });
+
+  it("offers an explicit preserve action when closing an unfinished batch", async () => {
+    render(<AdminMediaPage />);
+    await addVideosAndOpenMode([video("unfinished.mp4")], "自动转录");
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+
+    const prompt = await screen.findByRole("dialog", { name: "暂时关闭上传流程？" });
+    expect(within(prompt).getByText(/可保留未提交的视频和填写内容供下次继续/)).toBeInTheDocument();
+    fireEvent.click(within(prompt).getByRole("button", { name: "关闭并保留" }));
+    expect(screen.queryByRole("dialog", { name: "上传视频与转写" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /继续上传/ })).toBeInTheDocument();
+  });
+
+  it("can close and discard an unfinished batch from the close prompt", async () => {
+    render(<AdminMediaPage />);
+    await addVideosAndOpenMode([video("close-and-discard.mp4")], "自动转录");
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+
+    const prompt = await screen.findByRole("dialog", { name: "暂时关闭上传流程？" });
+    expect(within(prompt).getByRole("button", { name: "继续操作" })).toBeInTheDocument();
+    expect(within(prompt).getByRole("button", { name: "关闭并保留" })).toBeInTheDocument();
+    fireEvent.click(within(prompt).getByRole("button", { name: "关闭并放弃" }));
+    expect(screen.queryByRole("dialog", { name: "上传视频与转写" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /继续上传/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "上传视频" })).toBeInTheDocument();
+  });
+
+  it("makes abandoning the local upload draft a visible destructive action", async () => {
+    render(<AdminMediaPage />);
+    await addVideosAndOpenMode([video("discard.mp4")], "自动转录");
+
+    fireEvent.click(screen.getByRole("button", { name: "放弃本次上传" }));
+    const prompt = await screen.findByRole("dialog", { name: "放弃本次上传？" });
+    fireEvent.click(within(prompt).getByRole("button", { name: "放弃并清空" }));
+    expect(screen.queryByRole("dialog", { name: "上传视频与转写" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "上传视频" })).toBeInTheDocument();
+  });
+
   it("allows each automatic row to override the batch scheme", async () => {
     render(<AdminMediaPage />);
     await addVideosAndOpenMode([video("one.mp4"), video("two.mp4")], "自动转录");
@@ -482,5 +606,79 @@ describe("AdminMediaPage wizard", () => {
 
     await waitFor(() => expect(mocks.deleteFailedMediaAsset).toHaveBeenCalledWith("media-upload-failed"));
     await waitFor(() => expect(screen.queryByText("上传失败视频")).not.toBeInTheDocument());
+  });
+
+  it("uses the managed-content upload entry when embedded as transcription tasks", async () => {
+    render(<AdminMediaPage embedded />);
+    expect(await screen.findByRole("heading", { name: "转录任务" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /上传视频/ })).not.toBeInTheDocument();
+  });
+
+  it("does not list managed videos before a transcription job is created", async () => {
+    mocks.listMediaAssets.mockResolvedValue([
+      {
+        ...assets[0],
+        media_id: "media-awaiting-transcription",
+        title: "待转录视频",
+        status: "uploaded",
+        transcription_job_id: null,
+        transcription_job_status: null,
+      },
+      {
+        ...assets[0],
+        media_id: "media-with-job",
+        title: "已进入转录任务",
+        transcription_job_id: succeededJob.job_id,
+        transcription_job_status: succeededJob.status,
+      },
+    ]);
+    mocks.listTranscriptionJobs.mockResolvedValue([
+      { ...succeededJob, media_id: "media-with-job" },
+    ]);
+
+    render(<AdminMediaPage embedded />);
+
+    expect(await screen.findByText("已进入转录任务")).toBeInTheDocument();
+    expect(screen.queryByText("待转录视频")).not.toBeInTheDocument();
+    expect(screen.getByText(/当前显示 1 \/ 1 条记录/)).toBeInTheDocument();
+  });
+
+  it("shows the transcription-task empty state when the library only has pending videos", async () => {
+    mocks.listMediaAssets.mockResolvedValue([{
+      ...assets[0],
+      media_id: "media-awaiting-transcription",
+      title: "待转录视频",
+      status: "uploaded",
+      transcription_job_id: null,
+      transcription_job_status: null,
+    }]);
+    mocks.listTranscriptionJobs.mockResolvedValue([]);
+
+    render(<AdminMediaPage embedded />);
+
+    expect(await screen.findByText("暂无转录任务")).toBeInTheDocument();
+    expect(screen.getByText("共 0 个任务")).toBeInTheDocument();
+  });
+
+  it("keeps a permanent transcription failure retry button disabled from server capabilities", async () => {
+    const failed = {
+      ...succeededJob,
+      status: "failed" as const,
+      failure: { code: "invalid_media", message: "视频不可解析", retryable: false, recommended_action: "更换视频" },
+    };
+    mocks.listMediaAssets.mockResolvedValue([{
+      ...assets[0],
+      status: "failed",
+      available_actions: [],
+      disabled_actions: { retry_transcription: "仅可重试失败或已取消且允许恢复的转录任务" },
+    }]);
+    mocks.listTranscriptionJobs.mockResolvedValue([failed]);
+    render(<AdminMediaPage embedded />);
+
+    const retry = await screen.findByRole("button", { name: "重试" });
+    expect(retry).toBeDisabled();
+    expect(retry).toHaveAttribute("title", "仅可重试失败或已取消且允许恢复的转录任务");
+    fireEvent.click(retry);
+    expect(mocks.retryTranscription).not.toHaveBeenCalled();
   });
 });

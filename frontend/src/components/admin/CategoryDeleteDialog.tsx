@@ -122,7 +122,7 @@ export function CategoryDeleteDialog({
             {preview.active_reclassification_count > 0 && <p>进行中的分类调整：{preview.active_reclassification_count} 个</p>}
             {preview.active_index_count > 0 && <p>进行中的索引任务：{preview.active_index_count} 个</p>}
             {preview.protected_category && <p>系统默认一级分类受保护，不能强制永久删除。</p>}
-            {preview.media_transcript_count > 0 && <p>包含 {preview.media_transcript_count} 份视频转录稿，请先在视频管理中处理。</p>}
+            {preview.media_transcript_count > 0 && <p>包含 {preview.media_transcript_count} 份视频转录稿，请先在转录任务中处理。</p>}
           </AlertDescription>
         </Alert>}
         {preview.can_delete && <Alert variant="warning" role="status"><AlertTitle>此操作会删除整棵空目录</AlertTitle><AlertDescription>确认后无法在页面恢复；剩余同级文件夹将自动使用连续编号。</AlertDescription></Alert>}
@@ -139,7 +139,7 @@ export function CategoryDeleteDialog({
             <dt className="text-muted-foreground">进行中的索引任务</dt><dd className="tabular-nums">{preview.active_index_count} 个</dd>
           </dl>
           {preview.protected_category && <Alert variant="destructive"><AlertTitle>系统分类受保护</AlertTitle><AlertDescription>系统默认一级分类不能强制永久删除。</AlertDescription></Alert>}
-          {preview.media_transcript_count > 0 && <Alert variant="destructive"><AlertTitle>包含视频转录稿</AlertTitle><AlertDescription>请先在视频管理中处理 {preview.media_transcript_count} 份视频转录稿。</AlertDescription></Alert>}
+          {preview.media_transcript_count > 0 && <Alert variant="destructive"><AlertTitle>包含视频转录稿</AlertTitle><AlertDescription>请先在转录任务中处理 {preview.media_transcript_count} 份视频转录稿。</AlertDescription></Alert>}
           <label className="block space-y-2 text-ui-sm">
             <span className="font-medium">输入完整目录路径确认</span>
             <Input value={typedPath} onChange={(event) => setTypedPath(event.target.value)} placeholder={preview.full_path} disabled={deleting} />

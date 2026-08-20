@@ -11,6 +11,7 @@ from api.routes_admin import (
     _check_zip_bomb,
     _verify_office_signature,
 )
+from src.office_security import has_valid_office_signature
 
 
 def test_office_signature_rejects_non_zip_and_accepts_ooxml(tmp_path: Path):
@@ -22,6 +23,16 @@ def test_office_signature_rejects_non_zip_and_accepts_ooxml(tmp_path: Path):
 
     assert not _verify_office_signature(invalid, ".docx")
     assert _verify_office_signature(valid, ".docx")
+
+
+def test_legacy_office_signature_requires_ole_header(tmp_path: Path):
+    valid = tmp_path / "legacy.doc"
+    valid.write_bytes(bytes.fromhex("D0CF11E0A1B11AE1") + b"synthetic")
+    invalid = tmp_path / "legacy.xls"
+    invalid.write_bytes(b"PK\x03\x04synthetic")
+
+    assert has_valid_office_signature(valid, ".doc")
+    assert not has_valid_office_signature(invalid, ".xls")
 
 
 def test_office_macro_payload_is_detected(tmp_path: Path):

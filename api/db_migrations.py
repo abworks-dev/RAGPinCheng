@@ -270,7 +270,7 @@ CONTENT_LIBRARY_STATEMENTS = (
         object_sha256 TEXT REFERENCES content_objects(sha256) ON DELETE RESTRICT,
         transcript_version_id TEXT UNIQUE REFERENCES transcript_versions(id) ON DELETE RESTRICT,
         original_filename TEXT NOT NULL,
-        doc_type TEXT NOT NULL CHECK (doc_type IN ('pdf','markdown','docx','xlsx','pptx','transcript')),
+        doc_type TEXT NOT NULL CHECK (doc_type IN ('pdf','markdown','docx','xlsx','pptx','xmind','transcript')),
         source_origin TEXT NOT NULL CHECK (source_origin IN ('web','server','legacy','transcription')),
         source_batch_id TEXT REFERENCES upload_batches(id) ON DELETE RESTRICT,
         source_rel_path TEXT,
@@ -1115,6 +1115,192 @@ MIGRATIONS = (
                WHERE status<>'archived' AND target_category_id IS NOT NULL AND normalized_original_filename IS NOT NULL""",
         ),
     ),
+    Migration(
+        27,
+        "managed_upload_limit_settings",
+        (
+            "ALTER TABLE maintenance_settings ADD COLUMN upload_max_file_mb INTEGER NOT NULL DEFAULT 2000 CHECK (upload_max_file_mb BETWEEN 1 AND 10240)",
+            "ALTER TABLE maintenance_settings ADD COLUMN upload_max_batch_files INTEGER NOT NULL DEFAULT 5000 CHECK (upload_max_batch_files BETWEEN 1 AND 10000)",
+            "ALTER TABLE maintenance_settings ADD COLUMN upload_max_batch_mb INTEGER NOT NULL DEFAULT 10240 CHECK (upload_max_batch_mb BETWEEN 1 AND 102400)",
+        ),
+    ),
+    Migration(
+        28,
+        "external_media_sources",
+        (
+            """CREATE TABLE IF NOT EXISTS external_media_sources (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                root_alias TEXT NOT NULL,
+                relative_path TEXT NOT NULL,
+                target_category_id TEXT NOT NULL REFERENCES category_nodes(id) ON DELETE RESTRICT,
+                default_scheme_id TEXT NOT NULL REFERENCES transcription_schemes(id) ON DELETE RESTRICT,
+                auto_enqueue INTEGER NOT NULL DEFAULT 0 CHECK (auto_enqueue IN (0,1)),
+                scan_interval_seconds INTEGER NOT NULL DEFAULT 900 CHECK (scan_interval_seconds >= 60),
+                enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+                status TEXT NOT NULL DEFAULT 'never_scanned'
+                    CHECK (status IN ('never_scanned','scanning','available','unavailable','scan_failed')),
+                total_files INTEGER NOT NULL DEFAULT 0 CHECK (total_files >= 0),
+                available_files INTEGER NOT NULL DEFAULT 0 CHECK (available_files >= 0),
+                missing_files INTEGER NOT NULL DEFAULT 0 CHECK (missing_files >= 0),
+                last_scan_at INTEGER,
+                last_successful_scan_at INTEGER,
+                last_error_code TEXT,
+                created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+                UNIQUE(root_alias, relative_path)
+            )""",
+            """CREATE TABLE IF NOT EXISTS external_media_entries (
+                id TEXT PRIMARY KEY,
+                source_id TEXT NOT NULL REFERENCES external_media_sources(id) ON DELETE CASCADE,
+                media_id TEXT UNIQUE REFERENCES media_assets(media_id) ON DELETE RESTRICT,
+                relative_path TEXT NOT NULL,
+                parent_relative_path TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                file_size INTEGER NOT NULL CHECK (file_size >= 0),
+                modified_ns INTEGER NOT NULL CHECK (modified_ns >= 0),
+                fingerprint TEXT NOT NULL,
+                availability TEXT NOT NULL CHECK (availability IN ('available','missing','superseded')),
+                discovered_at INTEGER NOT NULL,
+                last_seen_at INTEGER NOT NULL,
+                missing_since INTEGER,
+                updated_at INTEGER NOT NULL
+            )""",
+            """CREATE INDEX IF NOT EXISTS idx_external_media_entries_identity
+               ON external_media_entries(source_id,relative_path,fingerprint)""",
+            """CREATE INDEX IF NOT EXISTS idx_external_media_entries_source_parent
+               ON external_media_entries(source_id,parent_relative_path,filename)""",
+            """CREATE UNIQUE INDEX IF NOT EXISTS uq_external_media_entries_current_path
+               ON external_media_entries(source_id,relative_path) WHERE availability='available'""",
+            """CREATE INDEX IF NOT EXISTS idx_external_media_entries_media
+               ON external_media_entries(media_id)""",
+            """CREATE TABLE IF NOT EXISTS external_media_scan_runs (
+                id TEXT PRIMARY KEY,
+                source_id TEXT NOT NULL REFERENCES external_media_sources(id) ON DELETE CASCADE,
+                trigger_type TEXT NOT NULL CHECK (trigger_type IN ('manual','scheduled')),
+                status TEXT NOT NULL CHECK (status IN ('running','succeeded','failed')),
+                discovered_count INTEGER NOT NULL DEFAULT 0 CHECK (discovered_count >= 0),
+                added_count INTEGER NOT NULL DEFAULT 0 CHECK (added_count >= 0),
+                changed_count INTEGER NOT NULL DEFAULT 0 CHECK (changed_count >= 0),
+                missing_count INTEGER NOT NULL DEFAULT 0 CHECK (missing_count >= 0),
+                enqueued_count INTEGER NOT NULL DEFAULT 0 CHECK (enqueued_count >= 0),
+                error_code TEXT,
+                started_at INTEGER NOT NULL,
+                finished_at INTEGER
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_external_media_scan_runs_source_started ON external_media_scan_runs(source_id,started_at DESC)",
+            "ALTER TABLE media_assets ADD COLUMN storage_kind TEXT NOT NULL DEFAULT 'managed' CHECK (storage_kind IN ('managed','external'))",
+        ),
+    ),
+    Migration(29, "xmind_managed_content", ("RELAX_CONTENT_VERSION_DOC_TYPE_XMIND",)),
+    Migration(
+        30,
+        "managed_content_bulk_operations",
+        (
+            """CREATE TABLE IF NOT EXISTS content_bulk_operations (
+                id TEXT PRIMARY KEY,
+                operation TEXT NOT NULL CHECK (operation IN (
+                    'move','submit','approve','reject','publish','download','delete','force_delete'
+                )),
+                status TEXT NOT NULL CHECK (status IN (
+                    'awaiting_confirmation','queued','running','packaging','ready',
+                    'succeeded','partial','failed','cancelled','expired'
+                )),
+                actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                target_category_id TEXT REFERENCES category_nodes(id) ON DELETE RESTRICT,
+                note TEXT,
+                source_json TEXT NOT NULL,
+                confirmation_phrase TEXT,
+                total_files INTEGER NOT NULL DEFAULT 0 CHECK (total_files >= 0),
+                selected_files INTEGER NOT NULL DEFAULT 0 CHECK (selected_files >= 0),
+                completed_files INTEGER NOT NULL DEFAULT 0 CHECK (completed_files >= 0),
+                failed_files INTEGER NOT NULL DEFAULT 0 CHECK (failed_files >= 0),
+                total_folders INTEGER NOT NULL DEFAULT 0 CHECK (total_folders >= 0),
+                total_bytes INTEGER NOT NULL DEFAULT 0 CHECK (total_bytes >= 0),
+                processed_bytes INTEGER NOT NULL DEFAULT 0 CHECK (processed_bytes >= 0),
+                archive_filename TEXT,
+                error_summary TEXT,
+                created_at INTEGER NOT NULL,
+                started_at INTEGER,
+                finished_at INTEGER,
+                expires_at INTEGER,
+                updated_at INTEGER NOT NULL
+            )""",
+            """CREATE TABLE IF NOT EXISTS content_bulk_operation_categories (
+                run_id TEXT NOT NULL REFERENCES content_bulk_operations(id) ON DELETE CASCADE,
+                category_id TEXT NOT NULL,
+                parent_id TEXT,
+                full_path TEXT NOT NULL,
+                archive_path TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                root_category_id TEXT NOT NULL,
+                is_root INTEGER NOT NULL DEFAULT 0 CHECK (is_root IN (0,1)),
+                eligible INTEGER NOT NULL DEFAULT 1 CHECK (eligible IN (0,1)),
+                selected INTEGER NOT NULL DEFAULT 1 CHECK (selected IN (0,1)),
+                reason TEXT,
+                result_status TEXT NOT NULL DEFAULT 'pending' CHECK (result_status IN (
+                    'pending','succeeded','failed','skipped'
+                )),
+                result_message TEXT,
+                sort_order INTEGER NOT NULL,
+                PRIMARY KEY(run_id,category_id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS content_bulk_operation_items (
+                run_id TEXT NOT NULL REFERENCES content_bulk_operations(id) ON DELETE CASCADE,
+                item_id TEXT NOT NULL,
+                version_id TEXT NOT NULL,
+                category_id TEXT NOT NULL,
+                category_path TEXT NOT NULL,
+                archive_path TEXT NOT NULL,
+                title TEXT NOT NULL,
+                original_filename TEXT NOT NULL,
+                content_kind TEXT NOT NULL,
+                lifecycle_status TEXT NOT NULL,
+                object_sha256 TEXT,
+                storage_rel_path TEXT,
+                size_bytes INTEGER NOT NULL DEFAULT 0 CHECK (size_bytes >= 0),
+                scope_source TEXT NOT NULL CHECK (scope_source IN ('category','direct')),
+                root_category_id TEXT,
+                eligible INTEGER NOT NULL DEFAULT 0 CHECK (eligible IN (0,1)),
+                selected INTEGER NOT NULL DEFAULT 0 CHECK (selected IN (0,1)),
+                reason TEXT,
+                result_status TEXT NOT NULL DEFAULT 'pending' CHECK (result_status IN (
+                    'pending','succeeded','failed','skipped'
+                )),
+                result_message TEXT,
+                index_job_id TEXT,
+                sort_order INTEGER NOT NULL,
+                PRIMARY KEY(run_id,item_id)
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_content_bulk_operations_actor_created ON content_bulk_operations(actor_user_id,created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_content_bulk_operations_status ON content_bulk_operations(status,updated_at)",
+            "CREATE INDEX IF NOT EXISTS idx_content_bulk_items_run_sort ON content_bulk_operation_items(run_id,sort_order)",
+            "CREATE INDEX IF NOT EXISTS idx_content_bulk_categories_run_sort ON content_bulk_operation_categories(run_id,sort_order)",
+        ),
+    ),
+    Migration(31, "legacy_office_managed_content", ("RELAX_CONTENT_VERSION_DOC_TYPE_LEGACY_OFFICE",)),
+    Migration(
+        32,
+        "unified_upload_transcription_entries",
+        (
+            "ALTER TABLE upload_batch_entries ADD COLUMN entry_kind TEXT NOT NULL DEFAULT 'document' CHECK (entry_kind IN ('document','video'))",
+            "ALTER TABLE upload_batch_entries ADD COLUMN media_id TEXT REFERENCES media_assets(media_id) ON DELETE SET NULL",
+            "ALTER TABLE upload_batch_entries ADD COLUMN transcription_job_id TEXT REFERENCES transcription_jobs(id) ON DELETE SET NULL",
+            "ALTER TABLE upload_batch_entries ADD COLUMN failure_code TEXT",
+            "CREATE INDEX IF NOT EXISTS idx_upload_batch_entries_media ON upload_batch_entries(media_id)",
+            "CREATE INDEX IF NOT EXISTS idx_upload_batch_entries_transcription_job ON upload_batch_entries(transcription_job_id)",
+        ),
+    ),
+    Migration(
+        33,
+        "remove_content_review_permissions",
+        (
+            "-- Historical review permissions remain readable for legacy API compatibility; they are absent from the active catalog",
+        ),
+    ),
+    Migration(34, "unbounded_managed_category_depth", ("RELAX_CATEGORY_NODE_LEVEL_CHECK",)),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -1149,6 +1335,13 @@ CONTENT_LIBRARY_TABLES = frozenset(
         "content_audit_events",
     }
 )
+CONTENT_BULK_OPERATION_TABLES = frozenset(
+    {
+        "content_bulk_operations",
+        "content_bulk_operation_categories",
+        "content_bulk_operation_items",
+    }
+)
 UPLOAD_TASK_TABLES = frozenset({"upload_batch_entries"})
 CONTENT_PERMISSION_GROUP_TABLES = frozenset(
     {"content_permission_groups", "content_permission_group_items"}
@@ -1168,6 +1361,22 @@ CONTENT_TRASH_LIFECYCLE_TABLES = frozenset(
 )
 TRANSCRIPTION_SCHEME_TABLES = frozenset({"transcription_bases", "transcription_schemes", "transcription_scheme_audit_events"})
 CATEGORY_FORCE_DELETE_TABLES = frozenset({"category_force_delete_runs"})
+EXTERNAL_MEDIA_SOURCE_TABLES = frozenset(
+    {"external_media_sources", "external_media_entries", "external_media_scan_runs"}
+)
+
+
+def validate_category_node_level_schema(conn: sqlite3.Connection) -> None:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='category_nodes'"
+    ).fetchone()
+    if (
+        row is None
+        or not row[0]
+        or "level INTEGER NOT NULL CHECK (level >= 1)" not in row[0]
+        or "CHECK (level BETWEEN 1 AND 4)" in row[0]
+    ):
+        raise RuntimeError("migration_schema_mismatch")
 
 
 def validate_system_content_permission_groups(
@@ -1188,9 +1397,18 @@ def validate_system_content_permission_groups(
             raise RuntimeError("system_permission_group_mismatch")
         if permission is not None:
             entry[2].add(permission)
+    legacy_permissions = {"item.submit", "item.review", "item.move_review"}
+    actual = {
+        key: (display_name, active, permissions - legacy_permissions)
+        for key, (display_name, active, permissions) in actual.items()
+    }
     expected = {
         key: (display_name, 1, set(permissions))
         for key, (display_name, permissions) in expected_groups.items()
+    }
+    expected = {
+        key: (display_name, active, permissions - legacy_permissions)
+        for key, (display_name, active, permissions) in expected.items()
     }
     if actual != expected:
         raise RuntimeError("system_permission_group_mismatch")
@@ -1207,7 +1425,9 @@ def validate_transcript_manual_revision_schema(conn: sqlite3.Connection) -> None
         raise RuntimeError("transcript_manual_revision_schema_mismatch")
 
 
-def validate_content_version_metadata(conn: sqlite3.Connection) -> None:
+def validate_content_version_metadata(
+    conn: sqlite3.Connection, *, require_xmind: bool = True
+) -> None:
     item_columns = {row[1] for row in conn.execute("PRAGMA table_info(content_items)")}
     version_columns = {row[1] for row in conn.execute("PRAGMA table_info(content_versions)")}
     indexes = {row[1] for row in conn.execute("PRAGMA index_list(content_items)")}
@@ -1216,6 +1436,11 @@ def validate_content_version_metadata(conn: sqlite3.Connection) -> None:
     if "uq_content_items_active_filename" not in indexes:
         raise RuntimeError("migration_schema_mismatch")
     if conn.execute("SELECT 1 FROM content_versions WHERE title IS NULL LIMIT 1").fetchone():
+        raise RuntimeError("migration_schema_mismatch")
+    schema = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='content_versions'"
+    ).fetchone()
+    if schema is None or (require_xmind and "'xmind'" not in str(schema[0])):
         raise RuntimeError("migration_schema_mismatch")
 
 
@@ -1245,6 +1470,76 @@ def split_sql_statements(script: str) -> tuple[str, ...]:
 
 
 def execute_migration_statement(conn: sqlite3.Connection, statement: str) -> None:
+    if statement == "RELAX_CATEGORY_NODE_LEVEL_CHECK":
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='category_nodes'"
+        ).fetchone()
+        if row is None or not row[0]:
+            raise RuntimeError("migration_schema_mismatch")
+        old = "level INTEGER NOT NULL CHECK (level BETWEEN 1 AND 4)"
+        new = "level INTEGER NOT NULL CHECK (level >= 1)"
+        if new in row[0] and "CHECK (level BETWEEN 1 AND 4)" not in row[0]:
+            return
+        if old not in row[0]:
+            raise RuntimeError("migration_schema_mismatch")
+        conn.execute("PRAGMA writable_schema=ON")
+        try:
+            conn.execute(
+                "UPDATE sqlite_master SET sql=? WHERE type='table' AND name='category_nodes'",
+                (row[0].replace(old, new),),
+            )
+        finally:
+            conn.execute("PRAGMA writable_schema=RESET")
+        return
+    if statement == "RELAX_CONTENT_VERSION_DOC_TYPE_LEGACY_OFFICE":
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='content_versions'"
+        ).fetchone()
+        if row is None or not row[0]:
+            raise RuntimeError("migration_schema_mismatch")
+        old = "'pdf','markdown','docx','xlsx','pptx','xmind','transcript'"
+        new = "'pdf','markdown','doc','docx','xls','xlsx','ppt','pptx','xmind','transcript'"
+        if new in row[0]:
+            return
+        if old not in row[0]:
+            # Migration 31 may be applied directly to a database that has
+            # not yet received the xmind relaxation from migration 29.
+            old = "'pdf','markdown','docx','xlsx','pptx','transcript'"
+            new = "'pdf','markdown','doc','docx','xls','xlsx','ppt','pptx','xmind','transcript'"
+            if new in row[0]:
+                return
+            if old not in row[0]:
+                raise RuntimeError("migration_schema_mismatch")
+        conn.execute("PRAGMA writable_schema=ON")
+        try:
+            conn.execute(
+                "UPDATE sqlite_master SET sql=? WHERE type='table' AND name='content_versions'",
+                (row[0].replace(old, new),),
+            )
+        finally:
+            conn.execute("PRAGMA writable_schema=RESET")
+        return
+    if statement == "RELAX_CONTENT_VERSION_DOC_TYPE_XMIND":
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='content_versions'"
+        ).fetchone()
+        if row is None or not row[0]:
+            raise RuntimeError("migration_schema_mismatch")
+        old = "'pdf','markdown','docx','xlsx','pptx','transcript'"
+        new = "'pdf','markdown','docx','xlsx','pptx','xmind','transcript'"
+        if new in row[0] or "'pdf','markdown','doc','docx','xls','xlsx','ppt','pptx','xmind','transcript'" in row[0]:
+            return
+        if old not in row[0]:
+            raise RuntimeError("migration_schema_mismatch")
+        conn.execute("PRAGMA writable_schema=ON")
+        try:
+            conn.execute(
+                "UPDATE sqlite_master SET sql=? WHERE type='table' AND name='content_versions'",
+                (row[0].replace(old, new),),
+            )
+        finally:
+            conn.execute("PRAGMA writable_schema=RESET")
+        return
     match = re.fullmatch(
         r"ALTER TABLE ([A-Za-z_][A-Za-z0-9_]*) ADD COLUMN ([A-Za-z_][A-Za-z0-9_]*) .+",
         statement.strip(),
@@ -1347,10 +1642,23 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
         raise RuntimeError("migration_schema_mismatch")
     if any(version == 20 for version, _name in applied) and not CONTENT_TRASH_LIFECYCLE_TABLES.issubset(tables):
         raise RuntimeError("migration_schema_mismatch")
+    if any(version == 28 for version, _name in applied) and not EXTERNAL_MEDIA_SOURCE_TABLES.issubset(tables):
+        raise RuntimeError("migration_schema_mismatch")
+    if any(version == 30 for version, _name in applied) and not CONTENT_BULK_OPERATION_TABLES.issubset(tables):
+        raise RuntimeError("migration_schema_mismatch")
+    if any(version == 34 for version, _name in applied):
+        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        try:
+            validate_category_node_level_schema(conn)
+        finally:
+            conn.close()
     if any(version == 10 for version, _name in applied):
         conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
         try:
-            validate_content_version_metadata(conn)
+            validate_content_version_metadata(
+                conn,
+                require_xmind=any(version == 29 for version, _name in applied),
+            )
         finally:
             conn.close()
     if any(version == 14 for version, _name in applied) and not UPLOAD_TASK_TABLES.issubset(tables):
@@ -1431,7 +1739,13 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
             raise RuntimeError("migration_schema_mismatch")
         if 20 in applied_versions and not CONTENT_TRASH_LIFECYCLE_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
+        if 30 in applied_versions and not CONTENT_BULK_OPERATION_TABLES.issubset(tables):
+            raise RuntimeError("migration_schema_mismatch")
+        if 34 in applied_versions:
+            validate_category_node_level_schema(conn)
         if 25 in applied_versions and not CATEGORY_FORCE_DELETE_TABLES.issubset(tables):
+            raise RuntimeError("migration_schema_mismatch")
+        if 28 in applied_versions and not EXTERNAL_MEDIA_SOURCE_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         if 21 in applied_versions and not TRANSCRIPTION_SCHEME_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")

@@ -20,8 +20,12 @@ SUPPORTED_TYPES = {
     ".pdf": "pdf",
     ".md": "markdown",
     ".docx": "docx",
+    ".doc": "doc",
     ".xlsx": "xlsx",
+    ".xls": "xls",
     ".pptx": "pptx",
+    ".ppt": "ppt",
+    ".xmind": "xmind",
 }
 
 
@@ -42,7 +46,7 @@ def resolve_import_category(
 ) -> tuple[str, bool]:
     parent_id: str | None = None
     resolved_id: str | None = None
-    for folder_name in directory_parts[:4]:
+    for folder_name in directory_parts:
         alias = conn.execute(
             """SELECT target_category_id FROM category_import_aliases
                WHERE parent_category_id IS ? AND folder_name=? AND is_active=1""",
@@ -70,7 +74,7 @@ def resolve_import_category(
             return "cat-99", True
         resolved_id = target["id"]
         parent_id = resolved_id
-    if resolved_id is None or len(directory_parts) > 4:
+    if resolved_id is None:
         return "cat-99", True
     return resolved_id, False
 

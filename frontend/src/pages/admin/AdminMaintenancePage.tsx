@@ -42,6 +42,9 @@ export function AdminMaintenancePage() {
   const [enabled, setEnabled] = useState(true);
   const [days, setDays] = useState("30");
   const [customDays, setCustomDays] = useState("30");
+  const [maxFileMb, setMaxFileMb] = useState("2000");
+  const [maxBatchFiles, setMaxBatchFiles] = useState("5000");
+  const [maxBatchMb, setMaxBatchMb] = useState("10240");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<"load" | "preview" | "save" | "cleanup" | null>("load");
@@ -65,6 +68,9 @@ export function AdminMaintenancePage() {
       const retention = nextStatus.settings.conversation_retention_days;
       setDays(retention === null ? NEVER : PRESETS.includes(retention) ? String(retention) : "custom");
       setCustomDays(retention === null ? "30" : String(retention));
+      setMaxFileMb(String(nextStatus.settings.upload_max_file_mb));
+      setMaxBatchFiles(String(nextStatus.settings.upload_max_batch_files));
+      setMaxBatchMb(String(nextStatus.settings.upload_max_batch_mb));
     } catch (e: any) {
       setError(e?.message || String(e));
     } finally {
@@ -94,6 +100,9 @@ export function AdminMaintenancePage() {
     const candidate: MaintenanceSettings = {
       conversation_cleanup_enabled: enabled,
       conversation_retention_days: selectedDays,
+      upload_max_file_mb: status.settings.upload_max_file_mb,
+      upload_max_batch_files: status.settings.upload_max_batch_files,
+      upload_max_batch_mb: status.settings.upload_max_batch_mb,
       updated_at: status.settings.updated_at,
       updated_by: status.settings.updated_by,
     };
@@ -115,6 +124,30 @@ export function AdminMaintenancePage() {
       setConfirmSettings(null);
       setNotice("维护策略已保存，将从下一次自动检查开始生效。");
       await refreshPreview(settings.conversation_retention_days ?? undefined);
+    } catch (e: any) {
+      setNotice(e?.message || String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function saveUploadLimits() {
+    if (!status) return;
+    const candidate: MaintenanceSettings = {
+      ...status.settings,
+      upload_max_file_mb: Number(maxFileMb),
+      upload_max_batch_files: Number(maxBatchFiles),
+      upload_max_batch_mb: Number(maxBatchMb),
+    };
+    setBusy("save");
+    setNotice(null);
+    try {
+      const settings = await adminMaintenanceApi.updateSettings(candidate);
+      setStatus((current) => current ? { ...current, settings } : current);
+      setMaxFileMb(String(settings.upload_max_file_mb));
+      setMaxBatchFiles(String(settings.upload_max_batch_files));
+      setMaxBatchMb(String(settings.upload_max_batch_mb));
+      setNotice("资料上传限制已保存，新上传请求将立即使用当前设置。");
     } catch (e: any) {
       setNotice(e?.message || String(e));
     } finally {
@@ -146,6 +179,14 @@ export function AdminMaintenancePage() {
   if (error || !status) return <ErrorState title="系统维护加载失败" description={error || "暂无可用状态"} action={<Button variant="outline" onClick={() => void load()}>重试</Button>} />;
 
   const dirty = enabled !== status.settings.conversation_cleanup_enabled || selectedDays !== status.settings.conversation_retention_days;
+  const uploadValues = [Number(maxFileMb), Number(maxBatchFiles), Number(maxBatchMb)];
+  const uploadValid = uploadValues.every(Number.isInteger)
+    && uploadValues[0] >= 1 && uploadValues[0] <= 10240
+    && uploadValues[1] >= 1 && uploadValues[1] <= 10000
+    && uploadValues[2] >= uploadValues[0] && uploadValues[2] <= 102400;
+  const uploadDirty = uploadValues[0] !== status.settings.upload_max_file_mb
+    || uploadValues[1] !== status.settings.upload_max_batch_files
+    || uploadValues[2] !== status.settings.upload_max_batch_mb;
   const lastRun = status.last_run;
 
   return (
@@ -181,6 +222,21 @@ export function AdminMaintenancePage() {
             <Button onClick={() => void requestSave()} disabled={!dirty || !validDays || busy !== null}><Save className="size-4" />{busy === "save" ? "保存中…" : "保存策略"}</Button>
           </div>
           <p id="retention-help" className={validDays ? "text-ui-xs text-muted-foreground" : "text-ui-xs text-destructive"}>{validDays ? "可设置 7 至 3650 天，或选择永久保留；默认值为 30 天。保存设置不会立即删除数据。" : "请输入 7 至 3650 之间的整数。"}</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>资料上传限制</CardTitle><CardDescription>限制受管资料的新建、更新和文件夹上传。保存后立即作用于新请求。</CardDescription></CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            <label className="space-y-1.5 text-ui-sm font-medium"><span>单文件上限（MB）</span><Input type="number" min={1} max={10240} value={maxFileMb} onChange={(event) => setMaxFileMb(event.target.value)} disabled={busy === "save"} /></label>
+            <label className="space-y-1.5 text-ui-sm font-medium"><span>单批文件数量</span><Input type="number" min={1} max={10000} value={maxBatchFiles} onChange={(event) => setMaxBatchFiles(event.target.value)} disabled={busy === "save"} /></label>
+            <label className="space-y-1.5 text-ui-sm font-medium"><span>单批总大小（MB）</span><Input type="number" min={1} max={102400} value={maxBatchMb} onChange={(event) => setMaxBatchMb(event.target.value)} disabled={busy === "save"} /></label>
+          </div>
+          <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className={uploadValid ? "text-ui-xs text-muted-foreground" : "text-ui-xs text-destructive"}>{uploadValid ? "单文件最大 10240 MB，单批最多 10000 个文件；单批总大小不得小于单文件上限。" : "请输入有效整数，且单批总大小不得小于单文件上限。"}</p>
+            <Button onClick={() => void saveUploadLimits()} disabled={!uploadDirty || !uploadValid || busy !== null}><Save className="size-4" />{busy === "save" ? "保存中…" : "保存上传限制"}</Button>
+          </div>
         </CardContent>
       </Card>
 

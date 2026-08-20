@@ -1,6 +1,6 @@
 import type { Page, Route } from "@playwright/test";
 
-export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "publication_failure" | "media_progress" | "media_upload" | "media_conflict" | "media_library";
+export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "asr_identity_unavailable" | "publication_failure" | "media_progress" | "media_permanent_failure" | "media_upload" | "media_conflict" | "media_library";
 export type WorkspaceUser = "admin" | "bim_engineer" | "member";
 
 const admin = {
@@ -39,6 +39,15 @@ export const categories = [
   { id: "cat-project", category_key: "project_delivery", parent_id: null, display_code: "04", display_name: "项目资料", sort_order: 20, level: 1, is_active: true, chat_search_enabled: true, chat_filter_selectable: true, version: 2, created_at: 1700000000, updated_at: 1700000000, full_path: "04 项目资料", item_count: 2, direct_child_count: 0, total_child_count: 0, total_item_count: 2 },
   { id: "cat-archive", category_key: "archived", parent_id: null, display_code: "99", display_name: "待确认资料", sort_order: 90, level: 1, is_active: false, chat_search_enabled: false, chat_filter_selectable: false, version: 1, created_at: 1700000000, updated_at: 1700000000, full_path: "99 待确认资料", item_count: 0, direct_child_count: 0, total_child_count: 0, total_item_count: 0 },
 ];
+
+export const managedChildFolder = {
+  id: "cat-company-modeling", category_key: "company_modeling", parent_id: "cat-company",
+  display_code: "01", display_name: "建模标准（长名称用于响应式检查）", sort_order: 10,
+  level: 2, is_active: true, chat_search_enabled: true, chat_filter_selectable: true,
+  version: 1, created_at: 1700000000, updated_at: 1700000000,
+  full_path: "03 公司内部标准 / 01 建模标准（长名称用于响应式检查）",
+  item_count: 2, direct_child_count: 0, total_child_count: 0, total_item_count: 2,
+};
 
 const knowledgeScopes = categories
   .filter((category) => category.is_active && category.chat_search_enabled && category.chat_filter_selectable)
@@ -243,18 +252,27 @@ const mediaAssets = [
     media_id: "media-failed-1", title: "机电协同培训录像", original_filename: "mep-training-recording.mp4",
     mime_type: "video/mp4", file_size: 3_456_789, transcript_origin: "generated", status: "failed",
     review_status: "not_required", publication_status: "not_published", publication_index_status: "pending",
+    current_phase: "failed", transcription_job_id: "media-failed-job", transcription_job_status: "failed", transcription_stage: null,
+    available_actions: ["retry_transcription"],
+    disabled_actions: { cancel_transcription: "当前没有运行中的转录任务", delete_failed: "仅从未创建转录任务的失败视频可删除" },
     created_at: 1700000400, updated_at: 1700000400, error: "provider_unavailable",
   },
   {
     media_id: "media-failed-2", title: "机电协同培训录像（重复提交）", original_filename: "mep-training-recording.mp4",
     mime_type: "video/mp4", file_size: 3_456_789, transcript_origin: "generated", status: "failed",
     review_status: "not_required", publication_status: "not_published", publication_index_status: "pending",
+    current_phase: "failed", transcription_job_id: null, transcription_job_status: null, transcription_stage: null,
+    available_actions: ["delete_failed"],
+    disabled_actions: { retry_transcription: "仅可重试失败或已取消且允许恢复的转录任务" },
     created_at: 1700000300, updated_at: 1700000300, error: "provider_unavailable",
   },
   {
     media_id: "media-ready", title: "项目交付培训", original_filename: "project-delivery-training.mp4",
     mime_type: "video/mp4", file_size: 8_765_432, transcript_origin: "generated", status: "transcript_ready",
     review_status: "awaiting_review", publication_status: "not_published", publication_index_status: "pending",
+    current_phase: "review", transcription_job_id: null, transcription_job_status: null, transcription_stage: null,
+    available_actions: ["review_transcript"], disabled_actions: {},
+    transcription_job_id: "media-ready-job", transcription_job_status: "succeeded",
     created_at: 1700000200, updated_at: 1700000200, error: null,
   },
 ];
@@ -580,6 +598,7 @@ export async function installAdminRoutes(
       path.startsWith("/api/admin/content/")
       || isIndexRead
       || path.startsWith("/api/admin/media")
+      || path.startsWith("/api/admin/external-media/")
       || path.startsWith("/api/admin/transcription/")
       || path.startsWith("/api/admin/asr")
       || path.startsWith("/api/admin/feedback")
@@ -659,6 +678,9 @@ export async function installAdminRoutes(
         settings: {
           conversation_cleanup_enabled: true,
           conversation_retention_days: 30,
+          upload_max_file_mb: 2000,
+          upload_max_batch_files: 5000,
+          upload_max_batch_mb: 10240,
           updated_at: 1700000000,
           updated_by: 9001,
         },
@@ -758,9 +780,15 @@ export async function installAdminRoutes(
     }
     if (request.method() === "GET" && path === "/api/admin/media") {
       if (scenario === "empty") return json(route, []);
-      if (scenario === "media_progress") return json(route, [{ ...mediaAssets[2], status: "transcribing" }]);
+      if (scenario === "media_progress") return json(route, [{ ...mediaAssets[2], status: "transcribing", current_phase: "transcription", transcription_job_id: "media-running-job", transcription_job_status: "running", transcription_stage: "transcribing", available_actions: ["cancel_transcription"], disabled_actions: { retry_transcription: "仅可重试失败或已取消且允许恢复的转录任务" } }]);
+      if (scenario === "media_permanent_failure") return json(route, [{ ...mediaAssets[0], available_actions: [], disabled_actions: { retry_transcription: "仅可重试失败或已取消且允许恢复的转录任务" } }]);
       if (scenario === "media_library") return json(route, [mediaLibraryAsset]);
       return json(route, mediaAssets);
+    }
+    if (request.method() === "GET" && path === "/api/admin/external-media/roots") return json(route, []);
+    if (request.method() === "GET" && path === "/api/admin/external-media/sources") return json(route, []);
+    if (request.method() === "GET" && /^\/api\/admin\/external-media\/sources\/[^/]+\/entries$/.test(path)) {
+      return json(route, { source_id: "", parent_relative_path: "", entries: [] });
     }
     if (request.method() === "GET" && path === "/api/admin/transcription/profiles") return json(route, transcriptionProfiles);
     if (request.method() === "GET" && path === "/api/admin/transcription/schemes") return json(route, scenario === "empty" ? [] : transcriptionSchemeOptions);
@@ -768,15 +796,22 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && path === "/api/admin/asr/schemes") return json(route, scenario === "empty" ? [] : transcriptionSchemes);
     if (request.method() === "GET" && path === "/api/admin/asr") {
       if (scenario === "empty") {
-        return json(route, { service: { status: "healthy", queue_depth: 0, queue_limit: 8, pause_reason: null }, profiles: [], release_requests: [], audit_events: [] });
+        return json(route, { service: { status: "healthy", queue_depth: 0, queue_limit: 8, pause_reason: null }, release_validation: { status: "ready", reason_code: null }, profiles: [], release_requests: [], audit_events: [] });
       }
       const service = scenario === "disabled"
         ? { status: "disabled", queue_depth: null, queue_limit: null, pause_reason: null }
         : { status: "healthy", queue_depth: 1, queue_limit: 8, pause_reason: null };
       const profiles = scenario === "disabled"
         ? asrProfiles.map((profile) => ({ ...profile, release_eligible: false, availability: "unavailable", unavailable_reason_code: "asr_service_disabled" }))
-        : asrProfiles;
-      return json(route, { service, profiles, release_requests: [], audit_events: [] });
+        : scenario === "asr_identity_unavailable"
+          ? asrProfiles.map((profile) => ({ ...profile, release_eligible: false }))
+          : asrProfiles;
+      const releaseValidation = scenario === "disabled"
+        ? { status: "disabled", reason_code: "asr_disabled" }
+        : scenario === "asr_identity_unavailable"
+          ? { status: "unavailable", reason_code: "profile_identity_unavailable" }
+          : { status: "ready", reason_code: null };
+      return json(route, { service, release_validation: releaseValidation, profiles, release_requests: [], audit_events: [] });
     }
     if (request.method() === "POST" && path === "/api/admin/asr/release-requests") {
       await new Promise((resolve) => setTimeout(resolve, 800));
@@ -801,6 +836,12 @@ export async function installAdminRoutes(
           started_at: Math.floor(Date.now() / 1000) - 125,
           finished_at: null,
           updated_at: Math.floor(Date.now() / 1000),
+        }]);
+      }
+      if (scenario === "media_permanent_failure") {
+        return json(route, [{
+          ...transcriptionJobs[0],
+          failure: { ...transcriptionJobs[0].failure, retryable: false },
         }]);
       }
       return json(route, transcriptionJobs);
@@ -884,8 +925,40 @@ export async function installAdminRoutes(
       return json(route, { enabled: scenario !== "disabled", max_upload_bytes: 10_000_000, supported_extensions: [".pdf", ".md", ".docx", ".xlsx", ".pptx"] });
     }
     if (request.method() === "GET" && path === "/api/admin/content/categories") {
-      const childFolder = { id: "cat-company-modeling", category_key: "company_modeling", parent_id: "cat-company", display_code: "01", display_name: "建模标准（长名称用于响应式检查）", sort_order: 10, level: 2, is_active: true, chat_search_enabled: true, chat_filter_selectable: true, version: 1, created_at: 1700000000, updated_at: 1700000000, full_path: "03 公司内部标准 / 01 建模标准（长名称用于响应式检查）", item_count: 1, direct_child_count: 0, total_child_count: 0, total_item_count: 1 };
-      return json(route, scenario === "empty" ? [] : options.includeChildFolder ? [...categories, childFolder] : categories);
+      return json(route, scenario === "empty" ? [] : options.includeChildFolder ? [...categories, managedChildFolder] : categories);
+    }
+    if (request.method() === "POST" && path === "/api/admin/content/bulk-operations/preflight") {
+      const payload = request.postDataJSON() as { operation: string };
+      const impacted = [
+        { ...items[1], category_id: managedChildFolder.id, category_path: managedChildFolder.full_path },
+        { ...items[0], category_id: managedChildFolder.id, category_path: managedChildFolder.full_path },
+      ];
+      return json(route, {
+        id: "bulk-visual-1", operation: payload.operation, status: "awaiting_confirmation",
+        actor_user_id: admin.id, target_category_id: null, note: null, source_json: "{}",
+        confirmation_phrase: null, total_files: 2, selected_files: 1, completed_files: 0,
+        failed_files: 0, total_folders: 1, total_bytes: 3145728, processed_bytes: 0,
+        archive_filename: null, error_summary: null, created_at: 1700000000, started_at: null,
+        finished_at: null, expires_at: null, updated_at: 1700000000, max_archive_bytes: 10737418240,
+        categories: [{
+          run_id: "bulk-visual-1", category_id: managedChildFolder.id,
+          parent_id: managedChildFolder.parent_id, full_path: managedChildFolder.full_path,
+          archive_path: `01 ${managedChildFolder.display_name}`, version: managedChildFolder.version,
+          root_category_id: managedChildFolder.id, is_root: true, eligible: true, selected: false,
+          reason: null, result_status: "pending", result_message: null, sort_order: 0,
+        }],
+        items: impacted.map((item, index) => ({
+          run_id: "bulk-visual-1", item_id: item.item_id, version_id: item.version_id,
+          category_id: managedChildFolder.id, category_path: managedChildFolder.full_path,
+          archive_path: `01 ${managedChildFolder.display_name}/${item.original_filename}`,
+          title: item.title, original_filename: item.original_filename, content_kind: "document",
+          lifecycle_status: item.lifecycle_status, object_sha256: null, storage_rel_path: `objects/${item.item_id}`,
+          size_bytes: index ? 1048576 : 2097152, scope_source: "category",
+          root_category_id: managedChildFolder.id, eligible: index === 0, selected: index === 0,
+          reason: index === 0 ? null : "仅待确认资料可审核", result_status: "pending",
+          result_message: null, index_job_id: null, sort_order: index,
+        })),
+      });
     }
     if (request.method() === "GET" && /^\/api\/admin\/content\/categories\/[^/]+\/delete-preview$/.test(path)) {
       const categoryId = path.split("/").at(-2)!;
@@ -1092,6 +1165,7 @@ export async function installAdminRoutes(
             sequence: index + 1,
             filename: entry.filename,
             relative_path: entry.relative_path,
+            kind: /\.mp4$/i.test(entry.filename) ? "video" : "document",
             status: "ready",
             reason: null,
             reason_code: null,
@@ -1103,7 +1177,12 @@ export async function installAdminRoutes(
       }
       if (path === "/api/admin/content/uploads") {
         await new Promise((resolve) => setTimeout(resolve, 800));
-        return json(route, { batch_id: "synthetic-batch", entries: [{ filename: "synthetic.pdf", item_id: "new-item", version_id: "new-version", sha256: null, status: "accepted", reason: null }] });
+        const multipart = request.postData() || "";
+        const hasVideo = multipart.includes("synthetic-video.mp4");
+        return json(route, { batch_id: "synthetic-batch", entries: [
+          { filename: "synthetic.pdf", kind: "document", item_id: "new-item", version_id: "new-version", sha256: null, status: "accepted", reason: null },
+          ...(hasVideo ? [{ filename: "synthetic-video.mp4", kind: "video", media_id: "media-uploaded", transcription_job_id: "job-uploaded", status: "accepted", reason: null }] : []),
+        ] });
       }
       if (path.endsWith("/bulk-review") || path.endsWith("/bulk-publish") || path.endsWith("/bulk-move") || path.endsWith("/bulk-archive")) {
         const body = request.postDataJSON() as { version_ids?: string[]; items?: Array<{ item_id: string; expected_version_id: string }> };

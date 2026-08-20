@@ -112,7 +112,8 @@ jobs:
           PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS="${CONFIGURED_TRANSCRIPTION_ADMITTED_PROFILE_IDS}"
           case "${TRANSCRIPTION_ADMISSION_ACTION}" in
             PRESERVE_CURRENT)
-              export TRANSCRIPTION_ADMITTED_PROFILE_IDS="${PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS}"
+              # The running backend is the source of truth for preservation.
+              export TRANSCRIPTION_ADMITTED_PROFILE_IDS=""
               ;;
             ENABLE_FASTER_WHISPER)
               export TRANSCRIPTION_ADMITTED_PROFILE_IDS="funasr-sensevoice-zh-experimental-v1,faster-whisper-zh-experimental-v1"
@@ -139,16 +140,6 @@ jobs:
           }
 
           cd "${REPO_PATH}"
-          if [ "${TRANSCRIPTION_ADMISSION_ACTION}" = "PRESERVE_CURRENT" ]; then
-            PYTHONPATH="${REPO_PATH}" python3 - <<'PY'
-          import os
-          from src.transcription_admission_config import parse_transcription_admitted_profile_ids
-
-          parse_transcription_admitted_profile_ids(
-              os.environ["TRANSCRIPTION_ADMITTED_PROFILE_IDS"]
-          )
-          PY
-          fi
           BASIC_AUTH="$(printf 'x-access-token:%s' "${GIT_TOKEN}" | base64 | tr -d '\n')"
           PROXY_ARGS=()
           if [ -n "${DEPLOY_HTTP_PROXY:-}" ]; then
@@ -306,6 +297,7 @@ jobs:
           active = {
               "content_index_jobs": ("pending", "parsing", "chunking", "summarizing", "embedding"),
               "content_reclassification_jobs": ("pending", "applying", "committing", "rolling_back"),
+              "content_bulk_operations": ("queued", "running", "packaging"),
               "index_jobs": ("pending", "running", "uploading", "queued_mineru", "parsing", "chunking", "embedding"),
               "transcript_publication_index_jobs": ("pending", "parsing", "chunking", "embedding"),
               "transcription_jobs": ("pending", "running", "processing"),
@@ -367,6 +359,16 @@ jobs:
             echo "ERROR: Docker did not create a valid production content root"
             exit 1
           }
+          CONTENT_AVAILABLE_KIB="$(df -Pk -- "${CONTENT_HOST_PATH}" | awk 'END {print $4}')"
+          [[ "${CONTENT_AVAILABLE_KIB}" =~ ^[0-9]+$ ]] || {
+            echo "ERROR: production content disk free space could not be determined"
+            exit 1
+          }
+          [ "${CONTENT_AVAILABLE_KIB}" -ge 12582912 ] || {
+            echo "ERROR: production content disk requires at least 12 GiB free for managed archive jobs"
+            exit 1
+          }
+          echo "APP_ONLY_CONTENT_DISK status=ready available_kib=${CONTENT_AVAILABLE_KIB} required_kib=12582912"
 
           ORIGINAL_COMPOSE_OVERRIDE="${COMPOSE_OVERRIDE}"
           if [ "${SOURCE_DECOUPLING_COMPLETE:-false}" = "true" ]; then
@@ -476,6 +478,36 @@ jobs:
               exit 1
               ;;
           esac
+          PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS=""
+          if PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS="$("${COMPOSE[@]}" exec -T backend python -c \
+            'from src.config import TRANSCRIPTION_ADMITTED_PROFILE_IDS; print(",".join(TRANSCRIPTION_ADMITTED_PROFILE_IDS))' 2>/dev/null)"; then
+            echo "APP_ONLY_ASR_ADMISSION source=running-backend"
+          else
+            if [ -z "${PREVIOUS_CONTAINER_ID:-}" ]; then
+              PREVIOUS_CONTAINER_ID="$("${COMPOSE[@]}" ps -aq backend)"
+            fi
+            [ -n "${PREVIOUS_CONTAINER_ID}" ] || {
+              echo "ERROR: production backend container identity is missing for admission preservation"
+              exit 1
+            }
+            PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
+              "${PREVIOUS_CONTAINER_ID}" | python3 -c '
+          import sys
+          values = [line.split("=", 1)[1] for line in sys.stdin if line.startswith("TRANSCRIPTION_ADMITTED_PROFILE_IDS=")]
+          assert len(values) == 1
+          print(values[0])
+          ')"
+            echo "APP_ONLY_ASR_ADMISSION source=container-config"
+          fi
+          PYTHONPATH="${REPO_PATH}" TRANSCRIPTION_ADMITTED_PROFILE_IDS="${PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS}" python3 - <<'PY'
+          import os
+          from src.transcription_admission_config import parse_transcription_admitted_profile_ids
+
+          parse_transcription_admitted_profile_ids(os.environ["TRANSCRIPTION_ADMITTED_PROFILE_IDS"])
+          PY
+          if [ "${TRANSCRIPTION_ADMISSION_ACTION}" = "PRESERVE_CURRENT" ]; then
+            export TRANSCRIPTION_ADMITTED_PROFILE_IDS="${PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS}"
+          fi
           if [ "${TRANSCRIPTION_ADMISSION_ACTION}" = "PRESERVE_CURRENT" ]; then
             if [ "${PREVIOUS_ASR_ENABLED}" = "false" ]; then
               echo "APP_ONLY_ASR_STATE configured-admission-requires-enabled"
@@ -601,19 +633,31 @@ jobs:
           assert active_reclassifications == 0
           actual_groups = {}
           for group_key, display_name, permission in permission_groups:
-              actual_groups.setdefault((group_key, display_name), [])
+              actual_groups.setdefault((group_key, display_name), set())
               if permission is not None:
-                  actual_groups[(group_key, display_name)].append(permission)
+                  actual_groups[(group_key, display_name)].add(permission)
           expected_groups = {
-              (group_key, display_name): sorted(permissions)
+              (group_key, display_name): set(permissions)
               for group_key, (display_name, permissions)
               in SYSTEM_CONTENT_PERMISSION_GROUPS.items()
           }
-          assert actual_groups == expected_groups
+          unexpected_group_names = actual_groups.keys() ^ expected_groups.keys()
+          assert not unexpected_group_names, sorted(unexpected_group_names)
+          retained_legacy_permissions = {}
+          for group, expected_permissions in expected_groups.items():
+              actual_permissions = actual_groups[group]
+              assert expected_permissions.issubset(actual_permissions), {
+                  "group": group,
+                  "missing_permissions": sorted(expected_permissions - actual_permissions),
+              }
+              legacy_permissions = actual_permissions - expected_permissions
+              if legacy_permissions:
+                  retained_legacy_permissions[group[0]] = sorted(legacy_permissions)
 
           print(
               f"MANAGED_CONTENT status=verified schema={CURRENT_SCHEMA_VERSION} "
-              f"categories=7 permission_groups={len(expected_groups)} mode={CONTENT_HEAD_ENFORCEMENT}"
+              f"categories=7 permission_groups={len(expected_groups)} mode={CONTENT_HEAD_ENFORCEMENT} "
+              f"retained_legacy_permissions={retained_legacy_permissions}"
           )
           PY
           }
@@ -666,10 +710,6 @@ jobs:
           }
 
           verify_transcription_admission() {
-            case "${TRANSCRIPTION_ADMISSION_ACTION}" in
-              ENABLE_FASTER_WHISPER|ENABLE_FASTER_WHISPER_AND_WHISPERX) ;;
-              *) return 0 ;;
-            esac
             "${COMPOSE[@]}" exec -T backend python - <<'PY'
           from api.transcription_runtime import (
               RemoteAsrProviderFactory,
@@ -696,12 +736,8 @@ jobs:
               WHISPERX_BALANCED_PROFILE_ID,
           )
 
-          expected = {
-              FASTER_WHISPER_PROFILE_ID,
-              FUNASR_SENSEVOICE_PROFILE_ID,
-          }
-          if WHISPERX_BALANCED_PROFILE_ID in TRANSCRIPTION_ADMITTED_PROFILE_IDS:
-              expected.add(WHISPERX_BALANCED_PROFILE_ID)
+          expected = set(TRANSCRIPTION_ADMITTED_PROFILE_IDS)
+          assert expected
           assert ASR_ENABLED is True
           assert set(TRANSCRIPTION_ADMITTED_PROFILE_IDS) == expected
           capabilities = RemoteAsrProviderFactory(
@@ -724,30 +760,22 @@ jobs:
               )
               for entry in entries
           }
-          assert states[FASTER_WHISPER_PROFILE_ID] == ("enabled", "available")
-          assert states[FUNASR_SENSEVOICE_PROFILE_ID] == ("enabled", "available")
-          assert states[QWEN3_ASR_PROFILE_ID][0] == "disabled"
-          if WHISPERX_BALANCED_PROFILE_ID in expected:
-              assert states[WHISPERX_BALANCED_PROFILE_ID] == ("enabled", "available")
-          else:
-              assert states[WHISPERX_BALANCED_PROFILE_ID][0] == "disabled"
+          for profile_id in expected:
+              assert states[profile_id] == ("enabled", "available")
+          for profile_id in states.keys() - expected:
+              assert states[profile_id][0] == "disabled"
           registry = build_phase4_profile_registry(
               upload_part_bytes=ASR_UPLOAD_PART_BYTES,
               poll_interval_ms=ASR_POLL_INTERVAL_MS,
               expected_api_version=ASR_EXPECTED_API_VERSION,
               admitted_profile_ids=TRANSCRIPTION_ADMITTED_PROFILE_IDS,
           )
-          resolved = registry.resolve_profile(
-              FASTER_WHISPER_PROFILE_ID,
-              ProfileOperation.new_attempt,
-          )
-          assert resolved.profile.profile_id == FASTER_WHISPER_PROFILE_ID
-          if WHISPERX_BALANCED_PROFILE_ID in expected:
+          for profile_id in expected:
               resolved = registry.resolve_profile(
-                  WHISPERX_BALANCED_PROFILE_ID,
+                  profile_id,
                   ProfileOperation.new_attempt,
               )
-              assert resolved.profile.profile_id == WHISPERX_BALANCED_PROFILE_ID
+              assert resolved.profile.profile_id == profile_id
           print("TRANSCRIPTION_ADMISSION status=verified profiles=" + ",".join(sorted(expected)))
           PY
           }

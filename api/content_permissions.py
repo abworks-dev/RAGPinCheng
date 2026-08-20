@@ -9,13 +9,15 @@ from .auth import CurrentUser, require_csrf, require_user
 from .content_permission_catalog import CONTENT_PERMISSIONS
 from .db import get_db
 
+LEGACY_CONTENT_PERMISSION_KEYS = frozenset({"item.submit", "item.review", "item.move_review"})
+
 
 def has_content_permission(
     conn: sqlite3.Connection,
     user: CurrentUser,
     permission: str,
 ) -> bool:
-    if permission not in CONTENT_PERMISSIONS:
+    if permission not in CONTENT_PERMISSIONS and permission not in LEGACY_CONTENT_PERMISSION_KEYS:
         raise ValueError("unknown_content_permission")
     if user.role == "admin":
         return True
@@ -30,7 +32,7 @@ def require_content_permission(
     *,
     csrf: bool = False,
 ) -> Callable[..., CurrentUser]:
-    if permission not in CONTENT_PERMISSIONS:
+    if permission not in CONTENT_PERMISSIONS and permission not in LEGACY_CONTENT_PERMISSION_KEYS:
         raise ValueError("unknown_content_permission")
     base_dependency = require_csrf if csrf else require_user
 

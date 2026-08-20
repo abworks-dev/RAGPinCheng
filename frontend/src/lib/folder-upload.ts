@@ -1,4 +1,4 @@
-const SUPPORTED_UPLOAD_EXTENSIONS = new Set([".pdf", ".md", ".docx", ".xlsx", ".pptx"]);
+const SUPPORTED_UPLOAD_EXTENSIONS = new Set([".pdf", ".md", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".xmind", ".mp4"]);
 
 export interface FolderUploadEntry {
   file: File;
