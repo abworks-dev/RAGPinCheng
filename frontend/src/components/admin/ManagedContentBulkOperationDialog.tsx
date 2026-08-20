@@ -140,14 +140,6 @@ export function ManagedContentBulkOperationDialog({
           reasons[destination.id] = "不能移动到所选文件夹自身或其子文件夹";
           break;
         }
-        const subtreeLevels = categories
-          .filter((category) => category.id === root.id || category.full_path.startsWith(`${root.full_path} /`))
-          .map((category) => category.level);
-        const subtreeHeight = Math.max(root.level, ...subtreeLevels) - root.level;
-        if (destination.level + 1 + subtreeHeight > 4) {
-          reasons[destination.id] = "移动后目录层级会超过四级";
-          break;
-        }
       }
     }
     return reasons;

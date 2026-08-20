@@ -1301,6 +1301,46 @@ def test_category_manager_can_review_folder_request(content_api):
     assert approved.json()["created_category_id"]
 
 
+def test_folder_request_and_approval_create_a_fifth_level_category(content_api):
+    client, sessions, _queued, db_path = content_api
+    conn = connect(db_path)
+    now = int(time.time())
+    conn.executemany(
+        """INSERT INTO category_nodes
+           (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,1,?,?)""",
+        [
+            ("request-depth-2", "request_depth_2", "cat-01", "01", "第二级", 10, 2, now, now),
+            ("request-depth-3", "request_depth_3", "request-depth-2", "01", "第三级", 10, 3, now, now),
+            ("request-depth-4", "request_depth_4", "request-depth-3", "01", "第四级", 10, 4, now, now),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    created = client.post(
+        "/api/admin/content/folder-requests",
+        json={"parent_category_id": "request-depth-4", "display_name": "第五级"},
+        **_auth(sessions, "organizer", csrf=True),
+    )
+    assert created.status_code == 200
+    approved = client.post(
+        f"/api/admin/content/folder-requests/{created.json()['id']}/review",
+        json={"approved": True},
+        **_auth(sessions, "reviewer", csrf=True),
+    )
+    assert approved.status_code == 200
+    conn = connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT parent_id,level FROM category_nodes WHERE id=?",
+            (approved.json()["created_category_id"],),
+        ).fetchone()
+        assert tuple(row) == ("request-depth-4", 5)
+    finally:
+        conn.close()
+
+
 def test_folder_request_rejects_duplicate_pending_and_second_review(content_api):
     client, sessions, _queued, _db_path = content_api
     url = "/api/admin/content/folder-requests"
@@ -1361,6 +1401,10 @@ def test_folder_upload_preflights_path_contract_before_creating_batch(content_ap
     client, sessions, _queued, db_path = content_api
     for relative_path, detail in (
         ("../guide.md", "文件夹路径无效"),
+        ("/guide.md", "文件夹路径无效"),
+        ("C:/guide.md", "文件夹路径无效"),
+        ("资料包/\x00/guide.md", "文件夹路径无效"),
+        (f"{'a/' * 512}guide.md", "文件夹路径无效"),
         ("资料包/other.md", "文件名与相对路径不一致"),
     ):
         response = client.post(
@@ -1372,6 +1416,22 @@ def test_folder_upload_preflights_path_contract_before_creating_batch(content_ap
         assert response.status_code == 400
         assert response.json()["detail"] == detail
 
+    duplicate = client.post(
+        "/api/admin/content/uploads",
+        data={
+            "category_id": "cat-04",
+            "relative_paths": ["资料包/guide.md", "资料包/guide.md"],
+            "upload_mode": "folder",
+        },
+        files=[
+            ("files", ("guide.md", b"first", "text/markdown")),
+            ("files", ("guide.md", b"second", "text/markdown")),
+        ],
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert duplicate.status_code == 400
+    assert duplicate.json()["detail"] == "文件夹中存在重复的文件路径"
+
     conn = connect(db_path)
     try:
         assert conn.execute("SELECT count(*) FROM upload_batches").fetchone()[0] == 0
@@ -1380,7 +1440,7 @@ def test_folder_upload_preflights_path_contract_before_creating_batch(content_ap
         conn.close()
 
 
-def test_folder_upload_rejects_depth_count_and_total_size_limits(content_api, monkeypatch):
+def test_folder_upload_accepts_deep_paths_and_keeps_count_and_total_size_limits(content_api, monkeypatch):
     client, sessions, _queued, _db_path = content_api
     depth = client.post(
         "/api/admin/content/uploads",
@@ -1388,8 +1448,8 @@ def test_folder_upload_rejects_depth_count_and_total_size_limits(content_api, mo
         files=[("files", ("guide.md", b"# folder", "text/markdown"))],
         **_auth(sessions, "admin", csrf=True),
     )
-    assert depth.status_code == 400
-    assert depth.json()["detail"] == "文件夹路径超过资料目录四级限制"
+    assert depth.status_code == 200
+    assert depth.json()["entries"][0]["status"] == "accepted"
 
     monkeypatch.setattr(routes_content, "get_settings", lambda _conn: SimpleNamespace(
         upload_max_file_mb=2000, upload_max_batch_files=1, upload_max_batch_mb=10240,
@@ -1595,6 +1655,72 @@ def test_folder_upload_preflight_and_resolution_for_existing_root(content_api):
         assert ("02", "建筑 (1)") in [tuple(row) for row in folders]
     finally:
         conn.close()
+
+
+def test_folder_upload_json_preflight_accepts_paths_beyond_four_levels(content_api):
+    client, sessions, _queued, _db_path = content_api
+    response = client.post(
+        "/api/admin/content/uploads/preflight",
+        json={
+            "category_id": "cat-03",
+            "upload_mode": "folder",
+            "entries": [{
+                "filename": "guide.md",
+                "relative_path": "a/b/c/d/e/f/guide.md",
+                "size_bytes": 8,
+            }],
+        },
+        **_auth(sessions, "admin", csrf=True),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["entries"][0]["status"] == "ready"
+
+
+def test_folder_upload_json_preflight_preserves_path_safety_contract(content_api):
+    client, sessions, _queued, _db_path = content_api
+    auth = _auth(sessions, "admin", csrf=True)
+    for relative_path, filename, expected_status, detail in (
+        ("../guide.md", "guide.md", 400, "文件夹路径无效"),
+        ("/guide.md", "guide.md", 400, "文件夹路径无效"),
+        ("C:/guide.md", "guide.md", 400, "文件夹路径无效"),
+        ("资料包/\x00/guide.md", "guide.md", 400, "文件夹路径无效"),
+        (f"{'a/' * 512}guide.md", "guide.md", 422, None),
+        ("资料包/other.md", "guide.md", 400, "文件名与相对路径不一致"),
+    ):
+        response = client.post(
+            "/api/admin/content/uploads/preflight",
+            json={
+                "category_id": "cat-03",
+                "upload_mode": "folder",
+                "entries": [{
+                    "filename": filename,
+                    "relative_path": relative_path,
+                    "size_bytes": 8,
+                }],
+            },
+            **auth,
+        )
+        assert response.status_code == expected_status
+        if detail is None:
+            assert response.json()["detail"][0]["type"] == "string_too_long"
+        else:
+            assert response.json()["detail"] == detail
+
+    duplicate = client.post(
+        "/api/admin/content/uploads/preflight",
+        json={
+            "category_id": "cat-03",
+            "upload_mode": "folder",
+            "entries": [
+                {"filename": "guide.md", "relative_path": "资料包/guide.md", "size_bytes": 8},
+                {"filename": "guide.md", "relative_path": "资料包/guide.md", "size_bytes": 8},
+            ],
+        },
+        **auth,
+    )
+    assert duplicate.status_code == 400
+    assert duplicate.json()["detail"] == "文件夹中存在重复的文件路径"
 
 
 def test_managed_office_upload_limit_cleans_staging_and_creates_no_content(content_api, monkeypatch):
@@ -2286,7 +2412,7 @@ def test_category_display_code_is_unique_within_each_parent(content_api):
     assert another_parent.status_code == 200
 
 
-def test_category_move_rejects_cycles_depth_conflicts_and_stale_versions(content_api):
+def test_category_move_rejects_cycles_conflicts_and_stale_versions_but_allows_deep_targets(content_api):
     client, sessions, _queued, db_path = content_api
     conn = connect(db_path)
     now = int(time.time())
@@ -2318,8 +2444,10 @@ def test_category_move_rejects_cycles_depth_conflicts_and_stale_versions(content
         json={"target_parent_id": "cat-depth-4", "before_category_id": None, "expected_version": 1},
         **auth,
     )
-    assert too_deep.status_code == 409
-    assert too_deep.json()["detail"] == "移动后分类层级将超过四级"
+    assert too_deep.status_code == 200
+    moved = next(row for row in too_deep.json() if row["id"] == "cat-01")
+    assert moved["parent_id"] == "cat-depth-4"
+    assert moved["level"] == 5
 
     stale = client.post(
         "/api/admin/content/categories/cat-02/move",

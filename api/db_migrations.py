@@ -1300,6 +1300,7 @@ MIGRATIONS = (
             "-- Historical review permissions remain readable for legacy API compatibility; they are absent from the active catalog",
         ),
     ),
+    Migration(34, "unbounded_managed_category_depth", ("RELAX_CATEGORY_NODE_LEVEL_CHECK",)),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -1363,6 +1364,19 @@ CATEGORY_FORCE_DELETE_TABLES = frozenset({"category_force_delete_runs"})
 EXTERNAL_MEDIA_SOURCE_TABLES = frozenset(
     {"external_media_sources", "external_media_entries", "external_media_scan_runs"}
 )
+
+
+def validate_category_node_level_schema(conn: sqlite3.Connection) -> None:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='category_nodes'"
+    ).fetchone()
+    if (
+        row is None
+        or not row[0]
+        or "level INTEGER NOT NULL CHECK (level >= 1)" not in row[0]
+        or "CHECK (level BETWEEN 1 AND 4)" in row[0]
+    ):
+        raise RuntimeError("migration_schema_mismatch")
 
 
 def validate_system_content_permission_groups(
@@ -1456,6 +1470,27 @@ def split_sql_statements(script: str) -> tuple[str, ...]:
 
 
 def execute_migration_statement(conn: sqlite3.Connection, statement: str) -> None:
+    if statement == "RELAX_CATEGORY_NODE_LEVEL_CHECK":
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='category_nodes'"
+        ).fetchone()
+        if row is None or not row[0]:
+            raise RuntimeError("migration_schema_mismatch")
+        old = "level INTEGER NOT NULL CHECK (level BETWEEN 1 AND 4)"
+        new = "level INTEGER NOT NULL CHECK (level >= 1)"
+        if new in row[0] and "CHECK (level BETWEEN 1 AND 4)" not in row[0]:
+            return
+        if old not in row[0]:
+            raise RuntimeError("migration_schema_mismatch")
+        conn.execute("PRAGMA writable_schema=ON")
+        try:
+            conn.execute(
+                "UPDATE sqlite_master SET sql=? WHERE type='table' AND name='category_nodes'",
+                (row[0].replace(old, new),),
+            )
+        finally:
+            conn.execute("PRAGMA writable_schema=RESET")
+        return
     if statement == "RELAX_CONTENT_VERSION_DOC_TYPE_LEGACY_OFFICE":
         row = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='content_versions'"
@@ -1611,6 +1646,12 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
         raise RuntimeError("migration_schema_mismatch")
     if any(version == 30 for version, _name in applied) and not CONTENT_BULK_OPERATION_TABLES.issubset(tables):
         raise RuntimeError("migration_schema_mismatch")
+    if any(version == 34 for version, _name in applied):
+        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        try:
+            validate_category_node_level_schema(conn)
+        finally:
+            conn.close()
     if any(version == 10 for version, _name in applied):
         conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
         try:
@@ -1700,6 +1741,8 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
             raise RuntimeError("migration_schema_mismatch")
         if 30 in applied_versions and not CONTENT_BULK_OPERATION_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
+        if 34 in applied_versions:
+            validate_category_node_level_schema(conn)
         if 25 in applied_versions and not CATEGORY_FORCE_DELETE_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         if 28 in applied_versions and not EXTERNAL_MEDIA_SOURCE_TABLES.issubset(tables):

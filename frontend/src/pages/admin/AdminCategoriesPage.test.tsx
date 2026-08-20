@@ -203,6 +203,16 @@ describe("AdminCategoriesPage", () => {
     }));
   });
 
+  it("offers a fourth-level category as a move destination", async () => {
+    const target = { ...category, id: "cat-target-level-4", category_key: "target_level_4", display_code: "02", display_name: "第四级目标", level: 4, full_path: "02 目标 / 01 二级 / 01 三级 / 01 第四级目标" };
+    mocks.categories.mockResolvedValueOnce([category, target]);
+    render(<AdminCategoriesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "移动至" }));
+    const dialog = await screen.findByRole("dialog", { name: "移动分类" });
+    expect(within(dialog).getByTestId("category-picker-item-cat-target-level-4")).toBeInTheDocument();
+  });
+
   it("creates a category from the Sheet form", async () => {
     render(<AdminCategoriesPage />);
     fireEvent.click(await screen.findByRole("button", { name: "新增分类" }));
@@ -217,6 +227,16 @@ describe("AdminCategoriesPage", () => {
       target_position: 2,
       confirm_number_shift: false,
     }));
+  });
+
+  it("allows adding a child below a fourth-level category", async () => {
+    const levelFour = { ...child, id: "cat-level-4", parent_id: child.id, level: 4, display_name: "第四级", full_path: `${child.full_path} / 01 第四级`, item_count: 0 };
+    mocks.categories.mockResolvedValueOnce([category, child, levelFour]);
+    render(<AdminCategoriesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "全部展开" }));
+    fireEvent.click(await screen.findByTestId("category-tree-item-cat-level-4"));
+    expect(await screen.findByRole("button", { name: "新增子分类" })).toBeEnabled();
   });
 
   it("confirms before creating at an occupied number", async () => {

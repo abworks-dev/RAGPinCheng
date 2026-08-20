@@ -285,8 +285,6 @@ def _preflight_upload_paths(
             raise HTTPException(status_code=400, detail="文件夹路径无效")
         if parts[-1] != filename:
             raise HTTPException(status_code=400, detail="文件名与相对路径不一致")
-        if int(category["level"]) + len(parts) - 1 > 4:
-            raise HTTPException(status_code=400, detail="文件夹路径超过资料目录四级限制")
         try:
             for folder_name in parts[:-1]:
                 _parse_folder_name(folder_name)
@@ -690,8 +688,6 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=404, detail="目标父分类不存在") from exc
     if message == "parent_category_inactive":
         raise HTTPException(status_code=409, detail="不能移动到已停用的分类中") from exc
-    if message == "category_depth_exceeded":
-        raise HTTPException(status_code=409, detail="移动后分类层级将超过四级") from exc
     if message == "active_child_category_exists":
         raise HTTPException(status_code=409, detail="该分类仍有启用的子分类，请先停用子分类") from exc
     if message == "content_too_large":
@@ -1107,8 +1103,6 @@ def preflight_managed_document_upload(
                 raise HTTPException(status_code=400, detail="文件夹路径无效")
             if parts[-1] != filename:
                 raise HTTPException(status_code=400, detail="文件名与相对路径不一致")
-            if int(category["level"]) + len(parts) - 1 > 4:
-                raise HTTPException(status_code=400, detail="文件夹路径超过资料目录四级限制")
             normalized_path = "/".join(parts)
             if normalized_path in seen_paths:
                 raise HTTPException(status_code=400, detail="文件夹中存在重复的文件路径")
@@ -1658,9 +1652,8 @@ async def upload_managed_documents(
             reason = {
                 "folder_approval_required": "目录尚未批准，请联系资料负责人创建后重试",
                 "folder_name_conflict": "上传文件夹与当前目录的子文件夹重名，请先确认合并或重命名",
-                "invalid_relative_path": "文件夹路径无效或超过允许深度",
+                "invalid_relative_path": "文件夹路径无效",
                 "invalid_folder_name": "文件夹名称不符合规则",
-                "category_depth_exceeded": "资料目录最多支持四级",
                 "content_filename_conflict": "当前目录下已存在同名资料",
                 "content_upload_conflict_changed": "同名资料已发生变化，请重新检查后处理",
                 "content_revision_in_progress": "同名资料正在发布，暂时不能更新",
@@ -3451,7 +3444,6 @@ def _bulk_failure_message(exc: Exception) -> str:
         "category_not_found": "目录不存在或已停用",
         "category_version_conflict": "目录版本已变化，请刷新后重新检查",
         "category_move_cycle": "不能把目录移动到自身或其子目录",
-        "category_depth_exceeded": "移动后目录层级会超过四级",
         "category_sibling_name_conflict": "目标位置已有同名目录",
         "category_delete_blocked": "目录内仍有资料或进行中的任务",
     }.get(str(exc), "资料状态已变化，请刷新后重试")
