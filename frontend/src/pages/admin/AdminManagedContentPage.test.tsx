@@ -631,7 +631,7 @@ describe("AdminManagedContentPage", () => {
     expect(folderRow.compareDocumentPosition(fileRow!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(within(folderRow).getByRole("checkbox", { name: "选择文件夹02 模型目录" })).not.toBeChecked();
 
-    fireEvent.click(within(table).getByRole("checkbox", { name: "选择当前页前20份资料" }));
+    fireEvent.click(within(table).getByRole("checkbox", { name: "选择当前页资料" }));
     expect(within(table).getByRole("checkbox", { name: "选择建模标准" })).toBeChecked();
     expect(screen.getByText("共 1 份，第 1 / 1 页")).toBeInTheDocument();
 
@@ -945,11 +945,7 @@ describe("AdminManagedContentPage", () => {
     }));
     fireEvent.focus(screen.getByRole("textbox", { name: "搜索资料" }));
     expect(within(screen.getByRole("dialog", { name: "搜索筛选" })).getByRole("combobox", { name: "状态" })).toHaveValue("");
-    expect(
-      screen.getAllByRole("status").some((node) =>
-        node.textContent?.includes("未选择资料") && node.textContent?.includes("单次最多 20 份"),
-      ),
-    ).toBe(true);
+    expect(screen.getAllByRole("status").some((node) => node.textContent?.includes("未选择资料"))).toBe(true);
     expect(screen.queryByRole("button", { name: "批量操作" })).not.toBeInTheDocument();
   });
 
@@ -1038,7 +1034,6 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getByRole("button", { name: "恢复所选（1）" })).toBeVisible();
     fireEvent.click(screen.getAllByRole("checkbox", { name: "选择恢复“项目标准”" })[0]);
     expect(screen.getByRole("status")).toHaveTextContent("已选择 2 份");
-    expect(screen.getByRole("status")).toHaveTextContent("单次最多 20 份");
     fireEvent.click(screen.getByRole("button", { name: "恢复所选（2）" }));
     const dialog = screen.getByRole("dialog", { name: "批量恢复" });
     expect(within(dialog).getByRole("combobox", { name: "恢复到" })).toHaveValue("original");
@@ -2358,8 +2353,8 @@ describe("AdminManagedContentPage", () => {
     await waitFor(() => expect(mocks.uploadTasks).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 25, offset: 0 })));
     expect(screen.getByText("共 21 个任务，第 1 / 1 页")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: "选择当前页上传任务" }));
-    expect(screen.getAllByRole("status").some((status) => status.textContent?.includes("已选择 20 个"))).toBe(true);
+    expect(screen.getAllByRole("status").some((status) => status.textContent?.includes("已选择 21 个"))).toBe(true);
     const selectedRows = screen.getAllByTestId("upload-task-row");
-    expect(within(selectedRows[20]).getByRole("checkbox")).not.toBeChecked();
+    expect(within(selectedRows[20]).getByRole("checkbox")).toBeChecked();
   });
 });
