@@ -34,19 +34,16 @@ vi.mock("../../components/ui/toast", () => ({
   toast: { success: mocks.toastSuccess, error: mocks.toastError },
 }));
 
-const organizerPermissions = ["workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit", "item.move_draft", "item.archive_draft", "folder.request"];
-const reviewerPermissions = ["workspace.view", "item.view", "item.download", "category.view", "item.review", "item.move_review", "folder.review", "trash.view", "trash.restore"];
+const organizerPermissions = ["workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.move_draft", "item.archive_draft", "folder.request"];
+const reviewerPermissions = ["workspace.view", "item.view", "item.download", "category.view", "folder.review", "trash.view", "trash.restore"];
 const permissionDefinitions = [
   { key: "workspace.view", domain: "access", domain_label: "入口与查看", label: "进入资料工作台", description: "进入资料管理工作台。", dependencies: [] },
   { key: "item.view", domain: "access", domain_label: "入口与查看", label: "查看资料", description: "查看资料列表、详情和预览。", dependencies: ["workspace.view"] },
   { key: "item.download", domain: "access", domain_label: "入口与查看", label: "下载资料", description: "下载单份资料或批量打包下载。", dependencies: ["workspace.view", "item.view"] },
   { key: "category.view", domain: "access", domain_label: "入口与查看", label: "查看分类", description: "查看资料分类树。", dependencies: ["workspace.view"] },
   { key: "item.upload", domain: "organize", domain_label: "资料整理", label: "上传资料", description: "上传文件并创建资料草稿。", dependencies: ["workspace.view", "item.view", "category.view"] },
-  { key: "item.submit", domain: "organize", domain_label: "资料整理", label: "提交确认", description: "提交草稿。", dependencies: ["workspace.view", "item.view"] },
   { key: "item.move_draft", domain: "organize", domain_label: "资料整理", label: "移动草稿", description: "移动草稿。", dependencies: ["workspace.view", "item.view", "category.view"] },
   { key: "item.archive_draft", domain: "organize", domain_label: "资料整理", label: "归档草稿", description: "归档草稿。", dependencies: ["workspace.view", "item.view"] },
-  { key: "item.review", domain: "review", domain_label: "确认流程", label: "确认与退回", description: "确认或退回资料。", dependencies: ["workspace.view", "item.view"] },
-  { key: "item.move_review", domain: "review", domain_label: "确认流程", label: "移动待确认资料", description: "移动待确认资料。", dependencies: ["workspace.view", "item.view", "category.view"] },
   { key: "item.publish", domain: "publish", domain_label: "发布流程", label: "发布资料", description: "发布或重新发布资料。", dependencies: ["workspace.view", "item.view"] },
   { key: "trash.view", domain: "trash", domain_label: "回收站", label: "查看回收站", description: "查看回收站。", dependencies: ["workspace.view", "item.view"] },
   { key: "trash.restore", domain: "trash", domain_label: "回收站", label: "恢复资料", description: "恢复资料。", dependencies: ["workspace.view", "item.view", "trash.view"] },
@@ -88,7 +85,7 @@ describe("AdminUsersPage", () => {
       { id: "bim", group_key: "bim_engineer", display_name: "BIM工程师", permissions: organizerPermissions, is_system: true, is_active: true, updated_at: 1 },
       { id: "owner", group_key: "content_owner", display_name: "资料负责人", permissions: reviewerPermissions, is_system: true, is_active: true, updated_at: 1 },
     ]);
-    mocks.catalog.mockResolvedValue({ schema_version: 6, permissions: permissionDefinitions });
+    mocks.catalog.mockResolvedValue({ schema_version: 999, permissions: permissionDefinitions });
     mocks.updatePermissions.mockResolvedValue({});
     mocks.createGroup.mockResolvedValue({});
   });
