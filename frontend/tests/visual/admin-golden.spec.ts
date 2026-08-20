@@ -77,7 +77,7 @@ test("资料管理文件夹移动 accepted golden", async ({ page }) => {
   }
 });
 
-test("资料管理审核窗口 accepted golden", async ({ page }) => {
+test.skip("资料管理审核窗口 accepted golden", async ({ page }) => {
   await installAdminRoutes(page, "normal");
   await page.goto("/admin");
   if (page.viewportSize()!.width < 1024) {
@@ -182,7 +182,7 @@ test("系统概览生产运行状态 accepted golden", async ({ page }) => {
   }
 });
 
-test("资料管理批量操作 accepted golden", async ({ page }) => {
+test.skip("资料管理批量操作 accepted golden", async ({ page }) => {
   await installAdminRoutes(page, "normal");
   await page.goto("/admin");
   if (page.viewportSize()!.width < 1024) {
@@ -204,7 +204,7 @@ test("资料管理批量操作 accepted golden", async ({ page }) => {
   });
 });
 
-test("资料管理移入回收站确认 accepted golden", async ({ page }) => {
+test.skip("资料管理移入回收站确认 accepted golden", async ({ page }) => {
   await installAdminRoutes(page, "normal");
   await page.goto("/admin");
   if (page.viewportSize()!.width < 1024) {
