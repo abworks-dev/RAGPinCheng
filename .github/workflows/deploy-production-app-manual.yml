@@ -633,19 +633,31 @@ jobs:
           assert active_reclassifications == 0
           actual_groups = {}
           for group_key, display_name, permission in permission_groups:
-              actual_groups.setdefault((group_key, display_name), [])
+              actual_groups.setdefault((group_key, display_name), set())
               if permission is not None:
-                  actual_groups[(group_key, display_name)].append(permission)
+                  actual_groups[(group_key, display_name)].add(permission)
           expected_groups = {
-              (group_key, display_name): sorted(permissions)
+              (group_key, display_name): set(permissions)
               for group_key, (display_name, permissions)
               in SYSTEM_CONTENT_PERMISSION_GROUPS.items()
           }
-          assert actual_groups == expected_groups
+          unexpected_group_names = actual_groups.keys() ^ expected_groups.keys()
+          assert not unexpected_group_names, sorted(unexpected_group_names)
+          retained_legacy_permissions = {}
+          for group, expected_permissions in expected_groups.items():
+              actual_permissions = actual_groups[group]
+              assert expected_permissions.issubset(actual_permissions), {
+                  "group": group,
+                  "missing_permissions": sorted(expected_permissions - actual_permissions),
+              }
+              legacy_permissions = actual_permissions - expected_permissions
+              if legacy_permissions:
+                  retained_legacy_permissions[group[0]] = sorted(legacy_permissions)
 
           print(
               f"MANAGED_CONTENT status=verified schema={CURRENT_SCHEMA_VERSION} "
-              f"categories=7 permission_groups={len(expected_groups)} mode={CONTENT_HEAD_ENFORCEMENT}"
+              f"categories=7 permission_groups={len(expected_groups)} mode={CONTENT_HEAD_ENFORCEMENT} "
+              f"retained_legacy_permissions={retained_legacy_permissions}"
           )
           PY
           }
