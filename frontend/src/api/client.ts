@@ -120,6 +120,7 @@ export type ManagedUploadOptions = {
   conflictActions?: ManagedUploadConflictAction[];
   videoSchemeId?: string;
   videoIdempotencyKeys?: string[];
+  publishIntents?: boolean[];
 };
 
 export function setUnauthorizedHandler(fn: (() => void) | null) {
@@ -695,6 +696,7 @@ export const api = {
     form.append("category_id", categoryId);
     form.append("upload_mode", uploadMode);
     form.append("allow_folder_merge", options?.allowFolderMerge ? "true" : "false");
+    files.forEach((_entry, index) => form.append("publish", options?.publishIntents?.[index] ? "true" : "false"));
     if (options?.videoSchemeId) form.append("video_scheme_id", options.videoSchemeId);
     options?.conflictActions?.forEach((action) => {
       form.append("conflict_actions", JSON.stringify(action));

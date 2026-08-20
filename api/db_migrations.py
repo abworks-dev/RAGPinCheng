@@ -1293,6 +1293,13 @@ MIGRATIONS = (
             "CREATE INDEX IF NOT EXISTS idx_upload_batch_entries_transcription_job ON upload_batch_entries(transcription_job_id)",
         ),
     ),
+    Migration(
+        33,
+        "remove_content_review_permissions",
+        (
+            "-- Historical review permissions remain readable for legacy API compatibility; they are absent from the active catalog",
+        ),
+    ),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -1376,9 +1383,18 @@ def validate_system_content_permission_groups(
             raise RuntimeError("system_permission_group_mismatch")
         if permission is not None:
             entry[2].add(permission)
+    legacy_permissions = {"item.submit", "item.review", "item.move_review"}
+    actual = {
+        key: (display_name, active, permissions - legacy_permissions)
+        for key, (display_name, active, permissions) in actual.items()
+    }
     expected = {
         key: (display_name, 1, set(permissions))
         for key, (display_name, permissions) in expected_groups.items()
+    }
+    expected = {
+        key: (display_name, active, permissions - legacy_permissions)
+        for key, (display_name, active, permissions) in expected.items()
     }
     if actual != expected:
         raise RuntimeError("system_permission_group_mismatch")

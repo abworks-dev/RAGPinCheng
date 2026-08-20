@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-CONTENT_PERMISSION_CATALOG_VERSION = 6
+CONTENT_PERMISSION_CATALOG_VERSION = 7
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,10 +35,6 @@ CONTENT_PERMISSION_DEFINITIONS = (
         ("workspace.view", "item.view", "category.view"),
     ),
     ContentPermissionDefinition(
-        "item.submit", "organize", "资料整理", "提交确认", "将草稿或退回资料提交确认。",
-        ("workspace.view", "item.view"),
-    ),
-    ContentPermissionDefinition(
         "item.move_draft", "organize", "资料整理", "移动草稿", "移动草稿或退回状态的资料。",
         ("workspace.view", "item.view", "category.view"),
     ),
@@ -47,15 +43,7 @@ CONTENT_PERMISSION_DEFINITIONS = (
         ("workspace.view", "item.view"),
     ),
     ContentPermissionDefinition(
-        "item.review", "review", "确认流程", "确认与退回", "确认或退回待确认资料。",
-        ("workspace.view", "item.view"),
-    ),
-    ContentPermissionDefinition(
-        "item.move_review", "review", "确认流程", "移动待确认资料", "移动待确认状态的资料。",
-        ("workspace.view", "item.view", "category.view"),
-    ),
-    ContentPermissionDefinition(
-        "item.publish", "publish", "发布流程", "发布资料", "发布或重新发布已确认资料。",
+        "item.publish", "publish", "发布流程", "发布资料", "发布、重新发布或重试发布资料。",
         ("workspace.view", "item.view"),
     ),
     ContentPermissionDefinition(
@@ -155,14 +143,14 @@ CONTENT_PERMISSION_V2_SYSTEM_CONTENT_PERMISSION_GROUPS = {
     "bim_engineer": (
         "BIM工程师",
         frozenset({
-            "workspace.view", "item.view", "category.view", "item.upload", "item.submit",
+            "workspace.view", "item.view", "category.view", "item.upload",
             "item.move_draft", "item.archive_draft", "folder.request",
         }),
     ),
     "content_owner": (
         "资料负责人",
         frozenset({
-            "workspace.view", "item.view", "category.view", "item.review", "item.move_review",
+            "workspace.view", "item.view", "category.view",
             "folder.review", "trash.view", "trash.restore",
         }),
     ),
@@ -196,8 +184,8 @@ SYSTEM_CONTENT_PERMISSION_GROUPS = {
         "资料浏览者",
         frozenset({"workspace.view", "item.view", "item.download", "category.view"}),
     ),
-    "bim_engineer": ("BIM工程师", LEGACY_CONTENT_PERMISSION_MAP["organize"]),
-    "content_owner": ("资料负责人", LEGACY_CONTENT_PERMISSION_MAP["review"]),
+    "bim_engineer": ("BIM工程师", LEGACY_CONTENT_PERMISSION_MAP["organize"] | frozenset({"item.submit"})),
+    "content_owner": ("资料负责人", LEGACY_CONTENT_PERMISSION_MAP["review"] | frozenset({"item.review", "item.move_review"})),
     "publisher": ("发布负责人", LEGACY_CONTENT_PERMISSION_MAP["publish"]),
     "category_admin": (
         "分类管理员",

@@ -274,7 +274,7 @@ def test_migration_seeds_permission_group_templates(tmp_path):
     )
     expected_order = ["member", "viewer", "bim_engineer", "content_owner", "publisher", "category_admin", "system_admin"]
     assert [(group.group_key, group.display_name, group.permissions) for group in groups] == [
-        (key, SYSTEM_CONTENT_PERMISSION_GROUPS[key][0], sorted(SYSTEM_CONTENT_PERMISSION_GROUPS[key][1]))
+            (key, SYSTEM_CONTENT_PERMISSION_GROUPS[key][0], sorted(SYSTEM_CONTENT_PERMISSION_GROUPS[key][1] - {"item.submit", "item.review", "item.move_review"}))
         for key in expected_order
     ]
     conn.close()
@@ -875,6 +875,43 @@ def test_read_only_view_uses_category_code_and_published_head(tmp_path):
     assert exported.read_bytes() == payload
     assert not os.path.samefile(object_path, exported)
     assert object_path.stat().st_mode & 0o200
+    conn.close()
+
+
+def test_create_publication_job_accepts_a_newly_uploaded_draft(tmp_path):
+    conn = _db(tmp_path)
+    actor = 1
+    storage = ContentStorage(tmp_path / "objects")
+    payload = b"# direct publish"
+    digest = hashlib.sha256(payload).hexdigest()
+    object_path = storage.object_path_for_sha256(digest)
+    object_path.parent.mkdir(parents=True, exist_ok=True)
+    object_path.write_bytes(payload)
+    uploaded = register_uploaded_document(
+        conn,
+        batch_id=create_web_batch(conn, actor_user_id=actor),
+        category_id="cat-03",
+        title="直接发布",
+        original_filename="direct.md",
+        doc_type="markdown",
+        stored=StoredContentObject(
+            sha256=digest,
+            size_bytes=len(payload),
+            mime_type="text/markdown",
+            storage_rel_path=object_path.relative_to(storage.root).as_posix(),
+            absolute_path=object_path,
+            created=True,
+        ),
+        actor_user_id=actor,
+    )
+
+    publication_id, job_id = create_publication_job(conn, uploaded.version_id, actor_user_id=actor)
+
+    assert publication_id.startswith("publication-")
+    assert job_id.startswith("content-index-")
+    assert conn.execute(
+        "SELECT lifecycle_status FROM content_versions WHERE id=?", (uploaded.version_id,)
+    ).fetchone()[0] == "publishing"
     conn.close()
 
 

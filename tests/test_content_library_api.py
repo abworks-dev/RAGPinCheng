@@ -2518,10 +2518,10 @@ def test_permission_catalog_and_dependency_validation(content_api):
     admin_write = _auth(sessions, "admin", csrf=True)
     catalog = client.get("/api/admin/content/permission-catalog", **admin_read)
     assert catalog.status_code == 200
-    assert catalog.json()["schema_version"] == 6
+    assert catalog.json()["schema_version"] == 7
     assert [item["key"] for item in catalog.json()["permissions"]] == [
-        "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
-        "item.move_draft", "item.archive_draft", "item.review", "item.move_review",
+        "workspace.view", "item.view", "item.download", "category.view", "item.upload",
+        "item.move_draft", "item.archive_draft",
         "item.publish", "item.reclassify_published", "item.archive_published", "trash.view", "trash.restore",
         "trash.purge", "trash.policy_manage",
         "category.manage", "category.force_delete", "folder.request", "folder.review", "import.server", "index.view",

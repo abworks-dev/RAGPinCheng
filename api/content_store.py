@@ -2742,7 +2742,7 @@ def create_publication_job(
         "SELECT item_id,lifecycle_status,source_batch_id FROM content_versions WHERE id=?",
         (version_id,),
     ).fetchone()
-    if row is None or row["lifecycle_status"] not in {"approved", "publication_failed"}:
+    if row is None or row["lifecycle_status"] not in {"draft", "approved", "publication_failed"}:
         raise ValueError("version_not_publishable")
     attempt = int(
         conn.execute(
