@@ -390,6 +390,9 @@ class TestDeployGitSafety(unittest.TestCase):
             workflow,
         )
         self.assertIn("in SYSTEM_CONTENT_PERMISSION_GROUPS.items()", workflow)
+        self.assertIn("expected_permissions.issubset(actual_permissions)", workflow)
+        self.assertIn("unexpected_group_names", workflow)
+        self.assertNotIn("assert actual_groups == expected_groups", workflow)
         for system_group in (
             '"member"',
             '"viewer"',
