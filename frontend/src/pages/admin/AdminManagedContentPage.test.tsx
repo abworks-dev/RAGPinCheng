@@ -52,6 +52,9 @@ const mocks = vi.hoisted(() => ({
   downloadFile: vi.fn(),
   downloadMedia: vi.fn(),
   createMediaMetadataRevision: vi.fn(),
+  transcriptionSchemes: vi.fn(),
+  preflightBulkTranscription: vi.fn(),
+  bulkStartTranscription: vi.fn(),
   deleteContent: vi.fn(),
   trash: vi.fn(),
   trashSettings: vi.fn(),
@@ -151,6 +154,9 @@ vi.mock("../../api/client", () => ({
     downloadManagedContentFile: mocks.downloadFile,
     downloadManagedMedia: mocks.downloadMedia,
     createMediaMetadataRevision: mocks.createMediaMetadataRevision,
+    listTranscriptionSchemes: mocks.transcriptionSchemes,
+    preflightBulkStartTranscription: mocks.preflightBulkTranscription,
+    bulkStartTranscription: mocks.bulkStartTranscription,
     deleteManagedContent: mocks.deleteContent,
     managedContentTrash: mocks.trash,
     managedContentTrashSettings: mocks.trashSettings,
@@ -323,6 +329,12 @@ describe("AdminManagedContentPage", () => {
     mocks.downloadFile.mockResolvedValue({ blob: new Blob(["file"]), filename: "standard.pdf" });
     mocks.downloadMedia.mockResolvedValue({ blob: new Blob(["media"]), filename: "WhisperX 培训视频-视频资料.zip" });
     mocks.createMediaMetadataRevision.mockResolvedValue({});
+    mocks.transcriptionSchemes.mockResolvedValue([{
+      scheme_id: "scheme-1", name: "标准转录", description: "测试方案", base_id: "base-1",
+      config_hash: "a".repeat(64), enabled: true, archived: false, sort_order: 1, version: 1,
+      availability: "available", unavailable_reason_code: null, requires_review: true,
+      auto_publish: false, auto_index: false,
+    }]);
   });
 
   it("shows library-wide status counts at the root while keeping the file list empty", async () => {
