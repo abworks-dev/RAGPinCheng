@@ -1264,7 +1264,7 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
     await openRootFolder();
     fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准" })[0]);
-    expect(screen.getByText("已选择", { exact: false })).toHaveTextContent("已选择 0 个文件夹、1 份资料");
+    expect(screen.getByText("已选择", { exact: false })).toHaveTextContent("已选择 1 份");
     expect(screen.getByText("已选择", { exact: false })).not.toHaveTextContent("单次最多");
     expect(screen.queryByRole("button", { name: "批量操作" })).not.toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准2" })[0]);
