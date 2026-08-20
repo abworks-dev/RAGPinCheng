@@ -17,6 +17,7 @@ import type { ManagedCategory, ManagedIndexJob, ManagedIndexJobList } from "../.
 import { formatAdminDate, formatBytes } from "../../lib/admin-formatters";
 import { ManagedSummaryCard } from "../../components/admin/ManagedSummaryCard";
 import { ManagedItemType } from "../../components/admin/ManagedItemType";
+import { useManagedContentLiveRefresh } from "../../hooks/useManagedContentLiveRefresh";
 
 const PAGE_SIZE = 25;
 const PAGE_SIZE_OPTIONS = [25, 50, 100];
@@ -182,11 +183,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
   }, [load]);
 
   const hasActive = listing.jobs.some((job) => ACTIVE_STATUSES.has(job.status));
-  useEffect(() => {
-    if (!hasActive) return;
-    const timer = window.setInterval(() => void load(true), 3000);
-    return () => window.clearInterval(timer);
-  }, [hasActive, load]);
+  useManagedContentLiveRefresh({ active: hasActive, refresh: () => load(true) });
 
   const counts = listing.status_counts;
   const allCount = Object.values(counts).reduce((sum, value) => sum + value, 0);
