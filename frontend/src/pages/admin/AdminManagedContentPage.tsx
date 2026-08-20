@@ -386,6 +386,37 @@ function UploadTasksPanel({
   </section>;
 }
 
+function UploadCornerNotice({
+  upload,
+  onClose,
+  onOpenTasks,
+}: {
+  upload: ActiveUploadState | null;
+  onClose: () => void;
+  onOpenTasks: () => void;
+}) {
+  if (!upload) return null;
+  const progress = upload.totalBytes > 0
+    ? Math.min(100, Math.round((upload.loadedBytes / upload.totalBytes) * 100))
+    : upload.phase === "completed" ? 100 : 0;
+  const running = upload.phase === "uploading" || upload.phase === "processing";
+  const result = upload.message || (upload.phase === "completed" ? "上传已完成，详情可在上传任务中查看" : undefined);
+  return <div className="fixed right-4 top-4 z-50 w-[min(24rem,calc(100vw-2rem))]" role="status" aria-live="polite">
+    <div className={`rounded-ui-lg border px-4 py-3 shadow-surface ${upload.phase === "failed" ? "border-destructive/40 bg-destructive/10" : upload.phase === "completed" ? "border-success/40 bg-success/10" : "border-primary/40 bg-background"}`}>
+      <div className="flex items-start gap-3">
+        {upload.phase === "failed" ? <XCircle className="mt-0.5 size-4 shrink-0 text-destructive" /> : upload.phase === "completed" ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" /> : <Upload className="mt-0.5 size-4 shrink-0 animate-pulse text-primary" />}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2"><p className="font-medium">{running ? (upload.phase === "processing" ? "服务端处理中…" : "上传中") : upload.phase === "completed" ? "上传完成" : "上传失败"}</p><button type="button" className="text-ui-xs text-muted-foreground hover:text-foreground" onClick={onClose} aria-label="关闭上传提示">关闭</button></div>
+          <p className="mt-1 break-words text-ui-xs text-muted-foreground">{upload.uploadMode === "folder" ? "文件夹" : "文件"} · {upload.totalFiles} 个 · {upload.targetPath}</p>
+          {running && <><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-primary/15"><div className="h-full rounded-full bg-primary transition-[width] duration-normal" style={{ width: `${progress}%` }} /></div><p className="mt-1 text-right text-ui-xs tabular-nums text-muted-foreground">{progress}%</p></>}
+          {result && <p className="mt-2 break-words text-ui-xs">{result}</p>}
+          <button type="button" className="mt-2 text-ui-xs font-medium text-primary hover:underline" onClick={onOpenTasks}>查看上传任务</button>
+        </div>
+      </div>
+    </div>
+  </div>;
+}
+
 const statusLabel: Record<string, string> = {
   draft: "待提交", awaiting_review: "待确认", approved: "已确认", rejected: "已退回",
   publishing: "发布中", published: "已发布", publication_failed: "发布失败", superseded: "历史版本",
@@ -820,6 +851,7 @@ export function AdminManagedContentPage() {
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadChecking, setUploadChecking] = useState(false);
+  const [uploadNoticeDismissed, setUploadNoticeDismissed] = useState(false);
   const [activeUpload, setActiveUpload] = useState<ActiveUploadState | null>(null);
   const [lastUploadAttempt, setLastUploadAttempt] = useState<{ batchId: string; files: Array<File | FolderUploadEntry>; categoryId: string; uploadMode: "files" | "folder" } | null>(null);
   const [uploadConflictReview, setUploadConflictReview] = useState<UploadConflictReview | null>(null);
@@ -1026,6 +1058,7 @@ export function AdminManagedContentPage() {
     const totalBytes = uploadFiles.reduce((sum, entry) => sum + ("file" in entry ? entry.file.size : entry.size), 0);
     const targetPath = categories.find((category) => category.id === targetFolderId)?.full_path || "当前目录";
     setUploading(true);
+    setUploadNoticeDismissed(false);
     setActiveUpload({ batchId: null, uploadMode, targetPath, totalFiles: uploadFiles.length, totalBytes, loadedBytes: 0, phase: "uploading" });
     try {
       const onProgress = (progress: ManagedUploadProgress) => setActiveUpload((current) => current ? {
@@ -1097,6 +1130,15 @@ export function AdminManagedContentPage() {
     uploadMode: "files" | "folder",
     allowFolderMerge = false,
   ) => {
+    setUploadNoticeDismissed(false);
+    const totalBytes = uploadFiles.reduce((sum, entry) => sum + ("file" in entry ? entry.file.size : entry.size), 0);
+    const targetPath = categories.find((category) => category.id === targetFolderId)?.full_path || "当前目录";
+    setActiveUpload({ batchId: null, uploadMode, targetPath, totalFiles: uploadFiles.length, totalBytes, loadedBytes: 0, phase: "processing", message: "正在检查冲突…" });
+    setUploadDialogOpen(false);
+    setPendingUploadFiles([]);
+    setPendingUploadFolderId("");
+    setPendingFolderUpload(null);
+    setPendingFolderUploadFolderId("");
     setUploadChecking(true);
     setUploadConflictError(null);
     try {
@@ -2408,6 +2450,9 @@ export function AdminManagedContentPage() {
       {can("index.view") && <Button size="sm" variant={view === "index" ? "default" : "outline"} role="tab" aria-selected={view === "index"} onClick={() => selectView("index")}><ListChecks className="size-4" />索引任务</Button>}
     </div>
   );
+  const uploadNotice = !uploadNoticeDismissed && activeUpload
+    ? <UploadCornerNotice upload={activeUpload} onClose={() => setUploadNoticeDismissed(true)} onOpenTasks={() => { setUploadNoticeDismissed(false); selectView("uploads"); }} />
+    : null;
 
   const auditDialog = <Dialog open={Boolean(auditTarget)} onOpenChange={(open) => { if (!open) { setAuditTarget(null); setAuditEvents([]); setAuditError(null); } }}>
     <DialogContent className="max-w-2xl">
@@ -2427,6 +2472,7 @@ export function AdminManagedContentPage() {
 
   if (view === "uploads") {
     return <section className="space-y-5" aria-labelledby="managed-content-title">
+      {uploadNotice}
       <header><p className="text-ui-xs font-medium text-primary">内容管理</p><h1 id="managed-content-title" className="mt-1 text-ui-2xl font-semibold tracking-tight">资料管理</h1><p className="mt-1 text-ui-sm text-muted-foreground">统一管理资料的上传、分类、确认和发布。</p></header>
       {viewTabs}
       <UploadTasksPanel activeUpload={activeUpload} canRetry={(task) => Boolean(lastUploadAttempt?.batchId === task.batch_id)} onRetry={(task) => void retryUploadTask(task)} />
@@ -2522,6 +2568,7 @@ export function AdminManagedContentPage() {
   }
 
   return <section className="space-y-5" aria-labelledby="managed-content-title">
+    {uploadNotice}
     <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div><p className="text-ui-xs font-medium text-primary">内容管理</p><h1 id="managed-content-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">资料管理</h1><p className="mt-1 text-ui-sm text-muted-foreground">统一管理资料的上传、分类、确认和发布。</p></div>
     </header>
