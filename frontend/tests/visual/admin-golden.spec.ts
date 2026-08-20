@@ -195,7 +195,7 @@ test.skip("资料管理批量操作 accepted golden", async ({ page }) => {
     : page.getByRole("table").getByRole("checkbox", { name: "选择机电专业协同检查清单" });
   await itemCheckbox.check();
   await page.getByRole("checkbox", { name: "选择建筑信息模型交付标准（合成长文件名用于响应式检查）" }).check();
-  await expect(page.getByText(/已选择\s*2\s*份/)).toBeVisible();
+  await expect(page.getByText(/已选择(?:\s*0 个文件夹、)?\s*2 份(?:资料)?/)).toBeVisible();
   await page.getByRole("button", { name: "批量操作" }).click();
   await expect(page.getByRole("menu", { name: "批量操作" })).toBeVisible();
   const viewport = page.viewportSize()!;

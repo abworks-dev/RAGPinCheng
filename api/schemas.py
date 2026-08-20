@@ -770,16 +770,16 @@ class BulkManagedContentItemRef(BaseModel):
 
 
 class BulkMoveManagedContentRequest(BaseModel):
-    items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
+    items: list[BulkManagedContentItemRef] = Field(min_length=1)
     target_category_id: str = Field(min_length=1, max_length=100)
 
 
 class BulkArchiveManagedContentRequest(BaseModel):
-    items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
+    items: list[BulkManagedContentItemRef] = Field(min_length=1)
 
 
 class BulkRestoreManagedContentRequest(BaseModel):
-    items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
+    items: list[BulkManagedContentItemRef] = Field(min_length=1)
     target_category_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
@@ -824,12 +824,12 @@ class UpdateTrashSettingsRequest(BaseModel):
 
 
 class TrashPurgeRequest(BaseModel):
-    items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
+    items: list[BulkManagedContentItemRef] = Field(min_length=1)
     confirmation: str = Field(min_length=1, max_length=100)
 
 
 class TrashPurgePreflightRequest(BaseModel):
-    items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
+    items: list[BulkManagedContentItemRef] = Field(min_length=1)
 
 
 class TrashPurgeItemDTO(BaseModel):
@@ -881,7 +881,7 @@ class TrashPurgeResponse(BaseModel):
 
 
 class BulkDownloadManagedContentRequest(BaseModel):
-    version_ids: list[str] = Field(min_length=1, max_length=20)
+    version_ids: list[str] = Field(min_length=1)
 
 
 class BulkOperationCategoryRef(BaseModel):
@@ -896,8 +896,8 @@ class BulkOperationItemRef(BaseModel):
 
 class BulkOperationPreflightRequest(BaseModel):
     operation: Literal["move", "submit", "approve", "reject", "publish", "download", "delete", "force_delete"]
-    categories: list[BulkOperationCategoryRef] = Field(default_factory=list, max_length=20)
-    items: list[BulkOperationItemRef] = Field(default_factory=list, max_length=20)
+    categories: list[BulkOperationCategoryRef] = Field(default_factory=list)
+    items: list[BulkOperationItemRef] = Field(default_factory=list)
 
 
 class BulkOperationSelectionRequest(BaseModel):
@@ -1006,7 +1006,7 @@ class FolderRequestDTO(BaseModel):
 
 
 class BulkManagedContentRequest(BaseModel):
-    version_ids: list[str] = Field(min_length=1, max_length=20)
+    version_ids: list[str] = Field(min_length=1)
     approved: bool | None = None
     note: str | None = Field(default=None, max_length=2000)
     category_id: str | None = None

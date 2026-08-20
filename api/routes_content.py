@@ -2985,7 +2985,6 @@ def _raise_bulk_operation_error(exc: Exception) -> None:
     status = 400
     detail = {
         "bulk_scope_empty": "请至少选择一个文件夹或资料",
-        "bulk_source_limit_exceeded": "单次最多选择 20 个文件夹或资料",
         "bulk_scope_file_limit_exceeded": "递归影响资料超过 5000 份，请拆分操作",
         "bulk_archive_size_exceeded": "打包资料总量不能超过 10 GiB",
         "folder_delete_requires_categories": "批量删除文件夹不能混入散选资料",
