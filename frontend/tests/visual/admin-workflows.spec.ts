@@ -473,9 +473,17 @@ test.describe("资料管理", () => {
     await openTab(page, "资料管理");
     await openRootFolder(page);
     await page.getByRole("button", { name: "上传文件" }).click();
-    const folderButton = page.getByRole("button", { name: "上传文件夹" });
+    const dropzone = page.getByTestId("managed-upload-dropzone");
+    await expect(dropzone).toContainText("拖动文件或文件夹到这里");
+    const fileButton = dropzone.getByRole("button", { name: "选择文件", exact: true });
+    const folderButton = dropzone.getByRole("button", { name: "选择文件夹", exact: true });
+    await expect(fileButton).toBeVisible();
     await expect(folderButton).toBeVisible();
-    if (page.viewportSize()!.width === 390) await expectTouchTarget(folderButton);
+    if (page.viewportSize()!.width === 390) {
+      await expectTouchTarget(fileButton);
+      await expectTouchTarget(folderButton);
+    }
+    await page.screenshot({ path: testInfo.outputPath("managed-content-upload-dropzone.png"), fullPage: false });
 
     await page.getByLabel("选择资料文件夹").evaluate((element: HTMLInputElement) => {
       const transfer = new DataTransfer();
