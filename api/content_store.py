@@ -837,8 +837,6 @@ def create_category(
             if not parent["is_active"]:
                 raise ValueError("parent_category_inactive")
             level = int(parent["level"]) + 1
-            if level > 4:
-                raise ValueError("category_depth_exceeded")
         siblings = sorted(_category_siblings(conn, parent_id), key=_category_sibling_sort_key)
         if target_position is not None:
             if target_position < 1 or target_position > len(siblings) + 1:
@@ -1219,10 +1217,6 @@ def move_category(
                ) SELECT id,level FROM descendants""",
             (category_id,),
         ).fetchall()
-        subtree_height = max(int(row["level"]) for row in descendants) - int(category["level"])
-        if target_level + subtree_height > 4:
-            raise ValueError("category_depth_exceeded")
-
         _ensure_category_sibling_identity_available(
             conn,
             parent_id=target_parent_id,
@@ -1330,8 +1324,6 @@ def create_folder_request(
         ).fetchone()
         if parent is None or not parent["is_active"]:
             raise ValueError("active_category_not_found")
-        if int(parent["level"]) >= 4:
-            raise ValueError("category_depth_exceeded")
         _ensure_category_sibling_identity_available(
             conn,
             parent_id=parent_category_id,

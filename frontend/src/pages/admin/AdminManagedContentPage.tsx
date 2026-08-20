@@ -3160,12 +3160,6 @@ export function AdminManagedContentPage() {
           visit(child.id);
         });
     visit(folderMoveTarget.id);
-    const subtreeHeight = Math.max(
-      0,
-      ...categories
-        .filter((category) => descendants.has(category.id))
-        .map((category) => category.level - folderMoveTarget.level),
-    );
     const destinationConflict = (parentId: string | null) => {
       const siblings = categories.filter(
         (category) =>
@@ -3190,8 +3184,6 @@ export function AdminManagedContentPage() {
         reasons[category.id] = "不能移动到自身的子目录";
       else if (category.id === folderMoveTarget.parent_id)
         reasons[category.id] = "文件夹已经位于此目录";
-      else if (category.level + 1 + subtreeHeight > 4)
-        reasons[category.id] = "移动后目录层级将超过四级";
       else reasons[category.id] = destinationConflict(category.id);
     });
     const rootReason =
@@ -6842,7 +6834,7 @@ export function AdminManagedContentPage() {
                       ? setNewFolderOpen(true)
                       : setRequestFolderOpen(true)
                   }
-                  disabled={!currentFolder || currentFolder.level >= 4}
+                  disabled={!currentFolder}
                 >
                   <FolderPlus className="size-4" />
                   新建目录
@@ -8826,8 +8818,7 @@ export function AdminManagedContentPage() {
           <DialogHeader>
             <DialogTitle>新建文件夹</DialogTitle>
             <DialogDescription>
-              文件夹将建立在“{currentFolder?.display_name || "当前目录"}
-              ”下，最多支持四级目录。
+              文件夹将建立在“{currentFolder?.display_name || "当前目录"}”下。
             </DialogDescription>
           </DialogHeader>
           <label className="space-y-1.5 text-ui-sm font-medium">

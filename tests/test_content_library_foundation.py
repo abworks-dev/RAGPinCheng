@@ -15,7 +15,7 @@ from api.content_permission_catalog import (
 )
 from api.content_import import import_server_batch, resolve_import_category
 from api.content_storage import ContentStorage, StoredContentObject
-from api.content_store import archive_content_item, create_category, create_content_revision, create_web_batch, delete_category, force_delete_category, get_category_delete_preview, get_category_force_delete_preview, list_categories, move_content_item, register_uploaded_document, restore_content_item
+from api.content_store import archive_content_item, create_category, create_content_revision, create_web_batch, delete_category, force_delete_category, get_category_delete_preview, get_category_force_delete_preview, list_categories, move_category, move_content_item, register_uploaded_document, restore_content_item
 from api.content_store import (
     create_publication_job,
     review_version,
@@ -92,6 +92,68 @@ def test_category_delete_removes_empty_subtree_and_renumbers_siblings(tmp_path):
     assert conn.execute("SELECT is_active FROM category_import_aliases WHERE id='alias-delete-test'").fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM category_nodes WHERE id IN (?,?) AND deleted_at IS NOT NULL", (target["id"], child["id"])).fetchone()[0] == 2
     assert all(row["id"] not in {target["id"], child["id"]} for row in list_categories(conn, include_inactive=True))
+    conn.close()
+
+
+def test_category_move_updates_every_descendant_beyond_four_levels(tmp_path):
+    conn = _db(tmp_path)
+    actor = conn.execute("SELECT id FROM users WHERE employee_id='u1'").fetchone()[0]
+    moving_root = create_category(
+        conn,
+        category_key="moving_root",
+        parent_id="cat-03",
+        display_code="01",
+        display_name="待移动树",
+        sort_order=10,
+        actor_user_id=actor,
+    )
+    moving_child = create_category(
+        conn,
+        category_key="moving_child",
+        parent_id=moving_root["id"],
+        display_code="01",
+        display_name="子目录",
+        sort_order=10,
+        actor_user_id=actor,
+    )
+    moving_leaf = create_category(
+        conn,
+        category_key="moving_leaf",
+        parent_id=moving_child["id"],
+        display_code="01",
+        display_name="叶目录",
+        sort_order=10,
+        actor_user_id=actor,
+    )
+    target_parent = "cat-04"
+    for level in range(2, 6):
+        target = create_category(
+            conn,
+            category_key=f"move_target_level_{level}",
+            parent_id=target_parent,
+            display_code="01",
+            display_name=f"目标第{level}级",
+            sort_order=level,
+            actor_user_id=actor,
+        )
+        target_parent = target["id"]
+
+    rows = move_category(
+        conn,
+        moving_root["id"],
+        target_parent_id=target_parent,
+        before_category_id=None,
+        expected_version=moving_root["version"],
+        actor_user_id=actor,
+    )
+
+    levels = {row["id"]: row["level"] for row in rows}
+    assert levels[moving_root["id"]] == 6
+    assert levels[moving_child["id"]] == 7
+    assert levels[moving_leaf["id"]] == 8
+    assert conn.execute(
+        "SELECT parent_id FROM category_nodes WHERE id=?", (moving_root["id"],)
+    ).fetchone()[0] == target_parent
     conn.close()
 
 
@@ -343,7 +405,7 @@ def test_admin_can_assign_scoped_content_permissions(tmp_path, monkeypatch):
     conn.close()
 
 
-def test_category_depth_is_limited_to_four(tmp_path):
+def test_category_creation_supports_depth_beyond_four(tmp_path):
     conn = _db(tmp_path)
     actor = conn.execute("SELECT id FROM users WHERE employee_id='u1'").fetchone()[0]
     parent = "cat-01"
@@ -358,16 +420,16 @@ def test_category_depth_is_limited_to_four(tmp_path):
             actor_user_id=actor,
         )
         parent = row["id"]
-    with pytest.raises(ValueError, match="category_depth_exceeded"):
-        create_category(
-            conn,
-            category_key="level_5",
-            parent_id=parent,
-            display_code="5",
-            display_name="第五级",
-            sort_order=5,
-            actor_user_id=actor,
-        )
+    row = create_category(
+        conn,
+        category_key="level_5",
+        parent_id=parent,
+        display_code="5",
+        display_name="第五级",
+        sort_order=5,
+        actor_user_id=actor,
+    )
+    assert row["level"] == 5
     conn.close()
 
 
@@ -807,6 +869,83 @@ def test_unknown_server_folder_routes_to_pending_confirmation(tmp_path):
     conn.close()
 
 
+def test_server_import_resolves_category_paths_beyond_four_levels(tmp_path):
+    conn = _db(tmp_path)
+    actor = conn.execute("SELECT id FROM users WHERE employee_id='u1'").fetchone()[0]
+    parent = "cat-01"
+    folder_names = []
+    for level in range(2, 7):
+        folder_name = f"第{level}级"
+        row = create_category(
+            conn,
+            category_key=f"import_level_{level}",
+            parent_id=parent,
+            display_code="01",
+            display_name=folder_name,
+            sort_order=level,
+            actor_user_id=actor,
+        )
+        parent = row["id"]
+        folder_names.append(folder_name)
+
+    category_id, needs_mapping = resolve_import_category(
+        conn,
+        ("01_行业规范与标准", *folder_names),
+    )
+
+    assert category_id == parent
+    assert needs_mapping is False
+    conn.close()
+
+
+def test_server_batch_apply_imports_into_category_beyond_four_levels(tmp_path):
+    conn = _db(tmp_path)
+    actor = conn.execute("SELECT id FROM users WHERE employee_id='u1'").fetchone()[0]
+    storage = ContentStorage(tmp_path / "content")
+    parent = "cat-01"
+    folder_names = ["01_行业规范与标准"]
+    for level in range(2, 7):
+        folder_name = f"第{level}级"
+        row = create_category(
+            conn,
+            category_key=f"apply_import_level_{level}",
+            parent_id=parent,
+            display_code="01",
+            display_name=folder_name,
+            sort_order=level,
+            actor_user_id=actor,
+        )
+        parent = row["id"]
+        folder_names.append(folder_name)
+    batch_root = storage.inbox_root / "server" / "batch-deep"
+    source_dir = batch_root.joinpath(*folder_names)
+    source_dir.mkdir(parents=True)
+    (source_dir / "guide.md").write_text("# 深层指南", encoding="utf-8")
+
+    batch_id, entries = import_server_batch(
+        conn,
+        storage,
+        batch_root,
+        actor_user_id=actor,
+        max_bytes=1024,
+        apply=True,
+    )
+
+    assert batch_id
+    assert len(entries) == 1
+    assert entries[0].status == "imported"
+    assert entries[0].category_id == parent
+    assert entries[0].needs_mapping is False
+    stored = conn.execute(
+        "SELECT category_id FROM content_items WHERE id=?", (entries[0].item_id,)
+    ).fetchone()
+    assert stored[0] == parent
+    assert conn.execute(
+        "SELECT lifecycle_status FROM content_versions WHERE id=?", (entries[0].version_id,)
+    ).fetchone()[0] == "awaiting_review"
+    conn.close()
+
+
 def test_server_batch_apply_registers_items_for_review(tmp_path):
     conn = _db(tmp_path)
     actor = conn.execute("SELECT id FROM users WHERE employee_id='u1'").fetchone()[0]
@@ -875,6 +1014,63 @@ def test_read_only_view_uses_category_code_and_published_head(tmp_path):
     assert exported.read_bytes() == payload
     assert not os.path.samefile(object_path, exported)
     assert object_path.stat().st_mode & 0o200
+    conn.close()
+
+
+def test_read_only_view_exports_published_content_beyond_four_levels(tmp_path):
+    conn = _db(tmp_path)
+    actor = conn.execute("SELECT id FROM users WHERE employee_id='u1'").fetchone()[0]
+    parent = "cat-01"
+    expected_parts = ["01_行业规范与标准"]
+    for level in range(2, 7):
+        row = create_category(
+            conn,
+            category_key=f"view_level_{level}",
+            parent_id=parent,
+            display_code="01",
+            display_name=f"第{level}级",
+            sort_order=level,
+            actor_user_id=actor,
+        )
+        parent = row["id"]
+        expected_parts.append(f"01_第{level}级")
+
+    storage = ContentStorage(tmp_path / "content")
+    storage.ensure_layout()
+    payload = b"deep published"
+    digest = hashlib.sha256(payload).hexdigest()
+    object_path = storage.object_path_for_sha256(digest)
+    object_path.parent.mkdir(parents=True, exist_ok=True)
+    object_path.write_bytes(payload)
+    uploaded = register_uploaded_document(
+        conn,
+        batch_id=create_web_batch(conn, actor_user_id=actor),
+        category_id=parent,
+        title="深层资料",
+        original_filename="deep.pdf",
+        doc_type="pdf",
+        stored=StoredContentObject(
+            digest,
+            len(payload),
+            "application/pdf",
+            object_path.relative_to(storage.root).as_posix(),
+            object_path,
+            True,
+        ),
+        actor_user_id=actor,
+    )
+    conn.execute(
+        "INSERT INTO content_publications(id,version_id,status,publisher_id,created_at,updated_at,published_at) VALUES ('deep-pub',?,'published',?,?,?,?)",
+        (uploaded.version_id, actor, 10, 10, 10),
+    )
+    conn.execute(
+        "INSERT INTO content_item_heads(item_id,current_version_id,publication_id,updated_at) VALUES (?,?,'deep-pub',10)",
+        (uploaded.item_id, uploaded.version_id),
+    )
+    conn.commit()
+
+    assert rebuild_read_only_view(conn, storage) == 1
+    assert storage.views_root.joinpath(*expected_parts, "deep.pdf").read_bytes() == payload
     conn.close()
 
 

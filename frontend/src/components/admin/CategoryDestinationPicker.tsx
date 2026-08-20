@@ -30,7 +30,7 @@ export function CategoryDestinationPicker({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const parent = categories.find((category) => category.id === value) || null;
-  const canCreate = Boolean(onCreateFolder && parent && parent.level < 4 && !pickerProps.disabled);
+  const canCreate = Boolean(onCreateFolder && parent && !pickerProps.disabled);
 
   const create = async () => {
     if (!onCreateFolder || !parent || !name.trim()) return;
@@ -56,7 +56,7 @@ export function CategoryDestinationPicker({
         size="sm"
         variant="outline"
         disabled={!canCreate}
-        title={!parent ? "请先选择上级目录" : parent.level >= 4 ? "最多支持四级目录" : undefined}
+        title={!parent ? "请先选择上级目录" : undefined}
         onClick={() => setCreating(true)}
       ><FolderPlus className="size-4" />新建文件夹</Button> : <div className="space-y-2">
         <div className="flex items-center gap-2">

@@ -187,11 +187,9 @@ export function AdminCategoriesPage() {
       visit(child.id);
     });
     visit(movingCategory.id);
-    const subtreeDepth = Math.max(0, ...categories.filter((category) => descendants.has(category.id)).map((category) => category.level - movingCategory.level));
     return categories.filter((category) => category.id !== movingCategory.id
       && !descendants.has(category.id)
-      && category.is_active
-      && category.level + 1 + subtreeDepth <= 4);
+      && category.is_active);
   }, [categories, movingCategory]);
   const createParentId = createDraft.parent_id || null;
   const createSiblings = useMemo(
@@ -530,7 +528,7 @@ export function AdminCategoriesPage() {
 
       <Sheet open={createOpen} onOpenChange={(open) => { if (!open && !createSaving) { setCreateOpen(false); setCreateConfirming(false); } }}>
         <SheetContent className="max-w-xl overflow-y-auto">
-          <SheetHeader><SheetTitle>新增分类</SheetTitle><SheetDescription>分类最多四级，稳定标识由系统自动生成。</SheetDescription></SheetHeader>
+          <SheetHeader><SheetTitle>新增分类</SheetTitle><SheetDescription>稳定标识由系统自动生成。</SheetDescription></SheetHeader>
           <div className="space-y-5 p-6">
             {createError && <Alert variant="destructive" role="alert"><AlertTitle>分类创建失败</AlertTitle><AlertDescription>{createError}</AlertDescription></Alert>}
             {!createConfirming ? <CategoryCreateForm draft={createDraft} categories={categories} saving={createSaving} siblingCount={createSiblings.length} positionValid={createPositionValid} onChange={(nextDraft) => { setCreateDraft(nextDraft); setCreateConfirming(false); setCreateError(null); }} onCreate={() => void create()} /> : <div className="space-y-4">
@@ -744,7 +742,7 @@ function CategoryDetail({
       {error && <Alert variant="destructive" role="alert"><AlertTitle>保存失败</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
       <section aria-labelledby={`category-level-${category.id}`} className="space-y-3">
         <div><h4 id={`category-level-${category.id}`} className="text-ui-sm font-semibold">目录结构</h4><p className="mt-1 break-words text-ui-xs text-muted-foreground">父分类：{parent ? `${parent.display_code} ${parent.display_name}` : "一级分类"} · 第 {category.level} 级 · {category.item_count} 份直接资料</p></div>
-        <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={onAddChild} disabled={moving || category.level >= 4 || !category.is_active}><Plus className="size-4" />新增子分类</Button><Button variant="outline" onClick={onMove} disabled={moving || isDirty}><Move className="size-4" />移动至</Button>{canDelete && <Button variant="outline" className="text-destructive hover:text-destructive" onClick={onDelete} disabled={moving || isDirty}><Trash2 className="size-4" />删除文件夹</Button>}</div>
+        <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={onAddChild} disabled={moving || !category.is_active}><Plus className="size-4" />新增子分类</Button><Button variant="outline" onClick={onMove} disabled={moving || isDirty}><Move className="size-4" />移动至</Button>{canDelete && <Button variant="outline" className="text-destructive hover:text-destructive" onClick={onDelete} disabled={moving || isDirty}><Trash2 className="size-4" />删除文件夹</Button>}</div>
       </section>
       <section aria-labelledby={`category-fields-${category.id}`} className="space-y-4">
         <h4 id={`category-fields-${category.id}`} className="text-ui-sm font-semibold">基本信息</h4>
@@ -802,7 +800,7 @@ function CategoryCreateForm({
   onCreate: () => void;
 }) {
   const canCreate = draft.display_name.trim() && positionValid;
-  return <div className="space-y-4"><Field label="父分类"><Select value={draft.parent_id} onChange={(event) => { const parentId = event.target.value; const nextSiblingCount = categories.filter((category) => category.parent_id === (parentId || null)).length; onChange({ ...draft, parent_id: parentId, target_position: String(nextSiblingCount + 1) }); }} aria-label="父分类"><option value="">一级分类</option>{categories.filter((category) => category.is_active && category.level < 4).map((category) => <option key={category.id} value={category.id}>{category.full_path}</option>)}</Select></Field><Field label="分类名称"><Input value={draft.display_name} maxLength={100} onChange={(event) => onChange({ ...draft, display_name: event.target.value })} placeholder="例如 公司内部标准" aria-label="分类名称" /></Field><Field label="编号"><Input type="number" min={1} max={siblingCount + 1} step={1} value={draft.target_position} onChange={(event) => onChange({ ...draft, target_position: event.target.value })} aria-label="编号" /><span className="mt-1 block text-ui-xs font-normal text-muted-foreground">可填写 1 到 {siblingCount + 1}；使用已有编号时，确认后同级分类会自动顺延。</span></Field>{!positionValid && <p className="text-ui-sm text-destructive" role="alert">请输入 1 到 {siblingCount + 1} 之间的整数。</p>}<Button className="w-full" onClick={onCreate} disabled={saving || !canCreate}><Plus className="size-4" />{saving ? "新增中…" : "新增分类"}</Button></div>;
+  return <div className="space-y-4"><Field label="父分类"><Select value={draft.parent_id} onChange={(event) => { const parentId = event.target.value; const nextSiblingCount = categories.filter((category) => category.parent_id === (parentId || null)).length; onChange({ ...draft, parent_id: parentId, target_position: String(nextSiblingCount + 1) }); }} aria-label="父分类"><option value="">一级分类</option>{categories.filter((category) => category.is_active).map((category) => <option key={category.id} value={category.id}>{category.full_path}</option>)}</Select></Field><Field label="分类名称"><Input value={draft.display_name} maxLength={100} onChange={(event) => onChange({ ...draft, display_name: event.target.value })} placeholder="例如 公司内部标准" aria-label="分类名称" /></Field><Field label="编号"><Input type="number" min={1} max={siblingCount + 1} step={1} value={draft.target_position} onChange={(event) => onChange({ ...draft, target_position: event.target.value })} aria-label="编号" /><span className="mt-1 block text-ui-xs font-normal text-muted-foreground">可填写 1 到 {siblingCount + 1}；使用已有编号时，确认后同级分类会自动顺延。</span></Field>{!positionValid && <p className="text-ui-sm text-destructive" role="alert">请输入 1 到 {siblingCount + 1} 之间的整数。</p>}<Button className="w-full" onClick={onCreate} disabled={saving || !canCreate}><Plus className="size-4" />{saving ? "新增中…" : "新增分类"}</Button></div>;
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {

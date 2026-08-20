@@ -47,4 +47,16 @@ describe("CategoryDestinationPicker", () => {
     await waitFor(() => expect(onCreateFolder).toHaveBeenCalledWith(root.id, "新建子目录"));
     expect(onChange).toHaveBeenCalledWith(created.id);
   });
+
+  it("allows creating a child below a fourth-level destination", () => {
+    const levelFour = { ...root, level: 4, full_path: "01 行业规范与标准 / 01 二级 / 01 三级 / 01 四级" };
+    render(<CategoryDestinationPicker
+      categories={[levelFour]}
+      value={levelFour.id}
+      onChange={vi.fn()}
+      onCreateFolder={vi.fn()}
+    />);
+
+    expect(screen.getByRole("button", { name: "新建文件夹" })).toBeEnabled();
+  });
 });

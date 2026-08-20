@@ -846,6 +846,19 @@ describe("AdminManagedContentPage", () => {
     expect(within(dialog).getByTestId(`category-picker-item-${childCategory.id}`)).toHaveTextContent("不能移动到文件夹自身");
   });
 
+  it("allows moving a folder below a fourth-level destination", async () => {
+    mocks.permissions = CATEGORY_MANAGER_PERMISSIONS;
+    const destination = { ...projectCategory, level: 4, item_count: 0 };
+    mocks.categories.mockResolvedValue([category, childCategory, destination]);
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    const row = screen.getByTestId(`managed-folder-row-${childCategory.id}`);
+    fireEvent.click(within(row).getByRole("button", { name: /移动文件夹/ }));
+    const dialog = screen.getByRole("dialog", { name: "移动文件夹位置" });
+    expect(within(dialog).getByTestId(`category-picker-item-${destination.id}`)).toHaveAttribute("aria-disabled", "false");
+  });
+
   it("sorts folder and file groups independently while keeping folders first", async () => {
     const alphaFolder = { ...childCategory, id: "folder-alpha", display_code: "01", display_name: "A 目录" };
     const zetaFolder = { ...childCategory, id: "folder-zeta", display_code: "09", display_name: "Z 目录" };
@@ -1665,6 +1678,15 @@ describe("AdminManagedContentPage", () => {
     await waitFor(() => expect(mocks.createCategory).toHaveBeenCalledWith(expect.objectContaining({
       parent_id: "cat-03", display_name: "审核标准",
     })));
+  });
+
+  it("allows creating a child folder from a fourth-level directory", async () => {
+    mocks.permissions = CATEGORY_MANAGER_PERMISSIONS;
+    mocks.categories.mockResolvedValue([{ ...category, level: 4 }]);
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    expect(await screen.findByRole("button", { name: "新建目录" })).toBeEnabled();
   });
 
   it("lets an organizer submit a child folder request", async () => {

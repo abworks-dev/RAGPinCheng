@@ -225,6 +225,75 @@ def test_schema_14_database_migrates_answer_policy_and_asr_profiles(tmp_path, mo
     conn.close()
 
 
+def test_schema_33_database_relaxes_category_level_check_without_losing_rows(tmp_path, monkeypatch):
+    path = tmp_path / "app.sqlite"
+    migrations = db_migrations.MIGRATIONS
+    monkeypatch.setattr(
+        db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 33),
+    )
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    conn.execute(
+        """INSERT INTO category_nodes
+           (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,created_at,updated_at)
+           VALUES ('migration-depth-4','migration_depth_4','cat-01','01','第四级',10,4,1,1,1)"""
+    )
+    conn.commit()
+    table_sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='category_nodes'"
+    ).fetchone()[0]
+    assert "level BETWEEN 1 AND 4" in table_sql
+    conn.close()
+
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    table_sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='category_nodes'"
+    ).fetchone()[0]
+    assert "level BETWEEN 1 AND 4" not in table_sql
+    assert "CHECK (level >= 1)" in table_sql
+    conn.execute(
+        """INSERT INTO category_nodes
+           (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,created_at,updated_at)
+           VALUES ('migration-depth-5','migration_depth_5','migration-depth-4','01','第五级',10,5,1,1,1)"""
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            """INSERT INTO category_nodes
+               (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,created_at,updated_at)
+               VALUES ('migration-depth-0','migration_depth_0',NULL,'98','无效层级',980,0,1,1,1)"""
+        )
+    assert conn.execute(
+        "SELECT display_name FROM category_nodes WHERE id='migration-depth-4'"
+    ).fetchone()[0] == "第四级"
+    assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
+    conn.close()
+
+
+def test_repeated_init_fails_closed_when_category_level_schema_drifts(tmp_path):
+    path = tmp_path / "app.sqlite"
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    table_sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='category_nodes'"
+    ).fetchone()[0]
+    conn.execute("PRAGMA writable_schema=ON")
+    conn.execute(
+        "UPDATE sqlite_master SET sql=? WHERE type='table' AND name='category_nodes'",
+        (table_sql.replace(
+            "level INTEGER NOT NULL CHECK (level >= 1)",
+            "level INTEGER NOT NULL CHECK (level >= 1) CHECK (level BETWEEN 1 AND 4)",
+        ),),
+    )
+    conn.execute("PRAGMA writable_schema=RESET")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(RuntimeError, match="migration_schema_mismatch"):
+        init_db(path, backup_dir=tmp_path / "backups")
+
+
 def test_schema_17_adds_reclassification_jobs_without_granting_custom_principals(
     tmp_path, monkeypatch
 ):
