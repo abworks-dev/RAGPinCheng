@@ -26,7 +26,7 @@ test.describe("转录任务", () => {
   test("媒体空状态和错误状态可恢复", async ({ page }) => {
     await installAdminRoutes(page, "empty");
     await page.goto("/admin/content?view=transcription");
-    await expect(page.getByText("暂无媒体资源")).toBeVisible();
+    await expect(page.getByText("暂无转录任务")).toBeVisible();
     await expectNoBodyOverflow(page);
 
     await page.unrouteAll({ behavior: "ignoreErrors" });
