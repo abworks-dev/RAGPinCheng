@@ -339,6 +339,8 @@ def _preflight_bulk_items(conn, body: BulkStartTranscriptionRequest) -> list[Bul
         job_status = str(row["job_status"] or "")
         if job_status in {"pending", "running"}:
             item_status, reason = "already_started", "已有正在运行的转录任务"
+        elif job_status == "succeeded":
+            item_status, reason = "unavailable", "该视频已完成转录"
         elif row["status"] == "failed" and not job_status:
             item_status, reason = "unavailable", "视频上传失败，请重新上传或删除失败记录"
         elif job_status == "failed" and row["job_failure_classification"] == "permanent":

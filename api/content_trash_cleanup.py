@@ -172,14 +172,14 @@ def _media_lineage_ids(conn: sqlite3.Connection, item_id: str, current_media_id:
 def _media_snapshot(conn: sqlite3.Connection, item_id: str) -> dict[str, Any] | None:
     row = conn.execute(
         """SELECT i.id AS item_id,i.title,i.archived_at,i.content_kind,i.media_id,
-                  i.category_id,h.current_version_id AS version_id,m.original_filename,
+                   i.category_id,h.current_version_id AS version_id,m.original_filename,
                   m.file_size,m.storage_rel_path,
                   COALESCE(json_extract(a.metadata_json,'$.category_path'),
                            c.display_code || ' ' || c.display_name) AS category_path
            FROM content_items i
            JOIN category_nodes c ON c.id=i.category_id
            JOIN media_assets m ON m.media_id=i.media_id
-           JOIN media_transcript_heads h ON h.media_id=i.media_id
+            LEFT JOIN media_transcript_heads h ON h.media_id=i.media_id
            LEFT JOIN content_audit_events a ON a.id=(
              SELECT a2.id FROM content_audit_events a2 WHERE a2.item_id=i.id
              AND a2.event_type='content.archived' ORDER BY a2.created_at DESC,a2.id DESC LIMIT 1)
@@ -250,6 +250,9 @@ def _media_snapshot(conn: sqlite3.Connection, item_id: str) -> dict[str, Any] | 
         unsafe_path = True
 
     result = dict(row)
+    result["version_id"] = str(
+        row["version_id"] or f"media-pending-{row['media_id']}"
+    )
     result.update({
         "object_sha256": None,
         "size_bytes": sum(int(media["file_size"] or 0) for media in media_rows)
@@ -391,6 +394,8 @@ def _delete_external(version_id: str, item_id: str, filename: str) -> tuple[int,
 
 
 def _delete_media_external(version_ids: list[str]) -> tuple[int, int]:
+    if not version_ids:
+        return 0, 0
     qdrant_count = 0
     client = _client()
     if client.collection_exists(COLLECTION):

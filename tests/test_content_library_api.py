@@ -14,13 +14,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api import content_bulk_operations, routes_admin, routes_content
+from api import content_bulk_operations, routes_admin, routes_content, routes_transcription
 from api import content_trash_cleanup
 from api.content_permission_catalog import LEGACY_CONTENT_PERMISSION_MAP
 from api.content_storage import ContentStorage
 from api.db import connect, get_db, init_db
 from api.media_transcript_catalog import ensure_media_transcript_catalog_item
-from api.schemas import MediaAssetDTO
+from api.schemas import BulkStartTranscriptionRequest, MediaAssetDTO
 from api.transcription_artifacts import LocalTranscriptionArtifactStore
 
 
@@ -444,6 +444,285 @@ def _insert_published_media(
     item_id = ensure_media_transcript_catalog_item(conn, media_id=media_id, now=now)
     conn.commit()
     return item_id
+
+
+def _insert_catalogued_media(
+    conn: sqlite3.Connection,
+    *,
+    media_id: str,
+    title: str,
+    filename: str,
+    now: int,
+    status: str = "uploaded",
+    job_status: str | None = None,
+    failure_classification: str | None = None,
+    batch_id: str | None = None,
+    sequence: int = 1,
+) -> tuple[str, str]:
+    conn.execute(
+        """INSERT INTO media_assets(
+               media_id,title,original_filename,storage_rel_path,mime_type,file_size,sha256,
+               transcript_source_path,transcript_origin,status,created_by,created_at,updated_at,error,target_category_id
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            media_id, title, filename, f"synthetic/{media_id}.mp4", "video/mp4", 1024,
+            None, None, "generated", status, None, now, now, None, "cat-03",
+        ),
+    )
+    if job_status:
+        job_id = f"{media_id[:-1]}job"
+        conn.execute(
+            """INSERT INTO transcription_jobs(
+                   id,media_id,attempt_number,request_idempotency_key,execution_identity,
+                   profile_id,provider_key,profile_definition_version,config_hash,
+                   profile_snapshot_json,execution_config_json,execution_fingerprint,audio_sha256,
+                   input_kind,input_size_bytes,total_ms,status,failure_classification,created_at,updated_at
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'media',?,1000,?,?,?,?)""",
+            (
+                job_id, media_id, 1, f"{media_id[:-1]}key", "synthetic-execution",
+                "synthetic-profile", "synthetic-provider", "1", "a" * 64,
+                "{}", "{}", "b" * 64, "c" * 64, 1024, job_status,
+                failure_classification, now, now,
+            ),
+        )
+    item_id = ensure_media_transcript_catalog_item(conn, media_id=media_id, now=now)
+    if batch_id:
+        conn.execute(
+            """INSERT INTO upload_batch_entries(
+                   batch_id,sequence,filename,relative_path,size_bytes,status,reason,item_id,version_id,
+                   entry_kind,media_id,transcription_job_id,failure_code,created_at
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                batch_id, sequence, filename, f"folder-{sequence}/{filename}", 1024, "accepted", None,
+                item_id, None, "video", media_id,
+                f"{media_id[:-1]}job" if job_status else None, None, now,
+            ),
+        )
+    conn.commit()
+    return item_id, f"media-pending-{media_id}"
+
+
+def test_untranscribed_video_can_move_to_trash_and_restore(content_api):
+    client, sessions, _queued, db_path = content_api
+    media_id = "123e4567-e89b-42d3-a456-426614174250"
+    conn = connect(db_path)
+    item_id, version_id = _insert_catalogued_media(
+        conn, media_id=media_id, title="待转录视频", filename="waiting.mp4", now=int(time.time()),
+    )
+    conn.close()
+
+    archived = client.request(
+        "DELETE", f"/api/admin/content/items/{item_id}",
+        json={"expected_version_id": version_id}, **_auth(sessions, "admin", csrf=True),
+    )
+    assert archived.status_code == 200, archived.text
+    assert archived.json()["previous_status"] == "awaiting_transcription"
+
+    refs = [{"item_id": item_id, "expected_version_id": version_id}]
+    blocked_preflight = client.post(
+        "/api/admin/content/bulk-restore/preflight",
+        json={"items": refs},
+        **_auth(sessions, "reviewer", csrf=True),
+    )
+    assert blocked_preflight.status_code == 403
+    preflight = client.post(
+        "/api/admin/content/bulk-restore/preflight",
+        json={"items": refs},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert preflight.status_code == 200, preflight.text
+    assert preflight.json()["results"][0]["status"] == "ready"
+    audit = client.get(
+        f"/api/admin/content/items/{item_id}/audit-events",
+        **_auth(sessions, "admin"),
+    )
+    assert audit.status_code == 200, audit.text
+    assert audit.json()[0]["event_type"] == "content.archived"
+
+    conn = connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT archived_at FROM content_items WHERE id=?", (item_id,)
+        ).fetchone()
+        media = conn.execute(
+            "SELECT status FROM media_assets WHERE media_id=?", (media_id,)
+        ).fetchone()
+        assert row["archived_at"] is not None
+        assert media["status"] == "archived"
+    finally:
+        conn.close()
+
+    forbidden_restore = client.post(
+        f"/api/admin/content/items/{item_id}/restore",
+        json={"expected_version_id": version_id},
+        **_auth(sessions, "reviewer", csrf=True),
+    )
+    assert forbidden_restore.status_code == 403
+    restored = client.post(
+        f"/api/admin/content/items/{item_id}/restore",
+        json={"expected_version_id": version_id}, **_auth(sessions, "admin", csrf=True),
+    )
+    assert restored.status_code == 200, restored.text
+    conn = connect(db_path)
+    try:
+        assert conn.execute("SELECT archived_at FROM content_items WHERE id=?", (item_id,)).fetchone()[0] is None
+        assert conn.execute("SELECT status FROM media_assets WHERE media_id=?", (media_id,)).fetchone()[0] == "uploaded"
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize(
+    ("job_status", "media_status", "failure_classification", "expected_lifecycle"),
+    [
+        ("failed", "failed", "transient", "transcription_failed"),
+        ("cancelled", "uploaded", None, "awaiting_transcription"),
+    ],
+)
+def test_retryable_terminal_video_can_move_to_trash_and_restore(
+    content_api,
+    job_status: str,
+    media_status: str,
+    failure_classification: str | None,
+    expected_lifecycle: str,
+):
+    client, sessions, _queued, db_path = content_api
+    suffix = "6" if job_status == "failed" else "7"
+    media_id = f"123e4567-e89b-42d3-a456-42661417425{suffix}"
+    conn = connect(db_path)
+    item_id, version_id = _insert_catalogued_media(
+        conn,
+        media_id=media_id,
+        title=f"{job_status} video",
+        filename=f"{job_status}.mp4",
+        now=int(time.time()),
+        status=media_status,
+        job_status=job_status,
+        failure_classification=failure_classification,
+    )
+    conn.close()
+
+    archived = client.request(
+        "DELETE",
+        f"/api/admin/content/items/{item_id}",
+        json={"expected_version_id": version_id},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert archived.status_code == 200, archived.text
+    assert archived.json()["previous_status"] == expected_lifecycle
+
+    restored = client.post(
+        f"/api/admin/content/items/{item_id}/restore",
+        json={"expected_version_id": version_id},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["restored_status"] == expected_lifecycle
+    conn = connect(db_path)
+    try:
+        assert conn.execute(
+            "SELECT archived_at FROM content_items WHERE id=?", (item_id,)
+        ).fetchone()[0] is None
+        assert conn.execute(
+            "SELECT status FROM media_assets WHERE media_id=?", (media_id,)
+        ).fetchone()[0] == media_status
+    finally:
+        conn.close()
+
+
+def test_active_transcription_blocks_video_archive(content_api):
+    client, sessions, _queued, db_path = content_api
+    media_id = "123e4567-e89b-42d3-a456-426614174251"
+    conn = connect(db_path)
+    item_id, version_id = _insert_catalogued_media(
+        conn, media_id=media_id, title="转录中视频", filename="running.mp4", now=int(time.time()),
+        status="transcribing", job_status="running",
+    )
+    conn.close()
+    response = client.request(
+        "DELETE", f"/api/admin/content/items/{item_id}",
+        json={"expected_version_id": version_id}, **_auth(sessions, "admin", csrf=True),
+    )
+    assert response.status_code == 409
+    conn = connect(db_path)
+    try:
+        assert conn.execute("SELECT archived_at FROM content_items WHERE id=?", (item_id,)).fetchone()[0] is None
+        assert conn.execute("SELECT status FROM media_assets WHERE media_id=?", (media_id,)).fetchone()[0] == "transcribing"
+    finally:
+        conn.close()
+
+
+def test_upload_task_projects_video_counts_for_subdirectories(
+    content_api, monkeypatch: pytest.MonkeyPatch
+):
+    client, sessions, _queued, db_path = content_api
+    now = int(time.time())
+    conn = connect(db_path)
+    conn.execute(
+        """INSERT INTO upload_batches(id,origin,status,created_by,created_at,updated_at,upload_mode,target_category_id,total_files,accepted_files,skipped_files,total_bytes,total_uploaded_bytes)
+           VALUES ('batch-video-counts','web','ready_for_review',1,?,?,?,?,?,?,?,?,?)""",
+        (now, now, "folder", "cat-03", 3, 3, 0, 3072, 3072),
+    )
+    _insert_catalogued_media(
+        conn, media_id="123e4567-e89b-42d3-a456-426614174252", title="待转录", filename="one.mp4", now=now,
+        batch_id="batch-video-counts", sequence=1,
+    )
+    _insert_catalogued_media(
+        conn, media_id="123e4567-e89b-42d3-a456-426614174253", title="转录中", filename="two.mp4", now=now,
+        status="transcribing", job_status="running", batch_id="batch-video-counts", sequence=2,
+    )
+    published_media_id = "123e4567-e89b-42d3-a456-426614174254"
+    published_item_id = _insert_published_media(
+        conn, media_id="123e4567-e89b-42d3-a456-426614174254", version_id="123e4567-e89b-42d3-a456-426614174255",
+        title="已发布", filename="three.mp4", now=now,
+    )
+    conn.execute(
+        """INSERT INTO upload_batch_entries(
+               batch_id,sequence,filename,relative_path,size_bytes,status,reason,item_id,version_id,
+               entry_kind,media_id,transcription_job_id,failure_code,created_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            "batch-video-counts", 3, "three.mp4", "folder-3/three.mp4", 1024, "accepted", None,
+            published_item_id, None, "video", published_media_id,
+            f"{published_media_id[:-1]}a", None, now,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    response = client.get("/api/admin/content/upload-tasks", **_auth(sessions, "admin"))
+    assert response.status_code == 200, response.text
+    task = next(row for row in response.json()["tasks"] if row["batch_id"] == "batch-video-counts")
+    assert task["video_count"] == 3
+    assert task["transcribable_video_count"] == 1
+    detail = client.get(
+        "/api/admin/content/upload-tasks/batch-video-counts",
+        **_auth(sessions, "admin"),
+    )
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["video_count"] == 3
+    assert detail.json()["transcribable_video_count"] == 1
+
+    monkeypatch.setattr(
+        routes_transcription,
+        "_check_start_scheme",
+        lambda _conn, _scheme_id: "synthetic-profile",
+    )
+    conn = connect(db_path)
+    try:
+        items = routes_transcription._preflight_bulk_items(
+            conn,
+            BulkStartTranscriptionRequest(
+                scheme_id="synthetic-scheme",
+                request_idempotency_key="123e4567-e89b-42d3-a456-426614174299",
+                upload_batch_id="batch-video-counts",
+            ),
+        )
+    finally:
+        conn.close()
+    by_media_id = {item.media_id: item for item in items}
+    assert by_media_id["123e4567-e89b-42d3-a456-426614174252"].status == "ready"
+    assert by_media_id[published_media_id].status == "unavailable"
+    assert by_media_id[published_media_id].reason == "该视频已完成转录"
 
 
 def test_content_endpoints_enforce_auth_permissions_csrf_and_role_separation(content_api):
@@ -1014,6 +1293,79 @@ def test_permanent_delete_archived_media_removes_lineage_files_indexes_and_recor
             (item_id,),
         ).fetchone()
         assert tuple(purge_audit) == ("succeeded", "待永久删除视频", "purge-video.mp4", 2, 1)
+    finally:
+        conn.close()
+
+
+def test_permanent_delete_archived_untranscribed_video(
+    content_api, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    client, sessions, _queued, db_path = content_api
+    media_id = "123e4567-e89b-12d3-a456-426614174219"
+    conn = connect(db_path)
+    item_id, version_id = _insert_catalogued_media(
+        conn,
+        media_id=media_id,
+        title="未转录待清理视频",
+        filename="untranscribed-purge.mp4",
+        now=int(time.time()),
+    )
+    conn.close()
+
+    media_dir = (tmp_path / "media").resolve()
+    monkeypatch.setattr(content_trash_cleanup, "MEDIA_DIR", media_dir)
+    monkeypatch.setattr(
+        content_trash_cleanup,
+        "TRANSCRIPTION_ARTIFACT_DIR",
+        (tmp_path / "transcription-artifacts").resolve(),
+    )
+    monkeypatch.setattr(
+        content_trash_cleanup,
+        "_client",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("untranscribed video purge must not contact Qdrant")
+        ),
+    )
+    video_path = media_dir / "synthetic" / f"{media_id}.mp4"
+    video_path.parent.mkdir(parents=True, exist_ok=True)
+    video_path.write_bytes(b"synthetic-video")
+
+    archived = client.request(
+        "DELETE",
+        f"/api/admin/content/items/{item_id}",
+        json={"expected_version_id": version_id},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert archived.status_code == 200, archived.text
+    refs = [{"item_id": item_id, "expected_version_id": version_id}]
+    preflight = client.post(
+        "/api/admin/content/trash/purge/preflight",
+        json={"items": refs},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert preflight.status_code == 200, preflight.text
+    assert preflight.json()["items"][0]["status"] == "ready"
+    assert preflight.json()["items"][0]["transcript_version_count"] == 0
+
+    purged = client.post(
+        "/api/admin/content/trash/purge",
+        json={
+            "items": refs,
+            "confirmation": preflight.json()["confirmation_phrase"],
+        },
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert purged.status_code == 200, purged.text
+    assert purged.json()["succeeded_count"] == 1
+    assert not video_path.exists()
+    conn = connect(db_path)
+    try:
+        assert conn.execute(
+            "SELECT 1 FROM content_items WHERE id=?", (item_id,)
+        ).fetchone() is None
+        assert conn.execute(
+            "SELECT 1 FROM media_assets WHERE media_id=?", (media_id,)
+        ).fetchone() is None
     finally:
         conn.close()
 
@@ -2997,11 +3349,18 @@ def test_published_media_transcripts_share_library_listing_without_document_mirr
     assert second_move.status_code == 409
     assert second_move.json()["detail"] == "目标目录已有同标题或同源文件名的视频资料"
 
-    archived = client.request(
+    forbidden = client.request(
         "DELETE",
         f"/api/admin/content/items/{first_item_id}",
         json={"expected_version_id": first_version_id},
         **_auth(sessions, "publisher", csrf=True),
+    )
+    assert forbidden.status_code == 403
+    archived = client.request(
+        "DELETE",
+        f"/api/admin/content/items/{first_item_id}",
+        json={"expected_version_id": first_version_id},
+        **_auth(sessions, "admin", csrf=True),
     )
     assert archived.status_code == 200, archived.text
     assert archived.json()["version_id"] == first_version_id
