@@ -9327,7 +9327,8 @@ export function AdminManagedContentPage() {
                 : "上传后可在资料流程中确认并发布文档。"}
             </DialogDescription>
           </DialogHeader>
-          <label
+          <div
+            data-testid="managed-upload-dropzone"
             onDragEnter={(event) => {
               event.preventDefault();
               setDragActive(true);
@@ -9346,14 +9347,38 @@ export function AdminManagedContentPage() {
               setDragActive(false);
               void inspectDroppedUpload(event.dataTransfer, "select");
             }}
-            className={`flex min-h-36 cursor-pointer flex-col items-center justify-center gap-2 rounded-ui-lg border border-dashed px-4 py-6 text-center transition-colors duration-normal focus-within:ring-2 focus-within:ring-ring ${dragActive ? "border-primary bg-primary/5" : "border-input bg-background hover:bg-surface-muted"}`}
+            className={`flex min-h-36 flex-col items-center justify-center gap-2 rounded-ui-lg border border-dashed px-4 py-6 text-center transition-colors duration-normal focus-within:ring-2 focus-within:ring-ring ${dragActive ? "border-primary bg-primary/5" : "border-input bg-background hover:bg-surface-muted"}`}
           >
             <Upload className="size-6 text-primary" />
             <span className="text-ui-sm font-medium">
               {folderScanning
                 ? "正在读取文件夹…"
-                : "拖动文件到这里，或选择文件"}
+                : "拖动文件或文件夹到这里"}
             </span>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="max-sm:h-control-md"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading || uploadChecking || folderScanning}
+              >
+                <Upload className="size-4" />
+                选择文件
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="max-sm:h-control-md"
+                onClick={() => folderInputRef.current?.click()}
+                disabled={uploading || uploadChecking || folderScanning}
+              >
+                <Folder className="size-4" />
+                选择文件夹
+              </Button>
+            </div>
             <span className="text-ui-xs text-muted-foreground">
               支持 PDF、Markdown、Word、Excel、PPT、XMind
               {isSystemAdmin ? " 和 MP4" : ""}
@@ -9374,32 +9399,22 @@ export function AdminManagedContentPage() {
                 acceptFiles(Array.from(event.target.files || []))
               }
             />
-          </label>
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full"
-            onClick={() => folderInputRef.current?.click()}
-            disabled={uploading || uploadChecking || folderScanning}
-          >
-            <Folder className="size-4" />
-            上传文件夹
-          </Button>
-          <input
-            ref={folderInputRef}
-            aria-label="选择资料文件夹"
-            type="file"
-            multiple
-            className="sr-only"
-            disabled={uploading || uploadChecking || folderScanning}
-            onChange={(event) =>
-              selectFolder(Array.from(event.target.files || []))
-            }
-            {...({
-              webkitdirectory: "",
-              directory: "",
-            } as React.InputHTMLAttributes<HTMLInputElement>)}
-          />
+            <input
+              ref={folderInputRef}
+              aria-label="选择资料文件夹"
+              type="file"
+              multiple
+              className="sr-only"
+              disabled={uploading || uploadChecking || folderScanning}
+              onChange={(event) =>
+                selectFolder(Array.from(event.target.files || []))
+              }
+              {...({
+                webkitdirectory: "",
+                directory: "",
+              } as React.InputHTMLAttributes<HTMLInputElement>)}
+            />
+          </div>
           {files.length > 0 && (
             <UploadSelectionList
               entries={files}

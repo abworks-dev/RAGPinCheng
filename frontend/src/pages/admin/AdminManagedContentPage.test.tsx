@@ -1445,7 +1445,7 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
     await openRootFolder();
     fireEvent.click(screen.getByRole("button", { name: "上传文件" }));
-    fireEvent.click(screen.getByRole("button", { name: "上传文件夹" }));
+    fireEvent.click(screen.getByRole("button", { name: "选择文件夹" }));
     fireEvent.change(screen.getByLabelText("选择资料文件夹"), { target: { files: [folder] } });
     fireEvent.click(await screen.findByRole("button", { name: "开始上传" }));
     const dialog = await screen.findByRole("dialog", { name: "处理上传冲突" });
@@ -1472,6 +1472,20 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getByText("retry.md")).toBeInTheDocument();
   });
 
+  it("keeps file and folder choices inside the upload dropzone", async () => {
+    mocks.permissions = ORGANIZER_PERMISSIONS;
+    mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    fireEvent.click(await screen.findByRole("button", { name: "上传文件" }));
+
+    const dropzone = await screen.findByTestId("managed-upload-dropzone");
+    expect(dropzone).toHaveTextContent("拖动文件或文件夹到这里");
+    expect(within(dropzone).getByRole("button", { name: "选择文件" })).toBeInTheDocument();
+    expect(within(dropzone).getByRole("button", { name: "选择文件夹" })).toBeInTheDocument();
+  });
+
   it("keeps a plain file dropped in the file upload dialog", async () => {
     mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
@@ -1481,7 +1495,7 @@ describe("AdminManagedContentPage", () => {
     const input = await screen.findByLabelText("选择资料文件");
     const file = new File(["# Dropped"], "dropped.md", { type: "text/markdown" });
 
-    fireEvent.drop(input.closest("label")!, {
+    fireEvent.drop(screen.getByTestId("managed-upload-dropzone"), {
       dataTransfer: { files: [file], items: [], types: ["Files"] },
     });
 
@@ -1501,7 +1515,7 @@ describe("AdminManagedContentPage", () => {
     await openRootFolder();
 
     fireEvent.click(screen.getByRole("button", { name: "上传文件" }));
-    fireEvent.click(screen.getByRole("button", { name: "上传文件夹" }));
+    fireEvent.click(screen.getByRole("button", { name: "选择文件夹" }));
     const guide = new File(["# Guide"], "guide.md", { type: "text/markdown" });
     Object.defineProperty(guide, "webkitRelativePath", { value: "资料包/01 建筑/guide.md" });
     const video = new File(["video"], "demo.mp4", { type: "video/mp4" });
