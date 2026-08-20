@@ -617,6 +617,8 @@ class ManagedUploadTaskDTO(BaseModel):
     skipped_files: int
     total_bytes: int
     total_uploaded_bytes: int
+    video_count: int = 0
+    transcribable_video_count: int = 0
     created_by_name: str
     created_at: int
     updated_at: int

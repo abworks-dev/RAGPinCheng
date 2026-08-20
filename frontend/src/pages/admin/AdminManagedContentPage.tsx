@@ -720,10 +720,12 @@ function UploadTasksPanel({
   activeUpload,
   canRetry,
   onRetry,
+  canTranscribe,
 }: {
   activeUpload: ActiveUploadState | null;
   canRetry: (task: ManagedUploadTask) => boolean;
   onRetry: (task: ManagedUploadTask) => void;
+  canTranscribe: boolean;
 }) {
   const [tasks, setTasks] = useState<ManagedUploadTask[]>([]);
   const [total, setTotal] = useState(0);
@@ -740,6 +742,12 @@ function UploadTasksPanel({
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<ManagedUploadTask | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [transcriptionTask, setTranscriptionTask] = useState<ManagedUploadTask | null>(null);
+  const [schemeId, setSchemeId] = useState("");
+  const [schemes, setSchemes] = useState<TranscriptionSchemeOption[]>([]);
+  const [preflight, setPreflight] = useState<Awaited<ReturnType<typeof adminContentApi.preflightBulkTranscription>> | null>(null);
+  const [transcriptionBusy, setTranscriptionBusy] = useState(false);
+  const [requestKey, setRequestKey] = useState("");
   useEffect(() => {
     setPage(0);
     setSelected([]);
@@ -799,6 +807,38 @@ function UploadTasksPanel({
     } finally {
       setDetailLoading(false);
     }
+  };
+  const openBatchTranscription = async (task: ManagedUploadTask) => {
+    setTranscriptionTask(task);
+    setSchemeId("");
+    setPreflight(null);
+    setRequestKey(createRequestId());
+    try {
+      setSchemes(await adminContentApi.transcriptionSchemes());
+    } catch (loadError) {
+      toast.error(loadError instanceof Error ? loadError.message : "转录方案加载失败");
+    }
+  };
+  const checkBatchTranscription = async () => {
+    if (!transcriptionTask || !schemeId || !requestKey) return;
+    setTranscriptionBusy(true);
+    try {
+      setPreflight(await adminContentApi.preflightBulkTranscription({ scheme_id: schemeId, request_idempotency_key: requestKey, upload_batch_id: transcriptionTask.batch_id }));
+    } catch (checkError) {
+      toast.error(checkError instanceof Error ? checkError.message : "转录预检失败");
+    } finally { setTranscriptionBusy(false); }
+  };
+  const startBatchTranscription = async () => {
+    if (!transcriptionTask || !schemeId || !requestKey || !preflight) return;
+    setTranscriptionBusy(true);
+    try {
+      const result = await adminContentApi.bulkStartTranscription({ scheme_id: schemeId, request_idempotency_key: requestKey, upload_batch_id: transcriptionTask.batch_id });
+      result.failed ? toast.error(`已启动 ${result.started} 个，${result.failed} 个未启动`) : toast.success(`已启动 ${result.started} 个视频转录任务`);
+      setTranscriptionTask(null);
+      await loadTasks();
+    } catch (startError) {
+      toast.error(startError instanceof Error ? startError.message : "启动转录失败");
+    } finally { setTranscriptionBusy(false); }
   };
   const visibleTasks = tasks;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -1125,7 +1165,7 @@ function UploadTasksPanel({
         ) : (
           <>
             <div
-              className="hidden grid-cols-[2rem_minmax(10rem,1.7fr)_5.5rem_minmax(11rem,1fr)_8rem_6rem_9.75rem] gap-x-4 border-b border-border bg-surface-muted/40 px-5 py-2.5 text-ui-xs font-medium text-muted-foreground xl:grid"
+              className="hidden grid-cols-[2rem_minmax(10rem,1.7fr)_7.5rem_minmax(11rem,1fr)_8rem_6rem_12rem] gap-x-4 border-b border-border bg-surface-muted/40 px-5 py-2.5 text-ui-xs font-medium text-muted-foreground xl:grid"
               data-testid="upload-task-header"
             >
               <Checkbox
@@ -1145,7 +1185,7 @@ function UploadTasksPanel({
               {visibleTasks.map((task) => (
                 <li
                   key={task.batch_id}
-                  className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-3 px-4 py-4 sm:px-5 xl:grid-cols-[2rem_minmax(10rem,1.7fr)_5.5rem_minmax(11rem,1fr)_8rem_6rem_9.75rem] xl:items-center xl:gap-x-4"
+                  className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-3 px-4 py-4 sm:px-5 xl:grid-cols-[2rem_minmax(10rem,1.7fr)_7.5rem_minmax(11rem,1fr)_8rem_6rem_12rem] xl:items-center xl:gap-x-4"
                   data-testid="upload-task-row"
                 >
                   <Checkbox
@@ -1169,10 +1209,11 @@ function UploadTasksPanel({
                     <span className="mb-1 block text-ui-xs font-medium text-muted-foreground xl:hidden">
                       文件
                     </span>
-                    <span className="text-ui-xs text-muted-foreground">
+                    <span className="block text-ui-xs text-muted-foreground">
                       {task.upload_mode === "folder" ? "文件夹" : "文件"} ·{" "}
                       {task.total_files} 个
                     </span>
+                    {task.video_count > 0 && <span className="mt-1 block text-ui-xs text-muted-foreground">{task.video_count} 个视频 · {task.transcribable_video_count} 个待转录</span>}
                   </div>
                   <div className="col-span-2 xl:col-span-1">
                     <span className="mb-1 block text-ui-xs font-medium text-muted-foreground xl:hidden">
@@ -1198,6 +1239,7 @@ function UploadTasksPanel({
                   </div>
                   <div className="col-span-2 flex flex-wrap gap-2 xl:col-span-1 xl:justify-end">
                     <>
+                      {canTranscribe && task.video_count > 0 && <Button size="sm" variant="outline" disabled={task.transcribable_video_count === 0} title={task.transcribable_video_count === 0 ? "此批次视频均已转录或正在转录" : undefined} onClick={() => void openBatchTranscription(task)}><Rocket className="size-4" />转录此批次视频</Button>}
                       {task.status === "failed" && (
                         <Button
                           size="sm"
@@ -1291,6 +1333,12 @@ function UploadTasksPanel({
         onRetry={onRetry}
         onClose={() => setDetail(null)}
       />
+      <Dialog open={Boolean(transcriptionTask)} onOpenChange={(open) => { if (!open && !transcriptionBusy) setTranscriptionTask(null); }}>
+        <DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>转录上传批次视频</DialogTitle><DialogDescription>视频仍保留在资料库；确认方案后才会创建转录任务。</DialogDescription></DialogHeader>
+          <div className="space-y-4"><label className="block space-y-1.5 text-ui-sm font-medium"><span>转录方案</span><Select aria-label="选择转录方案" value={schemeId} onChange={(event) => { setSchemeId(event.target.value); setPreflight(null); }}><option value="">请选择可用方案</option>{schemes.map((scheme) => <option key={scheme.scheme_id} value={scheme.scheme_id} disabled={!scheme.enabled || scheme.archived || scheme.availability !== "available"}>{scheme.name}{scheme.availability !== "available" ? "（不可用）" : ""}</option>)}</Select></label><p className="rounded-ui-md border border-border bg-surface-muted/40 px-3 py-2 text-ui-sm">范围：此上传批次，服务端会汇总各子目录中的待转录视频。</p>{preflight && <p className="text-ui-sm">可启动 <strong>{preflight.ready_count}</strong> 个，已跳过/不可用 <strong>{preflight.blocked_count}</strong> 个。</p>}</div>
+          <DialogFooter><Button variant="outline" disabled={transcriptionBusy} onClick={() => setTranscriptionTask(null)}>取消</Button>{!preflight ? <Button disabled={!schemeId || transcriptionBusy} onClick={() => void checkBatchTranscription()}>{transcriptionBusy ? "检查中…" : "检查可转录视频"}</Button> : <Button disabled={transcriptionBusy || preflight.ready_count === 0} onClick={() => void startBatchTranscription()}>{transcriptionBusy ? "启动中…" : `启动转录（${preflight.ready_count}）`}</Button>}</DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }
@@ -4306,7 +4354,8 @@ export function AdminManagedContentPage() {
     canMoveItem(item) ||
     canStartTranscription(item);
   const canDeleteItem = (item: ManagedContentItem) => {
-    if (item.content_kind === "media_transcript") return false;
+    if (item.content_kind === "media_transcript")
+      return isSystemAdmin && Boolean(item.media_id);
     const requiresPublish =
       item.has_published_head ||
       !["draft", "rejected"].includes(item.lifecycle_status);
@@ -4763,6 +4812,15 @@ export function AdminManagedContentPage() {
       const pendingTranscription =
         canStartTranscription(item) &&
         !item.transcription_job_status?.match(/pending|running/);
+      const transcriptionTooltip =
+        unavailableReason ||
+        (pendingTranscription
+          ? "选择转录方案"
+          : item.transcription_job_status?.match(/pending|running/)
+            ? "转录任务进行中"
+            : item.transcription_failure_classification === "permanent"
+              ? "该视频无法重试转录"
+              : "该视频已完成转录");
       const moveTooltip =
         unavailableReason ||
         (movable ? "调整归档目录" : "当前账号没有发布权限");
@@ -4770,68 +4828,25 @@ export function AdminManagedContentPage() {
         state.status === "authed" &&
         state.user.role === "admin" &&
         Boolean(item.media_id);
+      const updateAllowed =
+        mediaManageAllowed &&
+        !item.transcription_job_status?.match(/pending|running/);
       const mediaBaseUrl = `/admin/content?view=transcription&media_id=${encodeURIComponent(item.media_id || "")}`;
       return (
-        <div className="ml-auto flex min-h-10 w-[13.5rem] max-w-full items-center justify-end gap-1">
-          {pendingTranscription && (
-            <Button
-              size="sm"
-              disabled={disabled}
-              onClick={() => openTranscriptionDialog([item])}
-            >
-              <Rocket className="size-4" />
-              开始转录
-            </Button>
-          )}
+        <div className="ml-auto flex min-h-10 max-w-full flex-wrap items-center justify-end gap-1">
+          <IconButton label={`转录“${item.title}”`} tooltip={transcriptionTooltip} className="border border-border max-sm:size-10" disabled={disabled || !pendingTranscription} onClick={() => openTranscriptionDialog([item])}><Rocket className="size-4" /></IconButton>
+          <IconButton label={`播放“${item.title}”`} tooltip={unavailableReason || (item.has_published_head ? "播放视频与转录稿" : "转录稿发布后可播放")} className="border border-border max-sm:size-10" disabled={disabled || !item.media_id || !item.has_published_head} onClick={() => openVideoPreview({ mediaId: item.media_id!, title: item.title, startSeconds: 0, fromSource: false })}><Film className="size-4" /></IconButton>
           <IconButton
             label={`查看“${item.title}”的详细信息`}
-            tooltip={unavailableReason || "查看视频转录稿详情"}
+            tooltip={unavailableReason || "查看视频详细信息"}
             className="border border-border max-sm:size-10"
             disabled={disabled}
             onClick={() => setDetail(item)}
           >
             <Info className="size-4" />
           </IconButton>
-          <IconButton
-            label={`播放“${item.title}”`}
-            tooltip={
-              unavailableReason ||
-              (item.has_published_head
-                ? "播放视频与转录稿"
-                : "转录稿发布后可播放")
-            }
-            className="border border-border max-sm:size-10"
-            disabled={disabled || !item.media_id || !item.has_published_head}
-            onClick={() =>
-              openVideoPreview({
-                mediaId: item.media_id!,
-                title: item.title,
-                startSeconds: 0,
-                fromSource: false,
-              })
-            }
-          >
-            <Film className="size-4" />
-          </IconButton>
-          <IconButton
-            label={`下载“${item.title}”`}
-            tooltip={
-              unavailableReason ||
-              (downloadable
-                ? "选择下载视频、转录稿或两者"
-                : "当前账号没有下载资料的权限")
-            }
-            className="border border-border max-sm:size-10"
-            disabled={
-              disabled ||
-              !downloadable ||
-              !item.media_id ||
-              !item.has_published_head
-            }
-            onClick={() => openMediaDownload(item)}
-          >
-            <Download className="size-4" />
-          </IconButton>
+          <IconButton label={`重命名“${item.title}”`} tooltip={unavailableReason || (mediaManageAllowed ? "重命名视频" : "仅系统管理员可以重命名视频")} className="border border-border max-sm:size-10" disabled={disabled || !mediaManageAllowed} onClick={() => openMediaInfoDialog(item)}><Pencil className="size-4" /></IconButton>
+          <IconButton label={`更新“${item.title}”`} tooltip={unavailableReason || (updateAllowed ? "更新视频资料" : "转录任务进行中，暂不能更新视频")} className="border border-border max-sm:size-10" disabled={disabled || !updateAllowed} onClick={() => { window.location.href = `${mediaBaseUrl}&action=replace`; }}><FileUp className="size-4" /></IconButton>
           <IconButton
             label={`调整“${item.title}”的归档目录`}
             tooltip={moveTooltip}
@@ -4845,6 +4860,7 @@ export function AdminManagedContentPage() {
           >
             <FolderInput className="size-4" />
           </IconButton>
+          <IconButton label={`下载“${item.title}”`} tooltip={unavailableReason || (downloadable ? "选择下载视频、转录稿或两者" : "当前账号没有下载资料的权限")} className="border border-border max-sm:size-10" disabled={disabled || !downloadable || !item.media_id} onClick={() => openMediaDownload(item)}><Download className="size-4" /></IconButton>
           <ActionsMenu
             compact
             disabled={disabled}
@@ -4893,6 +4909,7 @@ export function AdminManagedContentPage() {
               },
             ]}
           />
+          <IconButton label={`删除“${item.title}”`} tooltip={unavailableReason || (deletable ? "移入回收站（视频与转录稿可一起恢复）" : "仅系统管理员可以删除视频")} className="border border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive max-sm:size-10" disabled={disabled || !deletable} onClick={() => openDeleteDialog([item])}><Trash2 className="size-4" /></IconButton>
         </div>
       );
     }
@@ -5387,6 +5404,7 @@ export function AdminManagedContentPage() {
         {viewTabs}
         <UploadTasksPanel
           activeUpload={activeUpload}
+          canTranscribe={isSystemAdmin}
           canRetry={(task) =>
             Boolean(lastUploadAttempt?.batchId === task.batch_id)
           }

@@ -1893,8 +1893,8 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getAllByText("有新转录稿待处理").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/00:01:05/).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: "下载“WhisperX 培训视频”" }).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: "重命名“WhisperX 培训视频”" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "删除“WhisperX 培训视频”" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "重命名“WhisperX 培训视频”" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "删除“WhisperX 培训视频”" }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: "调整“WhisperX 培训视频”的归档目录" }).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getAllByRole("button", { name: "播放“WhisperX 培训视频”" })[0]);

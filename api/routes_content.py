@@ -1702,6 +1702,8 @@ def _managed_upload_task_dto(
         skipped_files=int(row["skipped_files"] or 0),
         total_bytes=int(row["total_bytes"] or 0),
         total_uploaded_bytes=int(row["total_uploaded_bytes"] or 0),
+        video_count=int(row["video_count"] or 0),
+        transcribable_video_count=int(row["transcribable_video_count"] or 0),
         created_by_name=row["creator_name"],
         created_at=int(row["created_at"]),
         updated_at=int(row["updated_at"]),
@@ -2041,6 +2043,17 @@ def _purge_preflight_response(results: list[dict[str, object]]) -> TrashPurgePre
     )
 
 
+def _contains_media_items(conn: sqlite3.Connection, item_ids: list[str]) -> bool:
+    if not item_ids:
+        return False
+    placeholders = ",".join("?" for _ in item_ids)
+    return conn.execute(
+        f"""SELECT 1 FROM content_items
+             WHERE id IN ({placeholders}) AND content_kind='media_transcript' LIMIT 1""",
+        item_ids,
+    ).fetchone() is not None
+
+
 @router.post("/trash/purge/preflight", response_model=TrashPurgePreflightResponse)
 def preflight_content_trash_purge(
     body: TrashPurgePreflightRequest,
@@ -2098,16 +2111,29 @@ def get_content_trash_purge_runs(
 @router.post("/bulk-restore/preflight", response_model=BulkRestorePreflightResponse)
 def preflight_bulk_restore(
     body: BulkRestoreManagedContentRequest,
-    _user: CurrentUser = Depends(require_content_permission("trash.restore")),
+    user: CurrentUser = Depends(require_content_permission("trash.restore")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> BulkRestorePreflightResponse:
+    refs = _validate_bulk_item_refs(body.items)
+    if user.role != "admin" and _contains_media_items(
+        conn, [item.item_id for item in refs]
+    ):
+        raise HTTPException(status_code=403, detail="视频回收站操作首期仅限系统管理员")
     results: list[BulkRestorePreflightResultDTO] = []
-    for item in _validate_bulk_item_refs(body.items):
+    for item in refs:
         row = conn.execute(
-            """SELECT i.id,i.archived_at,i.category_id,v.id AS version_id,v.original_filename
-               FROM content_items i JOIN content_versions v ON v.item_id=i.id
+            """SELECT i.id,i.content_kind,i.archived_at,i.category_id,
+                      CASE WHEN i.content_kind='media_transcript'
+                           THEN COALESCE(h.current_version_id,'media-pending-' || i.media_id)
+                           ELSE v.id END AS version_id,
+                      COALESCE(m.original_filename,v.original_filename) AS original_filename
+               FROM content_items i
+               LEFT JOIN content_versions v ON v.item_id=i.id
                 AND v.version_number=(SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id)
-               WHERE i.id=? AND i.content_kind='document'""", (item.item_id,),
+               LEFT JOIN media_assets m ON m.media_id=i.media_id
+               LEFT JOIN media_transcript_heads h ON h.media_id=i.media_id
+               WHERE i.id=?""",
+            (item.item_id,),
         ).fetchone()
         status, message, target_path = "ready", "可以恢复", None
         if row is None or row["archived_at"] is None:
@@ -2179,10 +2205,15 @@ def bulk_restore_managed_content_items(
     _require_feature()
     if not has_content_permission(conn, user, "trash.restore"):
         raise HTTPException(status_code=403, detail="当前账号没有恢复资料的权限")
+    refs = _validate_bulk_item_refs(body.items)
+    if user.role != "admin" and _contains_media_items(
+        conn, [item.item_id for item in refs]
+    ):
+        raise HTTPException(status_code=403, detail="视频回收站操作首期仅限系统管理员")
     can_archive_draft = has_content_permission(conn, user, "item.archive_draft")
     can_archive_published = has_content_permission(conn, user, "item.archive_published")
     results: list[BulkManagedContentResultDTO] = []
-    for item in _validate_bulk_item_refs(body.items):
+    for item in refs:
         try:
             restore_content_item(
                 conn, item.item_id, expected_version_id=item.expected_version_id,
@@ -2213,6 +2244,12 @@ def restore_managed_content_item(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> RestoreManagedContentResponse:
     _require_feature()
+    item_kind = conn.execute(
+        "SELECT content_kind FROM content_items WHERE id=?", (item_id,)
+    ).fetchone()
+    is_media = item_kind is not None and item_kind["content_kind"] == "media_transcript"
+    if is_media and user.role != "admin":
+        raise HTTPException(status_code=403, detail="视频回收站操作首期仅限系统管理员")
     try:
         result = restore_content_item(
             conn,
@@ -2248,7 +2285,7 @@ def get_content_trash_audit_events(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> list[ContentTrashAuditEventDTO]:
     item = conn.execute(
-        "SELECT archived_at FROM content_items WHERE id=? AND content_kind='document'",
+        "SELECT archived_at FROM content_items WHERE id=?",
         (item_id,),
     ).fetchone()
     if item is None:
@@ -2284,6 +2321,12 @@ def delete_content_item(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> DeleteManagedContentResponse:
     _require_feature()
+    item_kind = conn.execute(
+        "SELECT content_kind FROM content_items WHERE id=?", (item_id,)
+    ).fetchone()
+    is_media = item_kind is not None and item_kind["content_kind"] == "media_transcript"
+    if is_media and user.role != "admin":
+        raise HTTPException(status_code=403, detail="视频操作首期仅限系统管理员")
     try:
         result = archive_content_item(
             conn,
@@ -3546,13 +3589,17 @@ def bulk_archive_content_items(
     results: list[BulkManagedContentResultDTO] = []
     for item in _validate_bulk_item_refs(body.items):
         try:
+            item_kind = conn.execute(
+                "SELECT content_kind FROM content_items WHERE id=?", (item.item_id,)
+            ).fetchone()
+            is_media = item_kind is not None and item_kind["content_kind"] == "media_transcript"
             archive_content_item(
                 conn,
                 item.item_id,
                 expected_version_id=item.expected_version_id,
                 actor_user_id=user.id,
                 can_archive_draft=can_archive_draft,
-                can_archive_published=can_archive_published,
+                can_archive_published=can_archive_published and (not is_media or user.role == "admin"),
             )
             results.append(BulkManagedContentResultDTO(
                 item_id=item.item_id,

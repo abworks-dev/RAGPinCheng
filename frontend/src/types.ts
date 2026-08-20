@@ -802,6 +802,8 @@ export type ManagedUploadTask = {
   skipped_files: number;
   total_bytes: number;
   total_uploaded_bytes: number;
+  video_count: number;
+  transcribable_video_count: number;
   created_by_name: string;
   created_at: number;
   updated_at: number;

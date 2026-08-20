@@ -1553,6 +1553,39 @@ def list_upload_tasks(
                         b.error_summary,b.storage_rel_path,
                         COALESCE(paths.full_path, '根目录') AS target_path,
                         COALESCE(u.real_name, '未知人员') AS creator_name,
+                        (SELECT count(DISTINCT e.media_id)
+                         FROM upload_batch_entries e
+                         JOIN media_assets m ON m.media_id=e.media_id
+                         JOIN content_items i ON i.media_id=m.media_id
+                           AND i.content_kind='media_transcript' AND i.archived_at IS NULL
+                         WHERE e.batch_id=b.id AND e.entry_kind='video'
+                           AND m.status<>'archived') AS video_count,
+                        (SELECT count(DISTINCT e.media_id)
+                         FROM upload_batch_entries e
+                         JOIN media_assets m ON m.media_id=e.media_id
+                         JOIN content_items i ON i.media_id=m.media_id
+                           AND i.content_kind='media_transcript' AND i.archived_at IS NULL
+                         WHERE e.batch_id=b.id AND e.entry_kind='video'
+                           AND m.status<>'archived'
+                           AND NOT EXISTS (
+                             SELECT 1 FROM transcription_jobs active
+                             WHERE active.media_id=m.media_id AND active.status IN ('pending','running')
+                           )
+                           AND COALESCE((
+                             SELECT latest.status FROM transcription_jobs latest
+                             WHERE latest.media_id=m.media_id
+                             ORDER BY latest.attempt_number DESC,latest.created_at DESC LIMIT 1
+                           ),'')<>'succeeded'
+                           AND NOT (
+                             m.status='failed' AND NOT EXISTS (
+                               SELECT 1 FROM transcription_jobs any_job WHERE any_job.media_id=m.media_id
+                             )
+                           )
+                           AND COALESCE((
+                             SELECT latest.failure_classification FROM transcription_jobs latest
+                             WHERE latest.media_id=m.media_id
+                             ORDER BY latest.attempt_number DESC,latest.created_at DESC LIMIT 1
+                           ),'')<>'permanent') AS transcribable_video_count,
                         {task_status} AS task_status
                  FROM upload_batches b
                  LEFT JOIN paths ON paths.id=b.target_category_id
@@ -1980,47 +2013,71 @@ def list_content_items_page(
 
 def _archive_media_transcript_item_locked(conn: sqlite3.Connection, item_id: str, *, expected_version_id: str, actor_user_id: int, can_archive_published: bool, now: int) -> ArchivedContent:
     row = conn.execute("""SELECT i.media_id,i.archived_at,i.category_id,m.status AS media_status,
-                                 h.current_version_id,tv.publication_status
+                                 h.current_version_id,tv.publication_status,
+                                 latest_job.status AS job_status,
+                                 CASE
+                                   WHEN m.status='failed' OR latest_job.status='failed' THEN 'transcription_failed'
+                                   WHEN latest_job.status IN ('pending','running') THEN 'transcribing'
+                                   WHEN tv.review_status='awaiting_review' THEN 'awaiting_review'
+                                   WHEN tv.review_status='review_rejected' THEN 'rejected'
+                                   WHEN tv.publication_status='publishing' THEN 'publishing'
+                                   WHEN tv.publication_status='publication_failed' THEN 'publication_failed'
+                                   WHEN h.current_version_id=tv.id AND tv.publication_status='published' THEN 'published'
+                                   WHEN tv.review_status='review_approved' THEN 'approved'
+                                   WHEN tv.id IS NOT NULL THEN 'transcript_ready'
+                                   ELSE 'awaiting_transcription'
+                                 END AS lifecycle_status
                           FROM content_items i JOIN media_assets m ON m.media_id=i.media_id
-                          JOIN media_transcript_heads h ON h.media_id=m.media_id
-                          JOIN transcript_versions tv ON tv.id=h.current_version_id
+                          LEFT JOIN media_transcript_heads h ON h.media_id=m.media_id
+                          LEFT JOIN transcript_versions tv ON tv.id=h.current_version_id
+                          LEFT JOIN transcription_jobs latest_job ON latest_job.id=(
+                            SELECT j.id FROM transcription_jobs j WHERE j.media_id=m.media_id
+                            ORDER BY j.attempt_number DESC,j.created_at DESC,j.id DESC LIMIT 1
+                          )
                           WHERE i.id=? AND i.content_kind='media_transcript'""", (item_id,)).fetchone()
     if row is None or row["archived_at"] is not None:
         raise ValueError("content_item_not_found")
-    if row["current_version_id"] != expected_version_id:
+    version_id = str(row["current_version_id"] or f"media-pending-{row['media_id']}")
+    if version_id != expected_version_id:
         raise ValueError("content_version_conflict")
     if not can_archive_published:
         raise ValueError("content_delete_forbidden")
     if conn.execute("SELECT 1 FROM transcription_jobs WHERE media_id=? AND status IN ('pending','running')", (row["media_id"],)).fetchone():
         raise ValueError("content_delete_in_progress")
-    if conn.execute("SELECT 1 FROM transcript_publication_index_jobs WHERE transcript_version_id=? AND status IN ('pending','parsing','chunking','embedding')", (expected_version_id,)).fetchone():
+    if row["current_version_id"] and conn.execute("SELECT 1 FROM transcript_publication_index_jobs WHERE transcript_version_id=? AND status IN ('pending','parsing','chunking','embedding')", (row["current_version_id"],)).fetchone():
         raise ValueError("content_delete_in_progress")
     if row["publication_status"] == "publishing":
         raise ValueError("content_delete_in_progress")
+    if conn.execute("SELECT 1 FROM media_metadata_revisions WHERE media_id=? AND status='pending'", (row["media_id"],)).fetchone():
+        raise ValueError("content_delete_in_progress")
+    if conn.execute("SELECT 1 FROM media_replacements WHERE (source_media_id=? OR candidate_media_id=?) AND status='pending'", (row["media_id"], row["media_id"])).fetchone():
+        raise ValueError("content_delete_in_progress")
     conn.execute("UPDATE content_items SET archived_at=?,updated_at=? WHERE id=?", (now, now, item_id))
     conn.execute("UPDATE media_assets SET status='archived',updated_at=? WHERE media_id=?", (now, row["media_id"]))
-    audit_event(conn, "content.archived", actor_user_id=actor_user_id, item_id=item_id, category_id=row["category_id"], metadata={"previous_status": "published", "media_status": row["media_status"], "content_kind": "media_transcript", "transcript_version_id": expected_version_id, "publication_withdrawn": False})
-    return ArchivedContent(item_id=item_id, version_id=expected_version_id, archived_at=now, previous_status="published", publication_withdrawn=False)
+    audit_event(conn, "content.archived", actor_user_id=actor_user_id, item_id=item_id, category_id=row["category_id"], metadata={"previous_status": row["lifecycle_status"], "media_status": row["media_status"], "content_kind": "media_transcript", "transcript_version_id": row["current_version_id"], "publication_withdrawn": False})
+    return ArchivedContent(item_id=item_id, version_id=version_id, archived_at=now, previous_status=str(row["lifecycle_status"]), publication_withdrawn=False)
 
 
 def _restore_media_transcript_item_locked(conn: sqlite3.Connection, item_id: str, *, expected_version_id: str, actor_user_id: int, can_restore: bool, now: int) -> RestoredContent:
     row = conn.execute("""SELECT i.media_id,i.archived_at,i.category_id,h.current_version_id,
                                  (SELECT ae.metadata_json FROM content_audit_events ae WHERE ae.item_id=i.id AND ae.event_type='content.archived' ORDER BY ae.created_at DESC,ae.id DESC LIMIT 1) AS metadata_json
                           FROM content_items i JOIN media_assets m ON m.media_id=i.media_id
-                          JOIN media_transcript_heads h ON h.media_id=m.media_id
+                          LEFT JOIN media_transcript_heads h ON h.media_id=m.media_id
                           WHERE i.id=? AND i.content_kind='media_transcript'""", (item_id,)).fetchone()
     if row is None or row["archived_at"] is None:
         raise ValueError("content_trash_item_not_found")
-    if row["current_version_id"] != expected_version_id:
+    version_id = str(row["current_version_id"] or f"media-pending-{row['media_id']}")
+    if version_id != expected_version_id:
         raise ValueError("content_version_conflict")
     if not can_restore:
         raise ValueError("content_restore_forbidden")
     metadata = json.loads(row["metadata_json"] or "{}")
     media_status = str(metadata.get("media_status") or "ready")
+    previous_status = str(metadata.get("previous_status") or "published")
     conn.execute("UPDATE content_items SET archived_at=NULL,updated_at=? WHERE id=?", (now, item_id))
     conn.execute("UPDATE media_assets SET status=?,updated_at=? WHERE media_id=?", (media_status, now, row["media_id"]))
-    audit_event(conn, "content.restored", actor_user_id=actor_user_id, item_id=item_id, category_id=row["category_id"], metadata={"previous_status": "published", "restored_status": "published", "restore_strategy": "original_directory", "content_kind": "media_transcript", "transcript_version_id": expected_version_id})
-    return RestoredContent(item_id=item_id, version_id=expected_version_id, restored_status="published", category_id=str(row["category_id"]), moved_to_alternate_category=False, replaced_conflict=False)
+    audit_event(conn, "content.restored", actor_user_id=actor_user_id, item_id=item_id, category_id=row["category_id"], metadata={"previous_status": previous_status, "restored_status": previous_status, "restore_strategy": "original_directory", "content_kind": "media_transcript", "transcript_version_id": row["current_version_id"]})
+    return RestoredContent(item_id=item_id, version_id=version_id, restored_status=previous_status, category_id=str(row["category_id"]), moved_to_alternate_category=False, replaced_conflict=False)
 
 
 def restore_content_item(
