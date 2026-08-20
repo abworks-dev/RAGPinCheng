@@ -814,7 +814,7 @@ function UploadTasksPanel({
     setPreflight(null);
     setRequestKey(createRequestId());
     try {
-      setSchemes(await adminContentApi.listTranscriptionSchemes());
+      setSchemes(await adminContentApi.transcriptionSchemes());
     } catch (loadError) {
       toast.error(loadError instanceof Error ? loadError.message : "转录方案加载失败");
     }
@@ -4812,6 +4812,15 @@ export function AdminManagedContentPage() {
       const pendingTranscription =
         canStartTranscription(item) &&
         !item.transcription_job_status?.match(/pending|running/);
+      const transcriptionTooltip =
+        unavailableReason ||
+        (pendingTranscription
+          ? "选择转录方案"
+          : item.transcription_job_status?.match(/pending|running/)
+            ? "转录任务进行中"
+            : item.transcription_failure_classification === "permanent"
+              ? "该视频无法重试转录"
+              : "该视频已完成转录");
       const moveTooltip =
         unavailableReason ||
         (movable ? "调整归档目录" : "当前账号没有发布权限");
@@ -4819,68 +4828,25 @@ export function AdminManagedContentPage() {
         state.status === "authed" &&
         state.user.role === "admin" &&
         Boolean(item.media_id);
+      const updateAllowed =
+        mediaManageAllowed &&
+        !item.transcription_job_status?.match(/pending|running/);
       const mediaBaseUrl = `/admin/content?view=transcription&media_id=${encodeURIComponent(item.media_id || "")}`;
       return (
-        <div className="ml-auto flex min-h-10 w-[13.5rem] max-w-full items-center justify-end gap-1">
-          {pendingTranscription && (
-            <Button
-              size="sm"
-              disabled={disabled}
-              onClick={() => openTranscriptionDialog([item])}
-            >
-              <Rocket className="size-4" />
-              开始转录
-            </Button>
-          )}
+        <div className="ml-auto flex min-h-10 max-w-full flex-wrap items-center justify-end gap-1">
+          <IconButton label={`转录“${item.title}”`} tooltip={transcriptionTooltip} className="border border-border max-sm:size-10" disabled={disabled || !pendingTranscription} onClick={() => openTranscriptionDialog([item])}><Rocket className="size-4" /></IconButton>
+          <IconButton label={`播放“${item.title}”`} tooltip={unavailableReason || (item.has_published_head ? "播放视频与转录稿" : "转录稿发布后可播放")} className="border border-border max-sm:size-10" disabled={disabled || !item.media_id || !item.has_published_head} onClick={() => openVideoPreview({ mediaId: item.media_id!, title: item.title, startSeconds: 0, fromSource: false })}><Film className="size-4" /></IconButton>
           <IconButton
             label={`查看“${item.title}”的详细信息`}
-            tooltip={unavailableReason || "查看视频转录稿详情"}
+            tooltip={unavailableReason || "查看视频详细信息"}
             className="border border-border max-sm:size-10"
             disabled={disabled}
             onClick={() => setDetail(item)}
           >
             <Info className="size-4" />
           </IconButton>
-          <IconButton
-            label={`播放“${item.title}”`}
-            tooltip={
-              unavailableReason ||
-              (item.has_published_head
-                ? "播放视频与转录稿"
-                : "转录稿发布后可播放")
-            }
-            className="border border-border max-sm:size-10"
-            disabled={disabled || !item.media_id || !item.has_published_head}
-            onClick={() =>
-              openVideoPreview({
-                mediaId: item.media_id!,
-                title: item.title,
-                startSeconds: 0,
-                fromSource: false,
-              })
-            }
-          >
-            <Film className="size-4" />
-          </IconButton>
-          <IconButton
-            label={`下载“${item.title}”`}
-            tooltip={
-              unavailableReason ||
-              (downloadable
-                ? "选择下载视频、转录稿或两者"
-                : "当前账号没有下载资料的权限")
-            }
-            className="border border-border max-sm:size-10"
-            disabled={
-              disabled ||
-              !downloadable ||
-              !item.media_id ||
-              !item.has_published_head
-            }
-            onClick={() => openMediaDownload(item)}
-          >
-            <Download className="size-4" />
-          </IconButton>
+          <IconButton label={`重命名“${item.title}”`} tooltip={unavailableReason || (mediaManageAllowed ? "重命名视频" : "仅系统管理员可以重命名视频")} className="border border-border max-sm:size-10" disabled={disabled || !mediaManageAllowed} onClick={() => openMediaInfoDialog(item)}><Pencil className="size-4" /></IconButton>
+          <IconButton label={`更新“${item.title}”`} tooltip={unavailableReason || (updateAllowed ? "更新视频资料" : "转录任务进行中，暂不能更新视频")} className="border border-border max-sm:size-10" disabled={disabled || !updateAllowed} onClick={() => { window.location.href = `${mediaBaseUrl}&action=replace`; }}><FileUp className="size-4" /></IconButton>
           <IconButton
             label={`调整“${item.title}”的归档目录`}
             tooltip={moveTooltip}
@@ -4894,6 +4860,7 @@ export function AdminManagedContentPage() {
           >
             <FolderInput className="size-4" />
           </IconButton>
+          <IconButton label={`下载“${item.title}”`} tooltip={unavailableReason || (downloadable ? "选择下载视频、转录稿或两者" : "当前账号没有下载资料的权限")} className="border border-border max-sm:size-10" disabled={disabled || !downloadable || !item.media_id} onClick={() => openMediaDownload(item)}><Download className="size-4" /></IconButton>
           <ActionsMenu
             compact
             disabled={disabled}
@@ -4942,6 +4909,7 @@ export function AdminManagedContentPage() {
               },
             ]}
           />
+          <IconButton label={`删除“${item.title}”`} tooltip={unavailableReason || (deletable ? "移入回收站（视频与转录稿可一起恢复）" : "仅系统管理员可以删除视频")} className="border border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive max-sm:size-10" disabled={disabled || !deletable} onClick={() => openDeleteDialog([item])}><Trash2 className="size-4" /></IconButton>
         </div>
       );
     }
