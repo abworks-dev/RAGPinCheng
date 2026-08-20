@@ -128,7 +128,6 @@ import {
 const PAGE_SIZE = 25;
 const PAGE_SIZE_OPTIONS = [25, 50, 100];
 const UPLOAD_TASK_PAGE_SIZE_OPTIONS = [10, 25, 50];
-const BULK_LIMIT = 20;
 const BULK_DOWNLOAD_TOAST_ID = "managed-content-bulk-download";
 const ACTIVE_RECLASSIFICATION_STATUSES = new Set([
   "pending",
@@ -803,7 +802,7 @@ function UploadTasksPanel({
   };
   const visibleTasks = tasks;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
-  const selectableTasks = visibleTasks.slice(0, BULK_LIMIT);
+  const selectableTasks = visibleTasks;
   const allSelected =
     selectableTasks.length > 0 &&
     selectableTasks.every((task) => selected.includes(task.batch_id));
@@ -818,16 +817,14 @@ function UploadTasksPanel({
     setSelected(
       allSelected
         ? []
-        : selectableTasks.map((task) => task.batch_id).slice(0, BULK_LIMIT),
+        : selectableTasks.map((task) => task.batch_id),
     );
   };
   const toggleTask = (batchId: string) => {
     setSelected((current) =>
       current.includes(batchId)
         ? current.filter((id) => id !== batchId)
-        : current.length >= BULK_LIMIT
-          ? current
-          : [...current, batchId],
+        : [...current, batchId],
     );
   };
   const exportSelected = () => {
@@ -1067,11 +1064,10 @@ function UploadTasksPanel({
               共 {total} 个任务 ·{" "}
               {selected.length > 0 ? (
                 <>
-                  已选择 <strong>{selected.length}</strong> 个，单次最多{" "}
-                  {BULK_LIMIT} 个
+                  已选择 <strong>{selected.length}</strong> 个
                 </>
               ) : (
-                <>未选择任务，单次最多 {BULK_LIMIT} 个</>
+                <>未选择任务</>
               )}
             </span>
           </div>
@@ -1156,16 +1152,7 @@ function UploadTasksPanel({
                     className="mt-0.5 xl:mt-0"
                     aria-label={`选择${task.upload_mode === "folder" ? "文件夹上传" : "文件上传"} ${task.target_path}`}
                     checked={selected.includes(task.batch_id)}
-                    disabled={
-                      !selected.includes(task.batch_id) &&
-                      selected.length >= BULK_LIMIT
-                    }
-                    title={
-                      !selected.includes(task.batch_id) &&
-                      selected.length >= BULK_LIMIT
-                        ? `单次最多选择 ${BULK_LIMIT} 个任务`
-                        : undefined
-                    }
+                    disabled={false}
                     onChange={() => toggleTask(task.batch_id)}
                   />
                   <div className="min-w-0">
@@ -4486,18 +4473,13 @@ export function AdminManagedContentPage() {
   };
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
-  const selectable = items.filter(canSelectItem).slice(0, BULK_LIMIT);
-  const selectableCount = Math.min(
-    BULK_LIMIT,
-    sortedChildFolders.length + selectable.length,
-  );
+  const selectable = items.filter(canSelectItem);
+  const selectableCount = sortedChildFolders.length + selectable.length;
   const allSelected =
     selectableCount > 0 &&
     sortedChildFolders
-      .slice(0, BULK_LIMIT)
       .every((folder) => selectedFolders.includes(folder.id)) &&
     selectable
-      .slice(0, Math.max(0, BULK_LIMIT - sortedChildFolders.length))
       .every((item) => selected.includes(item.version_id));
   const toggleAll = () => {
     if (allSelected) {
@@ -4505,12 +4487,10 @@ export function AdminManagedContentPage() {
       setSelectedFolders([]);
       return;
     }
-    const folders = sortedChildFolders.slice(0, BULK_LIMIT);
+    const folders = sortedChildFolders;
     setSelectedFolders(folders.map((folder) => folder.id));
     setSelected(
-      selectable
-        .slice(0, Math.max(0, BULK_LIMIT - folders.length))
-        .map((item) => item.version_id),
+      selectable.map((item) => item.version_id),
     );
   };
 
@@ -4553,9 +4533,7 @@ export function AdminManagedContentPage() {
     setSelectedFolders((current) =>
       current.includes(folderId)
         ? current.filter((id) => id !== folderId)
-        : totalSelectedCount >= BULK_LIMIT
-          ? current
-          : [...current, folderId],
+        : [...current, folderId],
     );
   };
   const openRecursiveBulk = (action: BulkOperationAction) =>
@@ -5448,7 +5426,7 @@ export function AdminManagedContentPage() {
       setTrashSelected(
         trashAllSelected
           ? []
-          : trashItems.slice(0, BULK_LIMIT).map((item) => item.version_id),
+          : trashItems.map((item) => item.version_id),
       );
     const retentionText = (item: ManagedContentItem) =>
       item.retention_status === "overdue"
@@ -5552,10 +5530,10 @@ export function AdminManagedContentPage() {
                   {trashSelected.length > 0 ? (
                     <>
                       已选择 <strong>{trashSelected.length}</strong>{" "}
-                      份，单次最多 {BULK_LIMIT} 份
+                      份
                     </>
                   ) : (
-                    <>未选择资料，单次最多 {BULK_LIMIT} 份</>
+                    <>未选择资料</>
                   )}
                 </span>
               </p>
@@ -5722,7 +5700,7 @@ export function AdminManagedContentPage() {
                       {(can("trash.restore") || can("trash.purge")) && (
                         <th className="w-12 px-3 py-3">
                           <Checkbox
-                            aria-label="选择当前页前20份回收站资料"
+                            aria-label="选择当前页回收站资料"
                             checked={trashAllSelected}
                             onChange={toggleAllTrash}
                           />
@@ -5789,10 +5767,7 @@ export function AdminManagedContentPage() {
                                       ? current.filter(
                                           (id) => id !== item.version_id,
                                         )
-                                      : [...current, item.version_id].slice(
-                                          0,
-                                          BULK_LIMIT,
-                                        ),
+                                      : [...current, item.version_id],
                                   )
                                 }
                               />
@@ -5889,10 +5864,7 @@ export function AdminManagedContentPage() {
                                   ? current.filter(
                                       (id) => id !== item.version_id,
                                     )
-                                  : [...current, item.version_id].slice(
-                                      0,
-                                      BULK_LIMIT,
-                                    ),
+                                  : [...current, item.version_id],
                               )
                             }
                           />
@@ -6631,16 +6603,14 @@ export function AdminManagedContentPage() {
                 {selectedFolders.length > 0 ? (
                   <>
                     已选择 <strong>{selectedFolders.length}</strong> 个文件夹、
-                    <strong>{selected.length}</strong> 份资料，单次最多{" "}
-                    {BULK_LIMIT} 项
+                    <strong>{selected.length}</strong> 份资料
                   </>
                 ) : selected.length > 0 ? (
                   <>
-                    已选择 <strong>{selected.length}</strong> 份，单次最多{" "}
-                    {BULK_LIMIT} 份
+                  已选择 <strong>{selected.length}</strong> 份
                   </>
                 ) : (
-                  <>未选择资料，单次最多 {BULK_LIMIT} 份</>
+                  <>未选择资料</>
                 )}
               </span>
             </p>
@@ -6945,7 +6915,7 @@ export function AdminManagedContentPage() {
                       <tr>
                         <th className="w-8 px-1.5 py-3">
                           <Checkbox
-                            aria-label="选择当前页前20份资料"
+                            aria-label="选择当前页资料"
                             checked={allSelected}
                             onChange={toggleAll}
                           />
@@ -7017,10 +6987,7 @@ export function AdminManagedContentPage() {
                               <Checkbox
                                 aria-label={`选择文件夹${folderLabel}`}
                                 checked={selectedFolders.includes(folder.id)}
-                                disabled={
-                                  !selectedFolders.includes(folder.id) &&
-                                  totalSelectedCount >= BULK_LIMIT
-                                }
+                                disabled={false}
                                 onClick={(event) => event.stopPropagation()}
                                 onChange={() =>
                                   toggleFolderSelection(folder.id)
@@ -7079,7 +7046,7 @@ export function AdminManagedContentPage() {
                               <Checkbox
                                 aria-label={`选择${item.title}`}
                                 checked={selected.includes(item.version_id)}
-                                disabled={index >= BULK_LIMIT || !rowSelectable}
+                                disabled={!rowSelectable}
                                 title={
                                   !rowSelectable
                                     ? "当前状态不可加入批量操作"
@@ -7091,10 +7058,7 @@ export function AdminManagedContentPage() {
                                       ? current.filter(
                                           (id) => id !== item.version_id,
                                         )
-                                      : [...current, item.version_id].slice(
-                                          0,
-                                          BULK_LIMIT,
-                                        ),
+                                      : [...current, item.version_id],
                                   )
                                 }
                               />
@@ -7140,10 +7104,7 @@ export function AdminManagedContentPage() {
                             className="mt-1"
                             aria-label={`选择文件夹${folderLabel}`}
                             checked={selectedFolders.includes(folder.id)}
-                            disabled={
-                              !selectedFolders.includes(folder.id) &&
-                              totalSelectedCount >= BULK_LIMIT
-                            }
+                            disabled={false}
                             onChange={() => toggleFolderSelection(folder.id)}
                           />
                           <button
@@ -7181,7 +7142,7 @@ export function AdminManagedContentPage() {
                             className="mt-0.5"
                             aria-label={`选择${item.title}`}
                             checked={selected.includes(item.version_id)}
-                            disabled={index >= BULK_LIMIT || !rowSelectable}
+                            disabled={!rowSelectable}
                             title={
                               !rowSelectable
                                 ? "当前状态不可加入批量操作"
@@ -7193,10 +7154,7 @@ export function AdminManagedContentPage() {
                                   ? current.filter(
                                       (id) => id !== item.version_id,
                                     )
-                                  : [...current, item.version_id].slice(
-                                      0,
-                                      BULK_LIMIT,
-                                    ),
+                                  : [...current, item.version_id],
                               )
                             }
                           />
