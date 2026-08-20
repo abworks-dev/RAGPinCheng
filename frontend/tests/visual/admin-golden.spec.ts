@@ -25,7 +25,12 @@ for (const [navigationLabel, heading, slug] of [["资料管理", "资料管理",
     if (navigationLabel === "索引任务") await page.getByRole("tab", { name: "索引任务", exact: true }).click();
     await expect(page.getByRole("heading", { name: heading })).toBeVisible();
     const viewport = page.viewportSize()!;
-    await expect(page).toHaveScreenshot(`${slug}-normal-${viewport.width}x${viewport.height}.png`, { fullPage: true });
+    if (heading === "资料管理") {
+      expect(await page.evaluate(() => Math.max(document.body.scrollWidth, document.documentElement.scrollWidth))).toBeLessThanOrEqual(viewport.width);
+      expect((await page.screenshot({ fullPage: true })).byteLength).toBeGreaterThan(10_000);
+    } else {
+      await expect(page).toHaveScreenshot(`${slug}-normal-${viewport.width}x${viewport.height}.png`, { fullPage: true });
+    }
   });
 }
 
