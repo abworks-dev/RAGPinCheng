@@ -1463,7 +1463,7 @@ describe("AdminManagedContentPage", () => {
     ));
   });
 
-  it("keeps the upload dialog and selected file after an upload failure", async () => {
+  it("keeps the background upload failure notice after the dialog closes", async () => {
     mocks.permissions = ORGANIZER_PERMISSIONS;
     mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });
     mocks.upload.mockRejectedValue(new Error("上传服务暂不可用"));
@@ -1476,8 +1476,10 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "确定上传" }));
 
     await waitFor(() => expect(mocks.error).toHaveBeenCalledWith("上传服务暂不可用"));
-    expect(screen.getByRole("dialog", { name: "上传文件" })).toBeInTheDocument();
-    expect(screen.getByText("retry.md")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "上传文件" })).not.toBeInTheDocument();
+    const notices = screen.getAllByRole("status");
+    expect(notices.some((notice) => notice.textContent?.includes("上传失败"))).toBe(true);
+    expect(notices.some((notice) => notice.textContent?.includes("上传服务暂不可用"))).toBe(true);
   });
 
   it("keeps file and folder choices inside the upload dropzone", async () => {
