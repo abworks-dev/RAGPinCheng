@@ -59,6 +59,8 @@ def test_empty_database_initializes_all_phase2_tables(tmp_path):
         "uq_media_assets_active_category_title",
         "uq_media_assets_active_category_filename",
     } <= media_indexes
+    upload_entry_columns = {row[1] for row in conn.execute("PRAGMA table_info(upload_batch_entries)")}
+    assert {"entry_kind", "media_id", "transcription_job_id", "failure_code"} <= upload_entry_columns
     conn.close()
     assert not (tmp_path / "backups").exists()
 
@@ -90,6 +92,74 @@ def test_repeated_init_is_noop_and_does_not_create_second_backup(tmp_path):
     first = list((tmp_path / "backups").glob("*.sqlite"))
     init_db(path, backup_dir=tmp_path / "backups")
     assert list((tmp_path / "backups").glob("*.sqlite")) == first
+
+
+def test_schema_29_relaxes_managed_content_doc_type_for_xmind(tmp_path, monkeypatch):
+    path = tmp_path / "app.sqlite"
+    migrations = db_migrations.MIGRATIONS
+    legacy_schema = SCHEMA.replace(
+        "'pdf','markdown','docx','xlsx','pptx','xmind','transcript'",
+        "'pdf','markdown','docx','xlsx','pptx','transcript'",
+    )
+    monkeypatch.setattr(app_db, "SCHEMA", legacy_schema)
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 28))
+    init_db(path, backup_dir=tmp_path / "backups")
+    monkeypatch.setattr(app_db, "SCHEMA", SCHEMA)
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
+
+    init_db(path, backup_dir=tmp_path / "backups")
+
+    conn = sqlite3.connect(path)
+    schema = conn.execute("SELECT sql FROM sqlite_master WHERE name='content_versions'").fetchone()[0]
+    assert "'xmind'" in schema
+    assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
+    conn.close()
+
+
+def test_schema_32_adds_video_upload_task_associations_without_rewriting_documents(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "app.sqlite"
+    migrations = db_migrations.MIGRATIONS
+    monkeypatch.setattr(
+        db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 31),
+    )
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    assert "entry_kind" not in {
+        row[1] for row in conn.execute("PRAGMA table_info(upload_batch_entries)")
+    }
+    conn.close()
+
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
+    init_db(path, backup_dir=tmp_path / "backups")
+
+    conn = sqlite3.connect(path)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(upload_batch_entries)")}
+    indexes = {row[1] for row in conn.execute("PRAGMA index_list(upload_batch_entries)")}
+    assert {"entry_kind", "media_id", "transcription_job_id", "failure_code"} <= columns
+    assert {
+        "idx_upload_batch_entries_media",
+        "idx_upload_batch_entries_transcription_job",
+    } <= indexes
+    conn.execute(
+        """INSERT INTO upload_batches(
+               id,origin,status,storage_rel_path,created_by,created_at,updated_at,
+               upload_mode,total_files,total_bytes
+           ) VALUES ('batch-doc','web','staging','inbox/web/batch-doc',NULL,1,1,'files',1,1)"""
+    )
+    conn.execute(
+        """INSERT INTO upload_batch_entries(
+               batch_id,sequence,filename,relative_path,size_bytes,status,created_at
+           ) VALUES ('batch-doc',1,'legacy.md',NULL,1,'accepted',1)"""
+    )
+    assert conn.execute(
+        "SELECT entry_kind,media_id,transcription_job_id,failure_code FROM upload_batch_entries"
+    ).fetchone() == ("document", None, None, None)
+    assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
+    conn.close()
 
 
 def test_schema_10_database_migrates_manual_revision_columns_and_index(tmp_path, monkeypatch):
@@ -153,6 +223,75 @@ def test_schema_14_database_migrates_answer_policy_and_asr_profiles(tmp_path, mo
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
     conn.close()
+
+
+def test_schema_33_database_relaxes_category_level_check_without_losing_rows(tmp_path, monkeypatch):
+    path = tmp_path / "app.sqlite"
+    migrations = db_migrations.MIGRATIONS
+    monkeypatch.setattr(
+        db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 33),
+    )
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    conn.execute(
+        """INSERT INTO category_nodes
+           (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,created_at,updated_at)
+           VALUES ('migration-depth-4','migration_depth_4','cat-01','01','第四级',10,4,1,1,1)"""
+    )
+    conn.commit()
+    table_sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='category_nodes'"
+    ).fetchone()[0]
+    assert "level BETWEEN 1 AND 4" in table_sql
+    conn.close()
+
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    table_sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='category_nodes'"
+    ).fetchone()[0]
+    assert "level BETWEEN 1 AND 4" not in table_sql
+    assert "CHECK (level >= 1)" in table_sql
+    conn.execute(
+        """INSERT INTO category_nodes
+           (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,created_at,updated_at)
+           VALUES ('migration-depth-5','migration_depth_5','migration-depth-4','01','第五级',10,5,1,1,1)"""
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            """INSERT INTO category_nodes
+               (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,created_at,updated_at)
+               VALUES ('migration-depth-0','migration_depth_0',NULL,'98','无效层级',980,0,1,1,1)"""
+        )
+    assert conn.execute(
+        "SELECT display_name FROM category_nodes WHERE id='migration-depth-4'"
+    ).fetchone()[0] == "第四级"
+    assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
+    conn.close()
+
+
+def test_repeated_init_fails_closed_when_category_level_schema_drifts(tmp_path):
+    path = tmp_path / "app.sqlite"
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    table_sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='category_nodes'"
+    ).fetchone()[0]
+    conn.execute("PRAGMA writable_schema=ON")
+    conn.execute(
+        "UPDATE sqlite_master SET sql=? WHERE type='table' AND name='category_nodes'",
+        (table_sql.replace(
+            "level INTEGER NOT NULL CHECK (level >= 1)",
+            "level INTEGER NOT NULL CHECK (level >= 1) CHECK (level BETWEEN 1 AND 4)",
+        ),),
+    )
+    conn.execute("PRAGMA writable_schema=RESET")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(RuntimeError, match="migration_schema_mismatch"):
+        init_db(path, backup_dir=tmp_path / "backups")
 
 
 def test_schema_17_adds_reclassification_jobs_without_granting_custom_principals(

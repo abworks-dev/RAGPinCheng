@@ -22,6 +22,11 @@ import type {
   Health,
   LlmHealth,
   MediaAsset,
+  ExternalMediaRoot,
+  ExternalMediaSource,
+  ExternalMediaEntryList,
+  ExternalMediaScan,
+  ExternalMediaEnqueueResult,
   MediaUploadPreflightResponse,
   ManagedCategory,
   CategoryDeletePreview,
@@ -30,10 +35,13 @@ import type {
   FolderRequest,
   ManagedContentItem,
   ManagedPreview,
+  XMindPreview,
   ContentTrashAuditEvent,
   ContentReclassificationJob,
   ManagedContentList,
   BulkManagedContentResponse,
+  BulkOperation,
+  BulkOperationAction,
   BulkRestorePreflightResult,
   TrashPurgePreflight,
   TrashPurgeRun,
@@ -46,6 +54,8 @@ import type {
   ManagedUploadTaskList,
   MediaTranscript,
   TranscriptionJob,
+  BulkTranscriptionPreflight,
+  BulkTranscriptionResult,
   TranscriptionProfile,
   TranscriptionBase,
   TranscriptionScheme,
@@ -108,6 +118,9 @@ export type ManagedUploadProgress = {
 export type ManagedUploadOptions = {
   allowFolderMerge?: boolean;
   conflictActions?: ManagedUploadConflictAction[];
+  videoSchemeId?: string;
+  videoIdempotencyKeys?: string[];
+  publishIntents?: boolean[];
 };
 
 export function setUnauthorizedHandler(fn: (() => void) | null) {
@@ -395,7 +408,7 @@ export const api = {
     jsonFetch<CleanupPreview>(
       `/api/admin/maintenance/cleanup-preview${retentionDays === undefined ? "" : `?retention_days=${retentionDays}`}`,
     ),
-  adminUpdateMaintenanceSettings: (settings: Pick<MaintenanceSettings, "conversation_cleanup_enabled" | "conversation_retention_days">) =>
+  adminUpdateMaintenanceSettings: (settings: Omit<MaintenanceSettings, "updated_at" | "updated_by">) =>
     jsonFetch<MaintenanceSettings>("/api/admin/maintenance/settings", {
       method: "PATCH",
       body: JSON.stringify(settings),
@@ -429,6 +442,8 @@ export const api = {
     jsonFetch<{
       enabled: boolean;
       max_upload_bytes: number;
+      max_batch_files: number;
+      max_batch_bytes: number;
       supported_extensions: string[];
     }>("/api/admin/content/capabilities"),
   managedCategories: (includeInactive = false) =>
@@ -447,6 +462,21 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  createSharedFolder: (body: {
+    parent_id: string | null;
+    display_name: string;
+    target_position?: number;
+    confirm_number_shift?: boolean;
+    root_alias: string;
+    relative_path?: string;
+    unc_path?: string | null;
+    default_scheme_id: string;
+    auto_enqueue?: boolean;
+    scan_interval_seconds?: number;
+  }) => jsonFetch<ManagedCategory>("/api/admin/content/shared-folders", {
+    method: "POST",
+    body: JSON.stringify(body),
+  }),
   updateManagedCategory: (
     categoryId: string,
     body: {
@@ -549,7 +579,7 @@ export const api = {
     lifecycle_status?: string;
     source_origin?: string;
     content_kind?: "document" | "media_transcript";
-    doc_type?: "pdf" | "docx" | "xlsx" | "pptx" | "markdown" | "transcript" | "other";
+    doc_type?: "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "xmind" | "markdown" | "transcript" | "other";
     sort_by?: "doc_type";
     sort_direction?: "asc" | "desc";
     limit?: number;
@@ -669,9 +699,20 @@ export const api = {
       form.append("files", file, file.name);
       form.append("relative_paths", relativePath);
     });
+    if (files.some((entry) => /\.mp4$/i.test("file" in entry ? entry.file.name : entry.name))) {
+      files.forEach((entry, index) => {
+        const file = "file" in entry ? entry.file : entry;
+        form.append(
+          "video_idempotency_keys",
+          /\.mp4$/i.test(file.name) ? options?.videoIdempotencyKeys?.[index] || crypto.randomUUID() : "",
+        );
+      });
+    }
     form.append("category_id", categoryId);
     form.append("upload_mode", uploadMode);
     form.append("allow_folder_merge", options?.allowFolderMerge ? "true" : "false");
+    files.forEach((_entry, index) => form.append("publish", options?.publishIntents?.[index] ? "true" : "false"));
+    if (options?.videoSchemeId) form.append("video_scheme_id", options.videoSchemeId);
     options?.conflictActions?.forEach((action) => {
       form.append("conflict_actions", JSON.stringify(action));
     });
@@ -826,6 +867,10 @@ export const api = {
       `/api/admin/content/versions/${encodeURIComponent(versionId)}/preview`,
       { method: "POST", body: JSON.stringify({}) },
     ),
+  managedContentXMindPreview: (versionId: string) =>
+    jsonFetch<XMindPreview>(
+      `/api/admin/content/versions/${encodeURIComponent(versionId)}/xmind-preview`,
+    ),
   bulkReviewManagedContent: (versionIds: string[], approved: boolean, note?: string) =>
     jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-review", {
       method: "POST",
@@ -878,6 +923,36 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ version_ids: versionIds }),
     }),
+  preflightManagedContentBulkOperation: (
+    operation: BulkOperationAction,
+    categories: Array<{ category_id: string; expected_version: number }>,
+    items: Array<{ item_id: string; expected_version_id: string }>,
+  ) => jsonFetch<BulkOperation>("/api/admin/content/bulk-operations/preflight", {
+    method: "POST", body: JSON.stringify({ operation, categories, items }),
+  }),
+  managedContentBulkOperation: (runId: string, includeTree = true) =>
+    jsonFetch<BulkOperation>(`/api/admin/content/bulk-operations/${encodeURIComponent(runId)}?include_tree=${includeTree}`),
+  updateManagedContentBulkSelection: (runId: string, itemIds: string[], selected: boolean) =>
+    jsonFetch<BulkOperation>(`/api/admin/content/bulk-operations/${encodeURIComponent(runId)}/selection`, {
+      method: "PATCH", body: JSON.stringify({ item_ids: itemIds, selected }),
+    }),
+  executeManagedContentBulkOperation: (
+    runId: string,
+    options: { target_category_id?: string; note?: string; confirmation?: string } = {},
+  ) => jsonFetch<BulkOperation>(`/api/admin/content/bulk-operations/${encodeURIComponent(runId)}/execute`, {
+    method: "POST", body: JSON.stringify(options),
+  }),
+  reviewManagedContentBulkItem: (runId: string, itemId: string, approved: boolean, note?: string) =>
+    jsonFetch<BulkOperation>(
+      `/api/admin/content/bulk-operations/${encodeURIComponent(runId)}/items/${encodeURIComponent(itemId)}/review`,
+      { method: "POST", body: JSON.stringify({ approved, note: note?.trim() || null }) },
+    ),
+  cancelManagedContentBulkOperation: (runId: string) =>
+    jsonFetch<BulkOperation>(`/api/admin/content/bulk-operations/${encodeURIComponent(runId)}/cancel`, {
+      method: "POST", body: JSON.stringify({}),
+    }),
+  managedContentBulkArchiveUrl: (runId: string) =>
+    `/api/admin/content/bulk-operations/${encodeURIComponent(runId)}/archive`,
   downloadManagedCategory: (categoryId: string, fallbackFilename: string) =>
     fileFetch(`/api/admin/content/categories/${encodeURIComponent(categoryId)}/download`, fallbackFilename, {
       method: "POST",
@@ -972,6 +1047,15 @@ export const api = {
     return multipartFetch<MediaAsset>("/api/admin/media", fd, callbacks);
   },
   listMediaAssets: () => jsonFetch<MediaAsset[]>("/api/admin/media"),
+  listExternalMediaRoots: () => jsonFetch<ExternalMediaRoot[]>("/api/admin/external-media/roots"),
+  listExternalMediaSources: () => jsonFetch<ExternalMediaSource[]>("/api/admin/external-media/sources"),
+  createExternalMediaSource: (body: { name: string; root_alias: string; relative_path: string; unc_path?: string | null; target_category_id: string; default_scheme_id: string; auto_enqueue: boolean; scan_interval_seconds: number }) =>
+    jsonFetch<ExternalMediaSource>("/api/admin/external-media/sources", { method: "POST", body: JSON.stringify(body) }),
+  updateExternalMediaSource: (sourceId: string, body: { name: string; target_category_id: string; default_scheme_id: string; auto_enqueue: boolean; scan_interval_seconds: number; enabled: boolean; expected_version: number }) =>
+    jsonFetch<ExternalMediaSource>(`/api/admin/external-media/sources/${encodeURIComponent(sourceId)}`, { method: "PATCH", body: JSON.stringify(body) }),
+  scanExternalMediaSource: (sourceId: string) => jsonFetch<ExternalMediaScan>(`/api/admin/external-media/sources/${encodeURIComponent(sourceId)}/scan`, { method: "POST", body: JSON.stringify({}) }),
+  listExternalMediaEntries: (sourceId: string, parent = "") => jsonFetch<ExternalMediaEntryList>(`/api/admin/external-media/sources/${encodeURIComponent(sourceId)}/entries?parent=${encodeURIComponent(parent)}`),
+  enqueueExternalMedia: (sourceId: string, entryIds?: string[]) => jsonFetch<ExternalMediaEnqueueResult>(`/api/admin/external-media/sources/${encodeURIComponent(sourceId)}/enqueue`, { method: "POST", body: JSON.stringify({ entry_ids: entryIds ?? null }) }),
   preflightMediaUpload: (body: {
     category_id: string;
     items: Array<{ client_id: string; title: string; original_filename: string }>;
@@ -1002,6 +1086,31 @@ export const api = {
     jsonFetch<TranscriptionJob[]>(
       `/api/admin/transcription/jobs?latest_per_media=${latestPerMedia}&limit=${limit}`,
     ),
+  startMediaTranscription: (mediaId: string, schemeId: string, requestIdempotencyKey: string) =>
+    jsonFetch<TranscriptionJob>(`/api/admin/transcription/media/${encodeURIComponent(mediaId)}/start`, {
+      method: "POST",
+      body: JSON.stringify({ scheme_id: schemeId, request_idempotency_key: requestIdempotencyKey }),
+    }),
+  preflightBulkStartTranscription: (body: {
+    scheme_id: string;
+    request_idempotency_key: string;
+    media_ids?: string[];
+    upload_batch_id?: string;
+    category_id?: string;
+    recursive?: boolean;
+  }) => jsonFetch<BulkTranscriptionPreflight>("/api/admin/transcription/bulk-start/preflight", {
+    method: "POST", body: JSON.stringify(body),
+  }),
+  bulkStartTranscription: (body: {
+    scheme_id: string;
+    request_idempotency_key: string;
+    media_ids?: string[];
+    upload_batch_id?: string;
+    category_id?: string;
+    recursive?: boolean;
+  }) => jsonFetch<BulkTranscriptionResult>("/api/admin/transcription/bulk-start", {
+    method: "POST", body: JSON.stringify(body),
+  }),
   getTranscriptionJob: (jobId: string) =>
     jsonFetch<TranscriptionJob>(`/api/admin/transcription/jobs/${jobId}`),
   cancelTranscriptionJob: (jobId: string) =>

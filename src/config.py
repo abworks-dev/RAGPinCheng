@@ -1,5 +1,7 @@
 from pathlib import Path
+import json
 import os
+import re
 from dotenv import load_dotenv
 
 from src.transcription_admission_config import (
@@ -12,10 +14,111 @@ load_dotenv()
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 CONTENT_ROOT = Path(os.getenv("CONTENT_ROOT", str(ROOT / "content"))).resolve()
+CONTENT_BULK_ARCHIVE_ROOT = Path(
+    os.getenv("CONTENT_BULK_ARCHIVE_ROOT", str(CONTENT_ROOT / ".bulk-archives"))
+).resolve()
+CONTENT_BULK_ARCHIVE_MAX_BYTES = int(
+    os.getenv("CONTENT_BULK_ARCHIVE_MAX_BYTES", str(10 * 1024 * 1024 * 1024))
+)
+CONTENT_BULK_ARCHIVE_RESERVE_BYTES = int(
+    os.getenv("CONTENT_BULK_ARCHIVE_RESERVE_BYTES", str(2 * 1024 * 1024 * 1024))
+)
+CONTENT_BULK_ARCHIVE_RETENTION_SECONDS = int(
+    os.getenv("CONTENT_BULK_ARCHIVE_RETENTION_SECONDS", str(6 * 60 * 60))
+)
+if CONTENT_BULK_ARCHIVE_MAX_BYTES <= 0:
+    raise ValueError("CONTENT_BULK_ARCHIVE_MAX_BYTES must be positive")
+if CONTENT_BULK_ARCHIVE_RESERVE_BYTES < 0:
+    raise ValueError("CONTENT_BULK_ARCHIVE_RESERVE_BYTES must not be negative")
+if CONTENT_BULK_ARCHIVE_RETENTION_SECONDS <= 0:
+    raise ValueError("CONTENT_BULK_ARCHIVE_RETENTION_SECONDS must be positive")
 # DOCS_DIR is retained as the legacy compatibility name. The default must not
 # overlap the repository's project documentation directory.
 DOCS_DIR = Path(os.getenv("DOCS_DIR", str(CONTENT_ROOT / "legacy-docs"))).resolve()
 MEDIA_DIR = Path(os.getenv("MEDIA_DIR", str(ROOT / "media"))).resolve()
+
+
+def parse_external_media_roots(raw: str) -> dict[str, Path]:
+    """Parse server-owned external media root aliases without exposing paths to clients."""
+    if not raw.strip():
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("EXTERNAL_MEDIA_ROOTS_JSON must be a JSON object") from exc
+    if not isinstance(value, dict):
+        raise ValueError("EXTERNAL_MEDIA_ROOTS_JSON must be a JSON object")
+    roots: dict[str, Path] = {}
+    for alias, configured_path in value.items():
+        if not isinstance(alias, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", alias):
+            raise ValueError("external media root alias is invalid")
+        if not isinstance(configured_path, str) or not configured_path.strip():
+            raise ValueError(f"external media root path is invalid: {alias}")
+        path = Path(configured_path).expanduser()
+        if not path.is_absolute():
+            raise ValueError(f"external media root must be absolute: {alias}")
+        roots[alias] = path.resolve(strict=False)
+    return roots
+
+
+def _normalize_unc_root(value: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError("external UNC root is invalid")
+    clean = value.strip().replace("/", "\\").rstrip("\\")
+    if not re.fullmatch(r"\\\\[^\\]+\\[^\\]+", clean):
+        raise ValueError("external UNC root is invalid")
+    return clean.casefold()
+
+
+def parse_external_unc_roots(raw: str) -> dict[str, tuple[str, Path]]:
+    """Parse administrator-approved UNC roots mapped to server mount paths."""
+    if not raw.strip():
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("EXTERNAL_MEDIA_UNC_ROOTS_JSON must be a JSON object") from exc
+    if not isinstance(value, dict):
+        raise ValueError("EXTERNAL_MEDIA_UNC_ROOTS_JSON must be a JSON object")
+    result: dict[str, tuple[str, Path]] = {}
+    for alias, entry in value.items():
+        if not isinstance(alias, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", alias):
+            raise ValueError("external UNC root alias is invalid")
+        if not isinstance(entry, dict) or not isinstance(entry.get("unc"), str) or not isinstance(entry.get("path"), str):
+            raise ValueError(f"external UNC root mapping is invalid: {alias}")
+        mount = Path(entry["path"]).expanduser()
+        if not mount.is_absolute():
+            raise ValueError(f"external UNC root mount must be absolute: {alias}")
+        result[alias] = (_normalize_unc_root(entry["unc"]), mount.resolve(strict=False))
+    return result
+
+
+def resolve_external_unc_path(value: str, roots: dict[str, tuple[str, Path]]) -> tuple[str, str]:
+    if not isinstance(value, str) or "\x00" in value:
+        raise ValueError("invalid_external_unc_path")
+    clean = value.strip().replace("/", "\\").rstrip("\\")
+    match = re.fullmatch(r"\\\\([^\\]+)\\([^\\]+)(?:\\(.*))?", clean)
+    if not match:
+        raise ValueError("invalid_external_unc_path")
+    unc_root = f"\\\\{match.group(1)}\\{match.group(2)}".casefold()
+    relative = (match.group(3) or "").replace("\\", "/")
+    parts = relative.split("/") if relative else []
+    if any(part in {"", ".", ".."} for part in parts):
+        raise ValueError("invalid_external_unc_path")
+    for alias, (configured_unc, _mount) in roots.items():
+        if configured_unc == unc_root:
+            return alias, "/".join(parts)
+    raise ValueError("external_unc_root_unconfigured")
+
+
+EXTERNAL_MEDIA_UNC_ROOTS = parse_external_unc_roots(os.getenv("EXTERNAL_MEDIA_UNC_ROOTS_JSON", ""))
+EXTERNAL_MEDIA_ROOTS = {**parse_external_media_roots(os.getenv("EXTERNAL_MEDIA_ROOTS_JSON", "")), **{alias: mount for alias, (_unc, mount) in EXTERNAL_MEDIA_UNC_ROOTS.items()}}
+EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE = int(os.getenv("EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE", "10000"))
+EXTERNAL_MEDIA_SCAN_POLL_SECONDS = int(os.getenv("EXTERNAL_MEDIA_SCAN_POLL_SECONDS", "60"))
+if EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE < 1:
+    raise ValueError("EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE must be positive")
+if EXTERNAL_MEDIA_SCAN_POLL_SECONDS < 10:
+    raise ValueError("EXTERNAL_MEDIA_SCAN_POLL_SECONDS must be at least 10")
 PARSED_DIR = DATA_DIR / "parsed"
 QDRANT_DIR = DATA_DIR / "qdrant"  # legacy embedded-mode path; unused after the server migration but kept for the optional cleanup script
 PARENTS_DB = DATA_DIR / "parents.sqlite"
@@ -29,7 +132,7 @@ CONTENT_MANAGEMENT_ENABLED = os.getenv("CONTENT_MANAGEMENT_ENABLED", "").strip()
 OFFICE_PROCESSING_ENABLED = os.getenv("OFFICE_PROCESSING_ENABLED", "true").strip().lower() in (
     "1", "true", "yes", "on",
 )
-OFFICE_DOC_TYPES = frozenset({"docx", "xlsx", "pptx"})
+OFFICE_DOC_TYPES = frozenset({"doc", "docx", "xls", "xlsx", "ppt", "pptx"})
 OFFICE_PARSE_TIMEOUT_SECONDS = int(os.getenv("OFFICE_PARSE_TIMEOUT_SECONDS", "120"))
 OFFICE_MIN_FREE_DISK_MB = int(os.getenv("OFFICE_MIN_FREE_DISK_MB", "1024"))
 CONTENT_HEAD_ENFORCEMENT = os.getenv("CONTENT_HEAD_ENFORCEMENT", "compat").strip().lower()

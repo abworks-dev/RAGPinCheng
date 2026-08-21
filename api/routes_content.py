@@ -30,8 +30,12 @@ from src.config import (
     CONTENT_TRASH_EXPIRING_WARNING_DAYS,
     DOCS_DIR,
     MEDIA_DIR,
+    MAX_VIDEO_UPLOAD_MB,
     ROOT,
     TRANSCRIPTION_ARTIFACT_DIR,
+    EXTERNAL_MEDIA_ROOTS,
+    EXTERNAL_MEDIA_UNC_ROOTS,
+    resolve_external_unc_path,
 )
 from src.office_security import find_unsafe_office_content
 from src.transcription.persistence import ManagedMarkdownRef
@@ -41,9 +45,12 @@ from src.indexing_pipeline import (
     list_managed_version_index_summaries,
 )
 from src.office_convert import convert_pptx_to_pdf, is_valid_pdf_file
+from src.xmind_parser import XMindParseError, XMindTopic, parse_xmind
 
 from .auth import CurrentUser, require_admin, require_csrf, require_csrf_admin, require_user
+from .maintenance import get_settings
 from .content_permissions import (
+    LEGACY_CONTENT_PERMISSION_KEYS,
     has_content_permission,
     require_content_permission,
 )
@@ -59,6 +66,17 @@ from .content_reclassification import (
     create_reclassification_job,
     failure_summary as reclassification_failure_summary,
     retry_reclassification_job,
+)
+from .content_bulk_operations import (
+    archive_file,
+    cancel_operation,
+    create_preflight as create_bulk_operation_preflight,
+    finalize_sync_run,
+    mark_item_result,
+    operation_snapshot,
+    start_archive,
+    start_force_delete,
+    update_item_selection,
 )
 from .content_storage import ContentStorage, StoredContentObject
 from .content_trash_cleanup import (
@@ -108,8 +126,15 @@ from .content_store import (
 )
 from .db import get_db
 from .routes_media import safe_join
+from .media_upload_conflicts import find_media_upload_conflicts, normalize_media_title
+from .media_storage import normalize_external_relative_path
+from .transcription_schemes import resolve_scheme_runtime
 from .schemas import (
     BulkArchiveManagedContentRequest,
+    BulkOperationDTO,
+    BulkOperationExecuteRequest,
+    BulkOperationPreflightRequest,
+    BulkOperationSelectionRequest,
     BulkRestoreManagedContentRequest,
     BulkRestorePreflightResponse,
     BulkRestorePreflightResultDTO,
@@ -123,6 +148,7 @@ from .schemas import (
     UpdateTrashSettingsRequest,
     BulkDownloadManagedContentRequest,
     CreateManagedCategoryRequest,
+    CreateSharedFolderRequest,
     CreateFolderRequest,
     CreateContentPermissionGroupRequest,
     DeleteManagedContentRequest,
@@ -154,6 +180,7 @@ from .schemas import (
     ManagedIndexJobListResponse,
     ManagedPublicationDTO,
     ManagedPreviewDTO,
+    XMindPreviewDTO,
     ManagedUploadEntryDTO,
     ManagedUploadConflictAction,
     ManagedUploadFilenameConflictDTO,
@@ -179,18 +206,20 @@ from .transcription_artifacts import LocalTranscriptionArtifactStore
 router = APIRouter(prefix="/admin/content", tags=["managed-content"])
 logger = logging.getLogger(__name__)
 _storage = ContentStorage(CONTENT_ROOT)
-_MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_MB", "200")) * 1024 * 1024
-_MAX_FOLDER_UPLOAD_FILES = int(os.getenv("MAX_FOLDER_UPLOAD_FILES", "500"))
-_MAX_FOLDER_UPLOAD_BYTES = int(os.getenv("MAX_FOLDER_UPLOAD_MB", "1024")) * 1024 * 1024
 _MAX_BULK_DOWNLOAD_BYTES = int(os.getenv("MAX_BULK_DOWNLOAD_MB", "1024")) * 1024 * 1024
 _MAX_RELATIVE_PATH_LENGTH = 1024
 _DOC_TYPES = {
     ".pdf": "pdf",
     ".md": "markdown",
     ".docx": "docx",
+    ".doc": "doc",
     ".xlsx": "xlsx",
+    ".xls": "xls",
     ".pptx": "pptx",
+    ".ppt": "ppt",
+    ".xmind": "xmind",
 }
+_VIDEO_EXTENSIONS = {".mp4"}
 _CONTENT_READ = CONTENT_PERMISSIONS
 
 
@@ -224,6 +253,7 @@ def _preflight_upload_paths(
     relative_paths: list[str] | None,
     upload_mode: str,
 ) -> list[str | None]:
+    settings = get_settings(conn)
     if upload_mode not in {"files", "folder"}:
         raise HTTPException(status_code=400, detail="上传模式无效")
     category = conn.execute(
@@ -261,8 +291,6 @@ def _preflight_upload_paths(
             raise HTTPException(status_code=400, detail="文件夹路径无效")
         if parts[-1] != filename:
             raise HTTPException(status_code=400, detail="文件名与相对路径不一致")
-        if int(category["level"]) + len(parts) - 1 > 4:
-            raise HTTPException(status_code=400, detail="文件夹路径超过资料目录四级限制")
         try:
             for folder_name in parts[:-1]:
                 _parse_folder_name(folder_name)
@@ -277,16 +305,16 @@ def _preflight_upload_paths(
 
     is_folder_upload = upload_mode == "folder" or has_nested_path
     if is_folder_upload:
-        if len(files) > _MAX_FOLDER_UPLOAD_FILES:
+        if len(files) > settings.upload_max_batch_files:
             raise HTTPException(
                 status_code=413,
-                detail=f"文件夹最多上传 {_MAX_FOLDER_UPLOAD_FILES} 个文件",
+                detail=f"文件夹最多上传 {settings.upload_max_batch_files} 个文件",
             )
         total_size = sum(_upload_size(upload) for upload in files)
-        if total_size > _MAX_FOLDER_UPLOAD_BYTES:
+        if total_size > settings.upload_max_batch_mb * 1024 * 1024:
             raise HTTPException(
                 status_code=413,
-                detail=f"文件夹总大小不能超过 {_MAX_FOLDER_UPLOAD_BYTES // (1024 * 1024)} MB",
+                detail=f"文件夹总大小不能超过 {settings.upload_max_batch_mb} MB",
             )
     return normalized_paths
 
@@ -350,6 +378,27 @@ def _suggest_available_filename(
         if find_content_filename_conflict(
             conn, category_id=category_id, original_filename=candidate
         ) is None:
+            return candidate
+    raise ValueError("filename_suggestion_exhausted")
+
+
+def _suggest_available_media_filename(
+    conn: sqlite3.Connection,
+    *,
+    category_id: str,
+    original_filename: str,
+) -> str:
+    path = Path(original_filename)
+    for number in range(1, 10_000):
+        marker = f" ({number})"
+        available = 255 - len(path.suffix) - len(marker)
+        candidate = f"{path.stem[:available]}{marker}{path.suffix}"
+        if not find_media_upload_conflicts(
+            conn,
+            category_id=category_id,
+            title=Path(candidate).stem,
+            original_filename=candidate,
+        ):
             return candidate
     raise ValueError("filename_suggestion_exhausted")
 
@@ -481,6 +530,7 @@ def _permission_group_dto(conn: sqlite3.Connection, row: sqlite3.Row) -> Content
             "SELECT permission FROM content_permission_group_items WHERE group_id=? ORDER BY permission",
             (row["id"],),
         ).fetchall()
+        if str(item[0]) not in LEGACY_CONTENT_PERMISSION_KEYS
     ]
     return ContentPermissionGroupDTO(
         id=row["id"], group_key=row["group_key"], display_name=row["display_name"],
@@ -491,7 +541,7 @@ def _permission_group_dto(conn: sqlite3.Connection, row: sqlite3.Row) -> Content
 
 def _validate_permissions(permissions: list[str]) -> set[str]:
     requested = set(permissions)
-    if len(requested) != len(permissions) or not requested.issubset(CONTENT_PERMISSIONS):
+    if len(requested) != len(permissions) or not requested.issubset(CONTENT_PERMISSIONS | LEGACY_CONTENT_PERMISSION_KEYS):
         raise HTTPException(status_code=400, detail="包含重复或未知资料权限")
     missing = missing_content_permission_dependencies(requested)
     if missing:
@@ -503,18 +553,41 @@ def _validate_permissions(permissions: list[str]) -> set[str]:
     return requested
 
 
-def _category_dto(row: sqlite3.Row) -> ManagedCategoryDTO:
+def _category_effective_flags(conn: sqlite3.Connection, row: sqlite3.Row) -> tuple[bool, bool, bool, bool]:
+    search = bool(row["is_active"] and row["chat_search_enabled"])
+    selectable = bool(search and row["chat_filter_selectable"])
+    parent_id = row["parent_id"]
+    while parent_id:
+        parent = conn.execute("SELECT parent_id,is_active,chat_search_enabled,chat_filter_selectable FROM category_nodes WHERE id=? AND deleted_at IS NULL", (parent_id,)).fetchone()
+        if parent is None:
+            break
+        if not parent["is_active"] or not parent["chat_search_enabled"]:
+            search = selectable = False
+        elif not parent["chat_filter_selectable"]:
+            selectable = False
+        parent_id = parent["parent_id"]
+    return search, selectable, search != bool(row["is_active"] and row["chat_search_enabled"]), selectable != bool(row["is_active"] and row["chat_search_enabled"] and row["chat_filter_selectable"])
+
+
+def _category_dto(conn: sqlite3.Connection, row: sqlite3.Row) -> ManagedCategoryDTO:
+    search_effective, filter_effective, search_inherited, filter_inherited = _category_effective_flags(conn, row)
     return ManagedCategoryDTO(
         id=row["id"],
         category_key=row["category_key"],
         parent_id=row["parent_id"],
         display_code=row["display_code"],
         display_name=row["display_name"],
+        category_kind=str(row["category_kind"] or "folder") if "category_kind" in row.keys() else "folder",
+        external_source_id=row["external_source_id"] if "external_source_id" in row.keys() else None,
         sort_order=row["sort_order"],
         level=row["level"],
         is_active=bool(row["is_active"]),
         chat_search_enabled=bool(row["chat_search_enabled"]),
         chat_filter_selectable=bool(row["chat_filter_selectable"]),
+        chat_search_effective=search_effective,
+        chat_filter_effective=filter_effective,
+        chat_search_inherited=search_inherited,
+        chat_filter_inherited=filter_inherited,
         version=row["version"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
@@ -524,6 +597,16 @@ def _category_dto(row: sqlite3.Row) -> ManagedCategoryDTO:
         total_child_count=int(row["total_child_count"]) if "total_child_count" in row.keys() else 0,
         total_item_count=int(row["total_item_count"]) if "total_item_count" in row.keys() else int(row["item_count"]) if "item_count" in row.keys() else 0,
     )
+
+
+def _reject_external_media_mutation(conn: sqlite3.Connection, item_id: str) -> None:
+    row = conn.execute(
+        """SELECT m.storage_kind FROM content_items i
+           JOIN media_assets m ON m.media_id=i.media_id WHERE i.id=?""",
+        (item_id,),
+    ).fetchone()
+    if row is not None and row["storage_kind"] == "external":
+        raise ValueError("external_media_read_only")
 
 
 def _folder_request_dto(row: sqlite3.Row) -> FolderRequestDTO:
@@ -623,8 +706,6 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=404, detail="目标父分类不存在") from exc
     if message == "parent_category_inactive":
         raise HTTPException(status_code=409, detail="不能移动到已停用的分类中") from exc
-    if message == "category_depth_exceeded":
-        raise HTTPException(status_code=409, detail="移动后分类层级将超过四级") from exc
     if message == "active_child_category_exists":
         raise HTTPException(status_code=409, detail="该分类仍有启用的子分类，请先停用子分类") from exc
     if message == "content_too_large":
@@ -711,10 +792,14 @@ def _require_feature() -> None:
 @router.get("/capabilities")
 def content_capabilities(
     _user: CurrentUser = Depends(require_content_permission("item.view")),
+    conn: sqlite3.Connection = Depends(get_db),
 ) -> dict[str, object]:
+    settings = get_settings(conn)
     return {
         "enabled": CONTENT_MANAGEMENT_ENABLED,
-        "max_upload_bytes": _MAX_UPLOAD_BYTES,
+        "max_upload_bytes": settings.upload_max_file_mb * 1024 * 1024,
+        "max_batch_files": settings.upload_max_batch_files,
+        "max_batch_bytes": settings.upload_max_batch_mb * 1024 * 1024,
         "supported_extensions": sorted(_DOC_TYPES),
     }
 
@@ -725,7 +810,7 @@ def get_categories(
     _user: CurrentUser = Depends(require_content_permission("category.view")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> list[ManagedCategoryDTO]:
-    return [_category_dto(row) for row in list_categories(conn, include_inactive=include_inactive)]
+    return [_category_dto(conn, row) for row in list_categories(conn, include_inactive=include_inactive)]
 
 
 @router.post("/categories", response_model=ManagedCategoryDTO)
@@ -749,7 +834,50 @@ def post_category(
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
-    return _category_dto(row)
+    return _category_dto(conn, row)
+
+
+@router.post("/shared-folders", response_model=ManagedCategoryDTO, status_code=201)
+def post_shared_folder(
+    body: CreateSharedFolderRequest,
+    user: CurrentUser = Depends(require_csrf_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ManagedCategoryDTO:
+    _require_feature()
+    try:
+        if body.unc_path:
+            root_alias, unc_relative = resolve_external_unc_path(body.unc_path, EXTERNAL_MEDIA_UNC_ROOTS)
+            relative_path = normalize_external_relative_path(unc_relative, allow_empty=True)
+        else:
+            root_alias = body.root_alias
+            if root_alias not in EXTERNAL_MEDIA_ROOTS:
+                raise ValueError("external_root_unconfigured")
+            relative_path = normalize_external_relative_path(body.relative_path, allow_empty=True)
+        resolve_scheme_runtime(conn, body.default_scheme_id)
+        conn.execute("BEGIN IMMEDIATE")
+        source_id = str(uuid.uuid4())
+        now = int(time.time())
+        row = create_category(
+            conn, category_key=None, parent_id=body.parent_id,
+            display_code=next_category_display_code(conn, body.parent_id),
+            display_name=body.display_name,
+            sort_order=next_category_sort_order(conn, body.parent_id), actor_user_id=user.id,
+            target_position=body.target_position, confirm_number_shift=body.confirm_number_shift, commit=False,
+        )
+        conn.execute(
+            """INSERT INTO external_media_sources
+               (id,name,root_alias,relative_path,target_category_id,default_scheme_id,
+                auto_enqueue,scan_interval_seconds,created_by,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (source_id, body.display_name.strip(), root_alias, relative_path, row["id"],
+             body.default_scheme_id, int(body.auto_enqueue), body.scan_interval_seconds, user.id, now, now),
+        )
+        conn.execute("UPDATE category_nodes SET category_kind='shared_folder', external_source_id=?, version=version+1 WHERE id=?", (source_id, row["id"]))
+        conn.commit()
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        conn.rollback()
+        _raise_domain_error(exc)
+    return _category_dto(conn, conn.execute("SELECT * FROM category_nodes WHERE id=?", (row["id"],)).fetchone())
 
 
 @router.patch("/categories/{category_id}", response_model=ManagedCategoryDTO)
@@ -775,7 +903,7 @@ def patch_category(
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
-    return _category_dto(row)
+    return _category_dto(conn, row)
 
 
 @router.patch("/categories/{category_id}/name", response_model=ManagedCategoryDTO)
@@ -796,7 +924,7 @@ def patch_category_name(
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
-    return _category_dto(row)
+    return _category_dto(conn, row)
 
 
 @router.patch("/categories/{category_id}/sort-order", response_model=ManagedCategoryDTO)
@@ -817,7 +945,7 @@ def patch_category_sort_order(
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
-    return _category_dto(row)
+    return _category_dto(conn, row)
 
 
 @router.patch("/categories/{category_id}/number", response_model=list[ManagedCategoryDTO])
@@ -839,7 +967,7 @@ def patch_category_number(
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
-    return [_category_dto(row) for row in rows]
+    return [_category_dto(conn, row) for row in rows]
 
 
 @router.post("/categories/{category_id}/move", response_model=list[ManagedCategoryDTO])
@@ -861,7 +989,7 @@ def move_managed_category(
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
-    return [_category_dto(row) for row in rows]
+    return [_category_dto(conn, row) for row in rows]
 
 
 @router.get(
@@ -870,11 +998,17 @@ def move_managed_category(
 )
 def get_managed_category_delete_preview(
     category_id: str,
-    _user: CurrentUser = Depends(require_content_permission("category.manage")),
+    user: CurrentUser = Depends(require_content_permission("category.manage")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> DeleteManagedCategoryPreviewDTO:
     _require_feature()
     try:
+        category = conn.execute(
+            "SELECT parent_id FROM category_nodes WHERE id=? AND deleted_at IS NULL",
+            (category_id,),
+        ).fetchone()
+        if category is not None and category["parent_id"] is None and user.role != "admin":
+            raise HTTPException(status_code=403, detail="仅系统管理员可以预检一级分类删除")
         return DeleteManagedCategoryPreviewDTO(**get_category_force_delete_preview(conn, category_id))
     except ValueError as exc:
         _raise_domain_error(exc)
@@ -892,6 +1026,12 @@ def delete_managed_category(
 ) -> DeleteManagedCategoryResponse:
     _require_feature()
     try:
+        category = conn.execute(
+            "SELECT parent_id FROM category_nodes WHERE id=? AND deleted_at IS NULL",
+            (category_id,),
+        ).fetchone()
+        if category is not None and category["parent_id"] is None and user.role != "admin":
+            raise HTTPException(status_code=403, detail="仅系统管理员可以删除一级分类")
         if body.force:
             if not has_content_permission(conn, user, "category.force_delete"):
                 raise HTTPException(status_code=403, detail="当前账号没有强制永久删除目录的权限")
@@ -912,7 +1052,7 @@ def delete_managed_category(
         deleted_folder_count=int(result["deleted_folder_count"]),
         renumbered_sibling_count=int(result["renumbered_sibling_count"]),
         parent_id=result["parent_id"],
-        categories=[_category_dto(row) for row in result["categories"]],
+        categories=[_category_dto(conn, row) for row in result["categories"]],
         force_delete=bool(result.get("force_delete", False)),
         cleanup_status=result.get("cleanup_status"),
         cleanup_error_count=int(result.get("cleanup_error_count", 0)),
@@ -985,16 +1125,17 @@ def preflight_managed_document_upload(
     ).fetchone()
     if category is None:
         raise HTTPException(status_code=400, detail="目标目录不存在或已停用")
-    if body.upload_mode == "folder" and len(body.entries) > _MAX_FOLDER_UPLOAD_FILES:
+    settings = get_settings(conn)
+    if body.upload_mode == "folder" and len(body.entries) > settings.upload_max_batch_files:
         raise HTTPException(
             status_code=413,
-            detail=f"文件夹最多上传 {_MAX_FOLDER_UPLOAD_FILES} 个文件",
+            detail=f"文件夹最多上传 {settings.upload_max_batch_files} 个文件",
         )
     total_size = sum(entry.size_bytes for entry in body.entries)
-    if body.upload_mode == "folder" and total_size > _MAX_FOLDER_UPLOAD_BYTES:
+    if body.upload_mode == "folder" and total_size > settings.upload_max_batch_mb * 1024 * 1024:
         raise HTTPException(
             status_code=413,
-            detail=f"文件夹总大小不能超过 {_MAX_FOLDER_UPLOAD_BYTES // (1024 * 1024)} MB",
+            detail=f"文件夹总大小不能超过 {settings.upload_max_batch_mb} MB",
         )
 
     can_create_folders = has_content_permission(conn, user, "category.manage")
@@ -1023,8 +1164,6 @@ def preflight_managed_document_upload(
                 raise HTTPException(status_code=400, detail="文件夹路径无效")
             if parts[-1] != filename:
                 raise HTTPException(status_code=400, detail="文件名与相对路径不一致")
-            if int(category["level"]) + len(parts) - 1 > 4:
-                raise HTTPException(status_code=400, detail="文件夹路径超过资料目录四级限制")
             normalized_path = "/".join(parts)
             if normalized_path in seen_paths:
                 raise HTTPException(status_code=400, detail="文件夹中存在重复的文件路径")
@@ -1034,6 +1173,87 @@ def preflight_managed_document_upload(
             normalized_path = None
 
         suffix = Path(filename).suffix.lower()
+        if suffix in _VIDEO_EXTENSIONS:
+            if user.role != "admin":
+                results.append(ManagedUploadPreflightEntryDTO(
+                    sequence=sequence, filename=filename, relative_path=normalized_path,
+                    kind="video", status="blocked", reason="视频上传首期仅限系统管理员",
+                    reason_code="video_admin_only",
+                ))
+                continue
+            video_limit = min(
+                settings.upload_max_file_mb * 1024 * 1024,
+                MAX_VIDEO_UPLOAD_MB * 1024 * 1024,
+            )
+            if entry.size_bytes > video_limit:
+                results.append(ManagedUploadPreflightEntryDTO(
+                    sequence=sequence, filename=filename, relative_path=normalized_path,
+                    kind="video", status="blocked", reason="视频超过上传大小上限",
+                    reason_code="video_too_large",
+                ))
+                continue
+            upload_category_id: str | None = body.category_id
+            blocked_reason: str | None = None
+            root_conflict = False
+            for folder_index, folder_name in enumerate(parts[:-1]):
+                try:
+                    _code, name = _parse_folder_name(folder_name)
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail="文件夹名称不符合规则") from exc
+                child = find_sibling_category_by_name(conn, upload_category_id, name, active_only=True)
+                if child is not None:
+                    if folder_index == 0 and not body.allow_folder_merge:
+                        key = str(child["id"])
+                        folder_conflicts.setdefault(key, ManagedUploadFolderConflictDTO(
+                            relative_path=folder_name,
+                            category_id=key,
+                            category_path=_category_path(conn, key),
+                            display_name=name,
+                            suggested_name=_suggest_available_folder_name(conn, parent_id=body.category_id, display_name=name),
+                            can_rename=can_create_folders,
+                        ))
+                        root_conflict = True
+                        break
+                    upload_category_id = str(child["id"])
+                    continue
+                if not can_create_folders:
+                    blocked_reason = "目录尚未批准，请联系资料负责人创建后重试"
+                upload_category_id = None
+                break
+            if root_conflict:
+                results.append(ManagedUploadPreflightEntryDTO(
+                    sequence=sequence, filename=filename, relative_path=normalized_path,
+                    kind="video", status="conflict", reason="上传文件夹与当前目录的子文件夹重名",
+                    reason_code="folder_name_conflict",
+                ))
+                continue
+            if blocked_reason:
+                results.append(ManagedUploadPreflightEntryDTO(
+                    sequence=sequence, filename=filename, relative_path=normalized_path,
+                    kind="video", status="blocked", reason=blocked_reason,
+                    reason_code="folder_approval_required",
+                ))
+                continue
+            if upload_category_id is not None and find_media_upload_conflicts(
+                conn,
+                category_id=upload_category_id,
+                title=Path(filename).stem,
+                original_filename=filename,
+            ):
+                results.append(ManagedUploadPreflightEntryDTO(
+                    sequence=sequence, filename=filename, relative_path=normalized_path,
+                    kind="video", status="conflict", reason="当前目录下已存在同名视频资料",
+                    reason_code="media_filename_conflict",
+                    suggested_filename=_suggest_available_media_filename(
+                        conn, category_id=upload_category_id, original_filename=filename,
+                    ),
+                ))
+                continue
+            results.append(ManagedUploadPreflightEntryDTO(
+                sequence=sequence, filename=filename, relative_path=normalized_path,
+                kind="video", status="ready",
+            ))
+            continue
         doc_type = _DOC_TYPES.get(suffix)
         if doc_type is None:
             results.append(ManagedUploadPreflightEntryDTO(
@@ -1049,7 +1269,7 @@ def preflight_managed_document_upload(
                 reason_code="office_processing_disabled",
             ))
             continue
-        if entry.size_bytes > _MAX_UPLOAD_BYTES:
+        if entry.size_bytes > settings.upload_max_file_mb * 1024 * 1024:
             results.append(ManagedUploadPreflightEntryDTO(
                 sequence=sequence, filename=filename, relative_path=normalized_path,
                 status="blocked", reason="文件超过上传大小上限",
@@ -1144,6 +1364,9 @@ async def upload_managed_documents(
     relative_paths: list[str] | None = Form(None),
     upload_mode: str = Form("files"),
     allow_folder_merge: bool = Form(False),
+    video_scheme_id: str | None = Form(None),
+    video_idempotency_keys: list[str] | None = Form(None),
+    publish: list[str] | None = Form(None),
     conflict_actions: list[str] | None = Form(None),
     user: CurrentUser = Depends(require_content_permission("item.upload", csrf=True)),
     conn: sqlite3.Connection = Depends(get_db),
@@ -1151,6 +1374,7 @@ async def upload_managed_documents(
     _require_feature()
     if not files:
         raise HTTPException(status_code=400, detail="至少选择一个文件")
+    settings = get_settings(conn)
     normalized_paths = _preflight_upload_paths(
         conn,
         files=files,
@@ -1158,7 +1382,16 @@ async def upload_managed_documents(
         relative_paths=relative_paths,
         upload_mode=upload_mode,
     )
+    if any(Path((upload.filename or "")).suffix.lower() in _VIDEO_EXTENSIONS for upload in files) and user.role != "admin":
+        raise HTTPException(status_code=403, detail="视频上传首期仅限系统管理员")
+    if video_idempotency_keys is not None and len(video_idempotency_keys) != len(files):
+        raise HTTPException(status_code=400, detail="文件和视频幂等键数量不一致")
     actions = _parse_upload_actions(conflict_actions, len(files))
+    publish_intents = [str(value).lower() in {"1", "true", "yes"} for value in (publish or [])]
+    if len(publish_intents) < len(files):
+        publish_intents.extend([False] * (len(files) - len(publish_intents)))
+    if any(publish_intents) and not has_content_permission(conn, user, "item.publish"):
+        raise HTTPException(status_code=403, detail="缺少发布资料权限")
     upload_sizes = [_upload_size(upload) for upload in files]
     batch_id = create_web_batch(
         conn,
@@ -1178,6 +1411,148 @@ async def upload_managed_documents(
         action = actions[index]
         final_filename = action.filename.strip() if action.strategy == "rename" and action.filename else filename
         suffix = Path(filename).suffix.lower()
+        if suffix in _VIDEO_EXTENSIONS:
+            if action.strategy == "skip":
+                reason = "按用户选择跳过"
+                entries.append(ManagedUploadEntryDTO(filename=filename, kind="video", status="skipped", reason=reason, reason_code="conflict_skipped"))
+                record_upload_batch_entry(
+                    conn, batch_id=batch_id, sequence=index + 1, filename=filename,
+                    relative_path=relative_path, size_bytes=size_bytes, status="skipped",
+                    reason=reason, entry_kind="video", failure_code="conflict_skipped",
+                )
+                continue
+            video_limit = min(
+                settings.upload_max_file_mb * 1024 * 1024,
+                MAX_VIDEO_UPLOAD_MB * 1024 * 1024,
+            )
+            if size_bytes > video_limit:
+                reason = "视频超过上传大小上限"
+                entries.append(ManagedUploadEntryDTO(filename=filename, kind="video", status="skipped", reason=reason, reason_code="video_too_large"))
+                record_upload_batch_entry(
+                    conn, batch_id=batch_id, sequence=index + 1, filename=filename,
+                    relative_path=relative_path, size_bytes=size_bytes, status="skipped",
+                    reason=reason, entry_kind="video", failure_code="video_too_large",
+                )
+                continue
+            try:
+                _storage.validate_filename(final_filename)
+            except ValueError:
+                reason = "新文件名无效"
+                entries.append(ManagedUploadEntryDTO(filename=filename, kind="video", status="skipped", reason=reason, reason_code="invalid_filename"))
+                record_upload_batch_entry(
+                    conn, batch_id=batch_id, sequence=index + 1, filename=filename,
+                    relative_path=relative_path, size_bytes=size_bytes, status="skipped",
+                    reason=reason, entry_kind="video", failure_code="invalid_filename",
+                )
+                continue
+            if Path(final_filename).suffix.lower() not in _VIDEO_EXTENSIONS:
+                reason = "重命名不能改变视频文件扩展名"
+                entries.append(ManagedUploadEntryDTO(filename=filename, kind="video", status="skipped", reason=reason, reason_code="invalid_filename_extension"))
+                record_upload_batch_entry(
+                    conn, batch_id=batch_id, sequence=index + 1, filename=filename,
+                    relative_path=relative_path, size_bytes=size_bytes, status="skipped",
+                    reason=reason, entry_kind="video", failure_code="invalid_filename_extension",
+                )
+                continue
+            try:
+                upload_category_id = _resolve_upload_category(
+                    conn,
+                    category_id=category_id,
+                    relative_path=relative_path,
+                    can_create_folders=can_create_folders,
+                    actor_user_id=user.id,
+                    allow_existing_folders=allow_folder_merge,
+                    created_category_ids=created_category_ids,
+                )
+                # Keep the existing media/transcription implementation as the
+                # source of truth for storage, idempotency, queueing and status.
+                from .routes_admin import upload_media
+
+                media_rowid_before = conn.execute(
+                    "SELECT COALESCE(MAX(rowid), 0) FROM media_assets"
+                ).fetchone()[0]
+                media = await upload_media(
+                    video=upload,
+                    title=Path(final_filename).stem,
+                    transcript=None,
+                    profile_id=video_scheme_id,
+                    request_idempotency_key=(
+                        video_idempotency_keys[index]
+                        if video_idempotency_keys and video_idempotency_keys[index]
+                        else str(uuid.uuid4())
+                    ),
+                    admin=user,
+                    conn=conn,
+                    replacement_source_media_id=None,
+                    scheme_id=video_scheme_id,
+                    category_id=upload_category_id,
+                    original_filename=final_filename,
+                    defer_transcription=True,
+                )
+                source_parts = relative_path.split("/") if relative_path else [final_filename]
+                source_parts[-1] = final_filename
+                entries.append(ManagedUploadEntryDTO(
+                    filename=final_filename, kind="video", media_id=media.media_id,
+                    transcription_job_id=media.transcription_job_id, status="accepted",
+                    resolution="renamed" if action.strategy == "rename" else "created",
+                ))
+                record_upload_batch_entry(
+                    conn, batch_id=batch_id, sequence=index + 1, filename=final_filename,
+                    relative_path="/".join(source_parts), size_bytes=size_bytes, status="accepted",
+                    entry_kind="video", media_id=media.media_id,
+                    transcription_job_id=media.transcription_job_id,
+                )
+            except HTTPException as exc:
+                conn.rollback()
+                detail = exc.detail
+                if isinstance(detail, dict):
+                    reason = str(detail.get("message") or detail.get("code") or "视频上传失败")
+                    failure_code = str(detail.get("code") or "video_upload_failed")
+                else:
+                    reason = str(detail or "视频上传失败")
+                    failure_code = "video_upload_failed"
+                failed_media = conn.execute(
+                    """SELECT media_id FROM media_assets
+                       WHERE rowid>? AND target_category_id=? AND normalized_title=?
+                         AND normalized_original_filename=? AND created_by=? AND status='failed'
+                       ORDER BY created_at DESC LIMIT 1""",
+                    (
+                        media_rowid_before,
+                        upload_category_id,
+                        normalize_media_title(Path(final_filename).stem)[1],
+                        normalize_content_filename(final_filename)[1],
+                        user.id,
+                    ),
+                ).fetchone()
+                failed_media_id = str(failed_media["media_id"]) if failed_media else None
+                entries.append(ManagedUploadEntryDTO(filename=final_filename, kind="video", media_id=failed_media_id, status="skipped", reason=reason, reason_code=failure_code))
+                record_upload_batch_entry(
+                    conn, batch_id=batch_id, sequence=index + 1, filename=final_filename,
+                    relative_path=relative_path, size_bytes=size_bytes, status="skipped",
+                    reason=reason, entry_kind="video", media_id=failed_media_id,
+                    failure_code=failure_code,
+                )
+            except (ValueError, OSError, sqlite3.Error, RuntimeError) as exc:
+                conn.rollback()
+                if isinstance(exc, OSError):
+                    reason_code = "media_storage_unavailable"
+                    reason = "服务器暂时无法保存视频，请稍后重试"
+                elif isinstance(exc, sqlite3.Error):
+                    reason_code = "media_database_unavailable"
+                    reason = "服务器暂时无法登记视频，请稍后重试"
+                elif isinstance(exc, RuntimeError):
+                    reason_code = "transcription_job_unavailable"
+                    reason = "服务器暂时无法创建转录任务，请稍后重试"
+                else:
+                    reason_code = "video_upload_failed"
+                    reason = str(exc) or "视频上传失败"
+                entries.append(ManagedUploadEntryDTO(filename=final_filename, kind="video", status="skipped", reason=reason, reason_code=reason_code))
+                record_upload_batch_entry(
+                    conn, batch_id=batch_id, sequence=index + 1, filename=final_filename,
+                    relative_path=relative_path, size_bytes=size_bytes, status="skipped",
+                    reason=reason, entry_kind="video", failure_code=reason_code,
+                )
+            continue
         doc_type = _DOC_TYPES.get(suffix)
         if doc_type is None:
             reason = "不支持的文件格式"
@@ -1266,14 +1641,24 @@ async def upload_managed_documents(
             elif conflict is not None:
                 raise ContentFilenameConflict(conflict)
             stored = await _storage.ingest_upload(
-                upload, batch_id=batch_id, max_bytes=_MAX_UPLOAD_BYTES
+                upload, batch_id=batch_id, max_bytes=settings.upload_max_file_mb * 1024 * 1024
             )
-            if doc_type in OFFICE_DOC_TYPES:
-                package_issue = find_unsafe_office_content(stored.absolute_path)
+            if doc_type in {"docx", "xlsx", "pptx"}:
+                package_issue = find_unsafe_office_content(
+                    stored.absolute_path,
+                    extension=f".{doc_type}",
+                )
                 if package_issue:
                     if stored.created:
                         stored.absolute_path.unlink(missing_ok=True)
                     raise ValueError(package_issue)
+            if doc_type == "xmind":
+                try:
+                    parse_xmind(stored.absolute_path)
+                except XMindParseError as exc:
+                    if stored.created:
+                        stored.absolute_path.unlink(missing_ok=True)
+                    raise ValueError(str(exc)) from exc
             source_parts = relative_path.split("/") if relative_path else [filename]
             source_parts[-1] = final_filename
             source_rel_path = "/".join(source_parts)
@@ -1319,6 +1704,11 @@ async def upload_managed_documents(
                 relative_path=source_rel_path, size_bytes=size_bytes, status="accepted",
                 item_id=item_id, version_id=version_id,
             )
+            if publish_intents[index]:
+                _publication_id, index_job_id = create_publication_job(
+                    conn, version_id, actor_user_id=user.id
+                )
+                enqueue_content_publication(index_job_id)
         except (ValueError, sqlite3.IntegrityError) as exc:
             conn.rollback()
             _discard_unreferenced_upload(conn, stored)
@@ -1326,9 +1716,8 @@ async def upload_managed_documents(
             reason = {
                 "folder_approval_required": "目录尚未批准，请联系资料负责人创建后重试",
                 "folder_name_conflict": "上传文件夹与当前目录的子文件夹重名，请先确认合并或重命名",
-                "invalid_relative_path": "文件夹路径无效或超过允许深度",
+                "invalid_relative_path": "文件夹路径无效",
                 "invalid_folder_name": "文件夹名称不符合规则",
-                "category_depth_exceeded": "资料目录最多支持四级",
                 "content_filename_conflict": "当前目录下已存在同名资料",
                 "content_upload_conflict_changed": "同名资料已发生变化，请重新检查后处理",
                 "content_revision_in_progress": "同名资料正在发布，暂时不能更新",
@@ -1336,6 +1725,14 @@ async def upload_managed_documents(
                 "office_external_link": "Office 文件包含外部链接，已拒绝处理",
                 "office_embedded_object": "Office 文件包含嵌入对象，已拒绝处理",
                 "office_package_invalid": "Office 文件格式无效",
+                "xmind_file_unavailable": "XMind 文件不可用",
+                "xmind_archive_invalid": "XMind 文件格式无效",
+                "xmind_archive_limits_exceeded": "XMind 文件内容超过安全限制",
+                "xmind_archive_path_invalid": "XMind 文件包含不安全路径",
+                "xmind_content_missing": "XMind 文件缺少主题内容",
+                "xmind_content_invalid": "XMind 主题内容无效",
+                "xmind_topic_structure_invalid": "XMind 主题结构无效或层级过深",
+                "xmind_topic_limits_exceeded": "XMind 主题数量超过安全限制",
             }.get(reason_code, reason_code)
             entries.append(ManagedUploadEntryDTO(
                 filename=final_filename, status="skipped", reason=reason,
@@ -1369,6 +1766,8 @@ def _managed_upload_task_dto(
         skipped_files=int(row["skipped_files"] or 0),
         total_bytes=int(row["total_bytes"] or 0),
         total_uploaded_bytes=int(row["total_uploaded_bytes"] or 0),
+        video_count=int(row["video_count"] or 0),
+        transcribable_video_count=int(row["transcribable_video_count"] or 0),
         created_by_name=row["creator_name"],
         created_at=int(row["created_at"]),
         updated_at=int(row["updated_at"]),
@@ -1376,8 +1775,13 @@ def _managed_upload_task_dto(
         entries=[ManagedUploadTaskEntryDTO(
             sequence=int(entry["sequence"]), filename=entry["filename"],
             relative_path=entry["relative_path"], size_bytes=int(entry["size_bytes"] or 0),
+            kind=entry["entry_kind"] if "entry_kind" in entry.keys() else "document",
             status=entry["status"], reason=entry["reason"], item_id=entry["item_id"],
-            version_id=entry["version_id"], created_at=int(entry["created_at"]),
+            version_id=entry["version_id"],
+            media_id=entry["media_id"] if "media_id" in entry.keys() else None,
+            transcription_job_id=entry["transcription_job_id"] if "transcription_job_id" in entry.keys() else None,
+            failure_code=entry["failure_code"] if "failure_code" in entry.keys() else None,
+            created_at=int(entry["created_at"]),
         ) for entry in entries] if entries is not None else None,
     )
 
@@ -1452,10 +1856,10 @@ def _content_item_dto(
     )
     preview_status: Literal["ready", "pending", "missing", "not_applicable"] = "not_applicable"
     preview_parent_id: str | None = None
-    if row["doc_type"] in {"pdf", "docx", "xlsx", "pptx"}:
-        preview_status = "pending"
-        if summary and summary.preview_parent_id:
-            if row["doc_type"] == "pptx":
+    if row["doc_type"] in {"pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "xmind"}:
+        preview_status = "ready" if row["doc_type"] == "xmind" else "pending"
+        if row["doc_type"] != "xmind" and summary and summary.preview_parent_id:
+            if row["doc_type"] in {"ppt", "pptx"}:
                 source_path = _storage.published_source_path(
                     content_item_id=row["item_id"],
                     content_version_id=row["version_id"],
@@ -1466,9 +1870,12 @@ def _content_item_dto(
                 preview_status = "ready"
             if preview_status == "ready":
                 preview_parent_id = summary.preview_parent_id
-        elif row["lifecycle_status"] in {"published", "superseded"}:
+        elif row["doc_type"] != "xmind" and row["lifecycle_status"] in {"published", "superseded"}:
             preview_status = "missing"
 
+    media_version_id = row["version_id"] or (
+        f"media-pending-{row['media_id']}" if row["media_id"] else None
+    )
     return ManagedContentItemDTO(
         item_id=row["item_id"],
         title=row["title"],
@@ -1480,8 +1887,8 @@ def _content_item_dto(
         media_id=row["media_id"],
         preview_parent_id=preview_parent_id,
         preview_status=preview_status,
-        version_id=row["version_id"],
-        version_number=row["version_number"],
+        version_id=media_version_id,
+        version_number=int(row["version_number"] or 0),
         original_filename=row["original_filename"],
         doc_type=row["doc_type"],
         lifecycle_status=row["lifecycle_status"],
@@ -1517,6 +1924,13 @@ def _content_item_dto(
         reclassification_status=row["reclassification_status"]
         if "reclassification_status" in row.keys()
         else None,
+        media_status=row["media_status"] if "media_status" in row.keys() else None,
+        transcription_job_id=row["transcription_job_id"] if "transcription_job_id" in row.keys() else None,
+        transcription_job_status=row["transcription_job_status"] if "transcription_job_status" in row.keys() else None,
+        transcription_stage=row["transcription_stage"] if "transcription_stage" in row.keys() else None,
+        transcription_failure_classification=row["transcription_failure_classification"] if "transcription_failure_classification" in row.keys() else None,
+        review_status=row["review_status"] if "review_status" in row.keys() else None,
+        publication_status=row["publication_status"] if "publication_status" in row.keys() else None,
     )
 
 
@@ -1555,7 +1969,7 @@ def get_content_items_page(
     lifecycle_status: str | None = None,
     source_origin: str | None = None,
     content_kind: Literal["document", "media_transcript"] | None = None,
-    doc_type: Literal["pdf", "docx", "xlsx", "pptx", "markdown", "transcript", "other"] | None = None,
+    doc_type: Literal["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "xmind", "markdown", "transcript", "other"] | None = None,
     sort_by: Literal["doc_type"] | None = None,
     sort_direction: Literal["asc", "desc"] = "asc",
     limit: int = Query(25, ge=1, le=100),
@@ -1693,6 +2107,17 @@ def _purge_preflight_response(results: list[dict[str, object]]) -> TrashPurgePre
     )
 
 
+def _contains_media_items(conn: sqlite3.Connection, item_ids: list[str]) -> bool:
+    if not item_ids:
+        return False
+    placeholders = ",".join("?" for _ in item_ids)
+    return conn.execute(
+        f"""SELECT 1 FROM content_items
+             WHERE id IN ({placeholders}) AND content_kind='media_transcript' LIMIT 1""",
+        item_ids,
+    ).fetchone() is not None
+
+
 @router.post("/trash/purge/preflight", response_model=TrashPurgePreflightResponse)
 def preflight_content_trash_purge(
     body: TrashPurgePreflightRequest,
@@ -1750,16 +2175,29 @@ def get_content_trash_purge_runs(
 @router.post("/bulk-restore/preflight", response_model=BulkRestorePreflightResponse)
 def preflight_bulk_restore(
     body: BulkRestoreManagedContentRequest,
-    _user: CurrentUser = Depends(require_content_permission("trash.restore")),
+    user: CurrentUser = Depends(require_content_permission("trash.restore")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> BulkRestorePreflightResponse:
+    refs = _validate_bulk_item_refs(body.items)
+    if user.role != "admin" and _contains_media_items(
+        conn, [item.item_id for item in refs]
+    ):
+        raise HTTPException(status_code=403, detail="视频回收站操作首期仅限系统管理员")
     results: list[BulkRestorePreflightResultDTO] = []
-    for item in _validate_bulk_item_refs(body.items):
+    for item in refs:
         row = conn.execute(
-            """SELECT i.id,i.archived_at,i.category_id,v.id AS version_id,v.original_filename
-               FROM content_items i JOIN content_versions v ON v.item_id=i.id
+            """SELECT i.id,i.content_kind,i.archived_at,i.category_id,
+                      CASE WHEN i.content_kind='media_transcript'
+                           THEN COALESCE(h.current_version_id,'media-pending-' || i.media_id)
+                           ELSE v.id END AS version_id,
+                      COALESCE(m.original_filename,v.original_filename) AS original_filename
+               FROM content_items i
+               LEFT JOIN content_versions v ON v.item_id=i.id
                 AND v.version_number=(SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id)
-               WHERE i.id=? AND i.content_kind='document'""", (item.item_id,),
+               LEFT JOIN media_assets m ON m.media_id=i.media_id
+               LEFT JOIN media_transcript_heads h ON h.media_id=i.media_id
+               WHERE i.id=?""",
+            (item.item_id,),
         ).fetchone()
         status, message, target_path = "ready", "可以恢复", None
         if row is None or row["archived_at"] is None:
@@ -1831,10 +2269,15 @@ def bulk_restore_managed_content_items(
     _require_feature()
     if not has_content_permission(conn, user, "trash.restore"):
         raise HTTPException(status_code=403, detail="当前账号没有恢复资料的权限")
+    refs = _validate_bulk_item_refs(body.items)
+    if user.role != "admin" and _contains_media_items(
+        conn, [item.item_id for item in refs]
+    ):
+        raise HTTPException(status_code=403, detail="视频回收站操作首期仅限系统管理员")
     can_archive_draft = has_content_permission(conn, user, "item.archive_draft")
     can_archive_published = has_content_permission(conn, user, "item.archive_published")
     results: list[BulkManagedContentResultDTO] = []
-    for item in _validate_bulk_item_refs(body.items):
+    for item in refs:
         try:
             restore_content_item(
                 conn, item.item_id, expected_version_id=item.expected_version_id,
@@ -1865,6 +2308,12 @@ def restore_managed_content_item(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> RestoreManagedContentResponse:
     _require_feature()
+    item_kind = conn.execute(
+        "SELECT content_kind FROM content_items WHERE id=?", (item_id,)
+    ).fetchone()
+    is_media = item_kind is not None and item_kind["content_kind"] == "media_transcript"
+    if is_media and user.role != "admin":
+        raise HTTPException(status_code=403, detail="视频回收站操作首期仅限系统管理员")
     try:
         result = restore_content_item(
             conn,
@@ -1900,7 +2349,7 @@ def get_content_trash_audit_events(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> list[ContentTrashAuditEventDTO]:
     item = conn.execute(
-        "SELECT archived_at FROM content_items WHERE id=? AND content_kind='document'",
+        "SELECT archived_at FROM content_items WHERE id=?",
         (item_id,),
     ).fetchone()
     if item is None:
@@ -1937,6 +2386,16 @@ def delete_content_item(
 ) -> DeleteManagedContentResponse:
     _require_feature()
     try:
+        _reject_external_media_mutation(conn, item_id)
+    except ValueError as exc:
+        _raise_domain_error(exc)
+    item_kind = conn.execute(
+        "SELECT content_kind FROM content_items WHERE id=?", (item_id,)
+    ).fetchone()
+    is_media = item_kind is not None and item_kind["content_kind"] == "media_transcript"
+    if is_media and user.role != "admin":
+        raise HTTPException(status_code=403, detail="视频操作首期仅限系统管理员")
+    try:
         result = archive_content_item(
             conn,
             item_id,
@@ -1965,6 +2424,10 @@ def move_managed_content_item(
 ) -> ManagedContentItemDTO:
     _require_feature()
     try:
+        _reject_external_media_mutation(conn, item_id)
+    except ValueError as exc:
+        _raise_domain_error(exc)
+    try:
         move_content_item(
             conn,
             item_id,
@@ -1972,7 +2435,7 @@ def move_managed_content_item(
             expected_version_id=body.expected_version_id,
             actor_user_id=user.id,
             can_move_draft=has_content_permission(conn, user, "item.move_draft"),
-            can_move_review=has_content_permission(conn, user, "item.move_review"),
+            can_move_review=False,
             can_move_published=has_content_permission(conn, user, "item.publish"),
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
@@ -2064,6 +2527,10 @@ def rename_managed_content_item(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedContentItemDTO:
     _require_feature()
+    try:
+        _reject_external_media_mutation(conn, item_id)
+    except ValueError as exc:
+        _raise_domain_error(exc)
     item_kind = conn.execute(
         "SELECT content_kind FROM content_items WHERE id=? AND archived_at IS NULL",
         (item_id,),
@@ -2162,7 +2629,17 @@ async def update_managed_content_item(
 
     batch_id = create_web_batch(conn, actor_user_id=user.id)
     try:
-        stored = await _storage.ingest_upload(file, batch_id=batch_id, max_bytes=_MAX_UPLOAD_BYTES)
+        settings = get_settings(conn)
+        stored = await _storage.ingest_upload(
+            file, batch_id=batch_id, max_bytes=settings.upload_max_file_mb * 1024 * 1024
+        )
+        if doc_type == "xmind":
+            try:
+                parse_xmind(stored.absolute_path)
+            except XMindParseError as exc:
+                if stored.created:
+                    stored.absolute_path.unlink(missing_ok=True)
+                raise ValueError(str(exc)) from exc
         create_content_revision(
             conn,
             item_id,
@@ -2219,6 +2696,55 @@ def get_content_version_file(
     if disposition == "attachment" and not has_content_permission(conn, user, "item.download"):
         raise HTTPException(status_code=403, detail="当前账号没有下载资料的权限")
     return FileResponse(path, filename=row["original_filename"], content_disposition_type=disposition)
+
+
+def _xmind_topic_payload(topic: XMindTopic) -> dict[str, object]:
+    return {
+        "id": topic.id,
+        "title": topic.title,
+        "notes": topic.notes,
+        "children": [_xmind_topic_payload(child) for child in topic.children],
+    }
+
+
+@router.get("/versions/{version_id}/xmind-preview", response_model=XMindPreviewDTO)
+def get_xmind_preview(
+    version_id: str,
+    _user: CurrentUser = Depends(require_content_permission("item.view")),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> XMindPreviewDTO:
+    row = conn.execute(
+        """SELECT v.doc_type,o.storage_rel_path
+           FROM content_versions v
+           JOIN content_items i ON i.id=v.item_id
+           JOIN content_objects o ON o.sha256=v.object_sha256
+           WHERE v.id=? AND i.archived_at IS NULL""",
+        (version_id,),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="资料文件不存在")
+    if row["doc_type"] != "xmind":
+        raise HTTPException(status_code=400, detail="该资料不是 XMind 文件")
+    try:
+        path = _storage.resolve_object(row["storage_rel_path"])
+        document = parse_xmind(path)
+    except (FileNotFoundError, ValueError, XMindParseError) as exc:
+        logger.warning("XMind preview unavailable for version %s: %s", version_id, exc)
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "xmind_preview_unavailable", "message": "XMind 文件无法解析或内容超过安全限制"},
+        ) from exc
+    return XMindPreviewDTO.model_validate({
+        "version_id": version_id,
+        "sheets": [
+            {
+                "id": sheet.id,
+                "title": sheet.title,
+                "root_topic": _xmind_topic_payload(sheet.root_topic),
+            }
+            for sheet in document.sheets
+        ],
+    })
 
 
 @router.post("/versions/{version_id}/preview", response_model=ManagedPreviewDTO)
@@ -2545,6 +3071,349 @@ def _resolve_category_download_entries(
     return root_name, entries
 
 
+def _bulk_permissions(conn: sqlite3.Connection, user: CurrentUser) -> set[str]:
+    return {
+        permission
+        for permission in CONTENT_PERMISSIONS
+        if has_content_permission(conn, user, permission)
+    }
+
+
+def _bulk_operation_permission(operation: str) -> str:
+    return {
+        "submit": "item.publish",
+        "approve": "item.publish",
+        "reject": "item.publish",
+        "publish": "item.publish",
+        "download": "item.download",
+        "move": "category.view",
+        "delete": "category.manage",
+        "force_delete": "category.force_delete",
+    }[operation]
+
+
+def _raise_bulk_operation_error(exc: Exception) -> None:
+    message = str(exc)
+    status = 400
+    detail = {
+        "bulk_scope_empty": "请至少选择一个文件夹或资料",
+        "bulk_scope_file_limit_exceeded": "递归影响资料超过 5000 份，请拆分操作",
+        "bulk_archive_size_exceeded": "打包资料总量不能超过 10 GiB",
+        "folder_delete_requires_categories": "批量删除文件夹不能混入散选资料",
+        "bulk_operation_not_found": "批量操作不存在或已过期",
+        "bulk_operation_owner_required": "只能查看和操作自己创建的批量任务",
+        "bulk_operation_already_started": "批量操作已经开始，请刷新状态",
+        "bulk_operation_no_selected_items": "没有勾选可操作的资料",
+        "bulk_archive_not_ready": "压缩包尚未准备完成",
+        "bulk_archive_expired": "压缩包已过期，请重新打包",
+        "bulk_archive_missing": "压缩包文件不存在，请重新打包",
+        "bulk_operation_confirmation_required": "强制删除确认文字不正确",
+        "bulk_operation_target_required": "请选择目标目录",
+    }.get(message, "批量操作状态已变化，请刷新后重试")
+    if isinstance(exc, PermissionError):
+        status = 403
+    elif message in {"bulk_operation_not_found", "bulk_archive_missing"}:
+        status = 404
+    elif message in {"category_version_conflict", "content_version_conflict", "bulk_operation_already_started"}:
+        status = 409
+    elif message in {"bulk_scope_file_limit_exceeded", "bulk_archive_size_exceeded"}:
+        status = 413
+    raise HTTPException(status_code=status, detail=detail)
+
+
+@router.post("/bulk-operations/preflight", response_model=BulkOperationDTO)
+def preflight_bulk_operation(
+    body: BulkOperationPreflightRequest,
+    user: CurrentUser = Depends(require_content_permission("workspace.view", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkOperationDTO:
+    _require_feature()
+    permission = (
+        "category.manage"
+        if body.operation == "move" and body.categories
+        else _bulk_operation_permission(body.operation)
+    )
+    if not has_content_permission(conn, user, permission):
+        raise HTTPException(status_code=403, detail="当前账号没有执行此批量操作的权限")
+    if body.operation == "force_delete" and (
+        not has_content_permission(conn, user, "category.manage")
+        or not has_content_permission(conn, user, "trash.purge")
+    ):
+        raise HTTPException(status_code=403, detail="强制删除还需要目录管理和永久删除权限")
+    try:
+        snapshot = create_bulk_operation_preflight(
+            conn,
+            operation=body.operation,
+            category_refs=[entry.model_dump() for entry in body.categories],
+            item_refs=[entry.model_dump() for entry in body.items],
+            actor_user_id=user.id,
+            permissions=_bulk_permissions(conn, user),
+        )
+    except (ValueError, PermissionError, sqlite3.IntegrityError) as exc:
+        _raise_bulk_operation_error(exc)
+    return BulkOperationDTO(**snapshot)
+
+
+@router.get("/bulk-operations/{run_id}", response_model=BulkOperationDTO)
+def get_bulk_operation(
+    run_id: str,
+    include_tree: bool = Query(default=True),
+    user: CurrentUser = Depends(require_content_permission("workspace.view")),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkOperationDTO:
+    try:
+        return BulkOperationDTO(**operation_snapshot(
+            conn, run_id, actor_user_id=user.id, include_tree=include_tree,
+        ))
+    except (ValueError, PermissionError) as exc:
+        _raise_bulk_operation_error(exc)
+
+
+@router.patch("/bulk-operations/{run_id}/selection", response_model=BulkOperationDTO)
+def patch_bulk_operation_selection(
+    run_id: str,
+    body: BulkOperationSelectionRequest,
+    user: CurrentUser = Depends(require_content_permission("workspace.view", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkOperationDTO:
+    try:
+        return BulkOperationDTO(**update_item_selection(
+            conn, run_id, actor_user_id=user.id, item_ids=body.item_ids, selected=body.selected,
+        ))
+    except (ValueError, PermissionError) as exc:
+        _raise_bulk_operation_error(exc)
+
+
+@router.post("/bulk-operations/{run_id}/items/{item_id}/review", response_model=BulkOperationDTO)
+def review_bulk_operation_item(
+    run_id: str,
+    item_id: str,
+    body: ReviewManagedContentRequest,
+    user: CurrentUser = Depends(require_content_permission("item.review", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkOperationDTO:
+    try:
+        run = operation_snapshot(conn, run_id, actor_user_id=user.id)
+        if str(run["operation"]) not in {"approve", "reject"}:
+            raise ValueError("bulk_operation_item_unavailable")
+        if str(run["status"]) != "awaiting_confirmation":
+            raise ValueError("bulk_operation_already_started")
+        target = next((entry for entry in run["items"] if entry["item_id"] == item_id), None)
+        if target is None or not target["eligible"] or target["result_status"] != "pending":
+            raise ValueError("bulk_operation_item_unavailable")
+        review_version(
+            conn,
+            str(target["version_id"]),
+            approved=body.approved,
+            note=body.note,
+            category_id=body.category_id,
+            actor_user_id=user.id,
+        )
+        mark_item_result(conn, run_id, item_id, status="succeeded")
+        remaining = conn.execute(
+            """SELECT count(*) FROM content_bulk_operation_items
+               WHERE run_id=? AND selected=1 AND eligible=1 AND result_status='pending'""",
+            (run_id,),
+        ).fetchone()[0]
+        if int(remaining) == 0:
+            finalize_sync_run(conn, run_id)
+        else:
+            conn.commit()
+        return BulkOperationDTO(**operation_snapshot(conn, run_id, actor_user_id=user.id))
+    except (ValueError, PermissionError, sqlite3.IntegrityError) as exc:
+        conn.rollback()
+        _raise_bulk_operation_error(exc)
+
+
+@router.post("/bulk-operations/{run_id}/execute", response_model=BulkOperationDTO)
+def execute_bulk_operation(
+    run_id: str,
+    body: BulkOperationExecuteRequest,
+    user: CurrentUser = Depends(require_content_permission("workspace.view", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkOperationDTO:
+    try:
+        run = operation_snapshot(conn, run_id, actor_user_id=user.id)
+        operation = str(run["operation"])
+        has_folder_roots = any(category["is_root"] for category in run["categories"])
+        permission = (
+            "category.manage"
+            if operation == "move" and has_folder_roots
+            else _bulk_operation_permission(operation)
+        )
+        if not has_content_permission(conn, user, permission):
+            raise PermissionError("bulk_operation_permission_required")
+        if operation == "force_delete" and (
+            not has_content_permission(conn, user, "category.manage")
+            or not has_content_permission(conn, user, "trash.purge")
+        ):
+            raise PermissionError("bulk_operation_permission_required")
+        if str(run["status"]) != "awaiting_confirmation":
+            raise ValueError("bulk_operation_already_started")
+        if operation == "download":
+            return BulkOperationDTO(**start_archive(run_id, actor_user_id=user.id))
+        if operation == "force_delete":
+            return BulkOperationDTO(**start_force_delete(
+                conn,
+                run_id,
+                actor_user_id=user.id,
+                confirmation=body.confirmation,
+            ))
+        if operation == "move" and not body.target_category_id:
+            raise ValueError("bulk_operation_target_required")
+        selected_root_count = sum(
+            category["is_root"] and category["eligible"] and category["selected"]
+            for category in run["categories"]
+        )
+        if operation in {"submit", "approve", "reject", "publish"} and int(run["selected_files"]) < 1:
+            raise ValueError("bulk_operation_no_selected_items")
+        if operation == "move" and selected_root_count < 1 and int(run["selected_files"]) < 1:
+            raise ValueError("bulk_operation_no_selected_items")
+        if operation == "delete" and selected_root_count < 1:
+            raise ValueError("bulk_operation_no_selected_items")
+        if operation == "reject" and not (body.note or "").strip():
+            raise ValueError("review_note_required")
+
+        now = int(time.time())
+        conn.execute(
+            """UPDATE content_bulk_operations SET status='running',target_category_id=?,note=?,
+                   started_at=?,updated_at=? WHERE id=?""",
+            (body.target_category_id, (body.note or "").strip() or None, now, now, run_id),
+        )
+        conn.commit()
+
+        if operation in {"move", "delete"}:
+            root_rows = conn.execute(
+                """SELECT * FROM content_bulk_operation_categories
+                   WHERE run_id=? AND is_root=1 AND selected=1 AND eligible=1 ORDER BY sort_order""",
+                (run_id,),
+            ).fetchall()
+            for category in root_rows:
+                try:
+                    category_id = str(category["category_id"])
+                    if operation == "move":
+                        target_parent_id = None if body.target_category_id == "__root__" else body.target_category_id
+                        move_category(
+                            conn, category_id, target_parent_id=target_parent_id, before_category_id=None,
+                            expected_version=int(category["version"]), actor_user_id=user.id,
+                        )
+                    else:
+                        delete_category(
+                            conn, category_id, expected_version=int(category["version"]),
+                            confirmed=True, actor_user_id=user.id,
+                        )
+                    conn.execute(
+                        """UPDATE content_bulk_operation_categories SET result_status='succeeded',selected=0
+                           WHERE run_id=? AND root_category_id=?""",
+                        (run_id, category_id),
+                    )
+                    if operation == "move":
+                        conn.execute(
+                            """UPDATE content_bulk_operation_items
+                               SET result_status='succeeded',selected=0
+                               WHERE run_id=? AND root_category_id=?""",
+                            (run_id, category_id),
+                        )
+                    conn.commit()
+                except Exception as exc:  # continue with independent roots
+                    conn.rollback()
+                    message = _bulk_failure_message(exc)
+                    conn.execute(
+                        """UPDATE content_bulk_operation_categories SET result_status='failed',result_message=?,selected=0
+                           WHERE run_id=? AND root_category_id=?""",
+                        (message, run_id, category["category_id"]),
+                    )
+                    if operation == "move":
+                        conn.execute(
+                            """UPDATE content_bulk_operation_items
+                               SET result_status='failed',result_message=?,selected=0
+                               WHERE run_id=? AND root_category_id=?""",
+                            (message, run_id, category["category_id"]),
+                        )
+                    conn.commit()
+
+        if operation not in {"delete", "force_delete"}:
+            source_clause = "AND scope_source='direct'" if operation == "move" else ""
+            item_rows = conn.execute(
+                f"""SELECT * FROM content_bulk_operation_items
+                   WHERE run_id=? AND selected=1 AND eligible=1 AND result_status='pending'
+                   {source_clause} ORDER BY sort_order""",
+                (run_id,),
+            ).fetchall()
+            for item in item_rows:
+                try:
+                    item_id = str(item["item_id"])
+                    version_id = str(item["version_id"])
+                    index_job_id = None
+                    if operation == "submit":
+                        submit_version_for_review(conn, version_id, actor_user_id=user.id)
+                    elif operation in {"approve", "reject"}:
+                        review_version(
+                            conn, version_id, approved=operation == "approve", note=body.note,
+                            category_id=None, actor_user_id=user.id,
+                        )
+                    elif operation == "publish":
+                        _publication_id, index_job_id = create_publication_job(
+                            conn, version_id, actor_user_id=user.id,
+                        )
+                        enqueue_content_publication(index_job_id)
+                    elif operation == "move":
+                        if str(item["lifecycle_status"]) == "published":
+                            job = create_reclassification_job(
+                                conn, item_id, target_category_id=str(body.target_category_id),
+                                expected_version_id=version_id, actor_user_id=user.id,
+                                can_reclassify=has_content_permission(conn, user, "item.reclassify_published"),
+                            )
+                            index_job_id = str(job["id"])
+                            enqueue_content_reclassification(index_job_id)
+                        else:
+                            move_content_item(
+                                conn, item_id, target_category_id=str(body.target_category_id),
+                                expected_version_id=version_id, actor_user_id=user.id,
+                                can_move_draft=has_content_permission(conn, user, "item.move_draft"),
+                                can_move_review=False,
+                            )
+                    mark_item_result(conn, run_id, item_id, status="succeeded", index_job_id=index_job_id)
+                    conn.commit()
+                except Exception as exc:  # each item is an independent workflow transition
+                    conn.rollback()
+                    mark_item_result(
+                        conn, run_id, str(item["item_id"]), status="failed",
+                        message=_bulk_failure_message(exc),
+                    )
+                    conn.commit()
+        finalize_sync_run(conn, run_id)
+        return BulkOperationDTO(**operation_snapshot(conn, run_id, actor_user_id=user.id))
+    except (ValueError, PermissionError, sqlite3.IntegrityError) as exc:
+        conn.rollback()
+        _raise_bulk_operation_error(exc)
+
+
+@router.post("/bulk-operations/{run_id}/cancel", response_model=BulkOperationDTO)
+def cancel_bulk_operation_route(
+    run_id: str,
+    user: CurrentUser = Depends(require_content_permission("workspace.view", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkOperationDTO:
+    try:
+        return BulkOperationDTO(**cancel_operation(conn, run_id, actor_user_id=user.id))
+    except (ValueError, PermissionError) as exc:
+        _raise_bulk_operation_error(exc)
+
+
+@router.get("/bulk-operations/{run_id}/archive")
+def download_bulk_operation_archive(
+    run_id: str,
+    user: CurrentUser = Depends(require_content_permission("item.download")),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    try:
+        path, filename = archive_file(conn, run_id, actor_user_id=user.id)
+    except (ValueError, PermissionError) as exc:
+        _raise_bulk_operation_error(exc)
+    return FileResponse(path, media_type="application/zip", filename=filename)
+
+
 @router.post("/bulk-download")
 def bulk_download_content(
     body: BulkDownloadManagedContentRequest,
@@ -2691,6 +3560,11 @@ def _bulk_failure_message(exc: Exception) -> str:
         "content_delete_reclassification_in_progress": "资料正在调整分类，暂时不能移入回收站",
         "version_not_submittable": "仅草稿或已退回资料可以提交审核",
         "active_category_not_found": "目标目录不存在或已停用",
+        "category_not_found": "目录不存在或已停用",
+        "category_version_conflict": "目录版本已变化，请刷新后重新检查",
+        "category_move_cycle": "不能把目录移动到自身或其子目录",
+        "category_sibling_name_conflict": "目标位置已有同名目录",
+        "category_delete_blocked": "目录内仍有资料或进行中的任务",
     }.get(str(exc), "资料状态已变化，请刷新后重试")
 
 
@@ -2702,13 +3576,14 @@ def bulk_move_content_items(
 ) -> BulkManagedContentResponse:
     _require_feature()
     can_move_draft = has_content_permission(conn, user, "item.move_draft")
-    can_move_review = has_content_permission(conn, user, "item.move_review")
+    can_move_review = False
     can_move_published = has_content_permission(conn, user, "item.publish")
     if not (can_move_draft or can_move_review or can_move_published):
         raise HTTPException(status_code=403, detail="当前账号没有移动资料的权限")
     results: list[BulkManagedContentResultDTO] = []
     for item in _validate_bulk_item_refs(body.items):
         try:
+            _reject_external_media_mutation(conn, item.item_id)
             move_content_item(
                 conn,
                 item.item_id,
@@ -2748,6 +3623,7 @@ def bulk_reclassify_content_items(
     results: list[BulkManagedContentResultDTO] = []
     for item in _validate_bulk_item_refs(body.items):
         try:
+            _reject_external_media_mutation(conn, item.item_id)
             row = create_reclassification_job(
                 conn,
                 item.item_id,
@@ -2791,13 +3667,18 @@ def bulk_archive_content_items(
     results: list[BulkManagedContentResultDTO] = []
     for item in _validate_bulk_item_refs(body.items):
         try:
+            _reject_external_media_mutation(conn, item.item_id)
+            item_kind = conn.execute(
+                "SELECT content_kind FROM content_items WHERE id=?", (item.item_id,)
+            ).fetchone()
+            is_media = item_kind is not None and item_kind["content_kind"] == "media_transcript"
             archive_content_item(
                 conn,
                 item.item_id,
                 expected_version_id=item.expected_version_id,
                 actor_user_id=user.id,
                 can_archive_draft=can_archive_draft,
-                can_archive_published=can_archive_published,
+                can_archive_published=can_archive_published and (not is_media or user.role == "admin"),
             )
             results.append(BulkManagedContentResultDTO(
                 item_id=item.item_id,
@@ -3055,7 +3936,7 @@ def list_content_index_jobs(
                   o.size_bytes AS file_size,
                   CASE WHEN h.current_version_id=v.id THEN 1 ELSE 0 END AS is_current_head,
                   CASE WHEN """ + latest_attempt + """ THEN 1 ELSE 0 END AS is_latest_attempt""" + base +
-        f" {where} ORDER BY j.created_at DESC,j.id LIMIT ? OFFSET ?",
+        f" {where} ORDER BY CASE WHEN j.status='failed' THEN 0 WHEN j.status IN ('pending','uploading','queued_mineru','parsing','chunking','summarizing','embedding') THEN 1 ELSE 2 END, j.updated_at DESC,j.id LIMIT ? OFFSET ?",
         [*params, limit, offset],
     ).fetchall()
     total = int(conn.execute(cte + " SELECT count(*)" + base + f" {where}", params).fetchone()[0])

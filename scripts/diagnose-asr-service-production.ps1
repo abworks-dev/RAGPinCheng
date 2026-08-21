@@ -194,6 +194,10 @@ $schedulerConsecutiveFailures = $null
 $schedulerFailureLimit = $null
 $schedulerQueueDepth = $null
 $schedulerQueueLimit = $null
+$profileIdentitiesOutcome = "unavailable"
+$profileIdentitiesExceptionType = ""
+$profileIdentitiesSchemaVersion = ""
+$profileIdentityCount = $null
 if (
     $healthOutcome -eq "healthy" -and
     $configValid -and
@@ -216,6 +220,20 @@ if (
         $schedulerQueueLimit = [int]$schedulerDiagnostics.queue_limit
     } catch {
         $schedulerDiagnosticsExceptionType = $_.Exception.GetType().Name
+    }
+    try {
+        $profileIdentities = Invoke-RestMethod `
+            -Method Get `
+            -Uri "http://127.0.0.1:8200/v1/profile-identities" `
+            -Headers $headers `
+            -TimeoutSec 10
+        $profileIdentitiesSchemaVersion = [string]$profileIdentities.schema_version
+        $profileIdentityCount = @($profileIdentities.profiles).Count
+        $profileIdentitiesOutcome = if (
+            $profileIdentitiesSchemaVersion -eq "asr-profile-identities/1"
+        ) { "available" } else { "unexpected" }
+    } catch {
+        $profileIdentitiesExceptionType = $_.Exception.GetType().Name
     }
 }
 
@@ -268,6 +286,7 @@ if ($healthOutcome -ne "healthy") { $signals += "health_$healthOutcome" }
 if ($schedulerDiagnosticsOutcome -eq "available" -and $schedulerPauseReason) {
     $signals += "scheduler_paused_$schedulerPauseReason"
 }
+if ($profileIdentitiesOutcome -ne "available") { $signals += "profile_identities_$profileIdentitiesOutcome" }
 if ($activeStatePresent -and -not $activeStateValid) { $signals += "active_state_invalid" }
 if ($null -eq $latestLog) { $signals += "startup_log_missing" }
 elseif ($null -ne $taskInfo -and $latestLog.LastWriteTimeUtc -lt $taskInfo.LastRunTime.ToUniversalTime()) { $signals += "startup_log_not_updated_by_last_run" }
@@ -329,6 +348,10 @@ $report = [ordered]@{
     scheduler_failure_limit = $schedulerFailureLimit
     scheduler_queue_depth = $schedulerQueueDepth
     scheduler_queue_limit = $schedulerQueueLimit
+    profile_identities_outcome = $profileIdentitiesOutcome
+    profile_identities_exception_type = $profileIdentitiesExceptionType
+    profile_identities_schema_version = $profileIdentitiesSchemaVersion
+    profile_identity_count = $profileIdentityCount
     active_state_present = [bool]$activeStatePresent
     active_state_valid = [bool]$activeStateValid
     active_candidate_id = $activeCandidateId

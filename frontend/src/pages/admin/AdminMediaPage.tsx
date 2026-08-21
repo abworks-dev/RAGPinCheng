@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ClipboardCheck, FileUp, Film, LoaderCircle, RefreshCw, Rocket, Settings2, Upload, XCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ClipboardCheck, FileUp, Film, LoaderCircle, RefreshCw, Rocket, Settings2, Trash2, Upload, XCircle, MoreHorizontal } from "lucide-react";
 import { adminMediaApi } from "../../api/admin/media";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
@@ -13,6 +13,7 @@ import { Progress } from "../../components/ui/progress";
 import { Select } from "../../components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 import { Checkbox } from "../../components/ui/checkbox";
+import { IconButton } from "../../components/ui/icon-button";
 import { TranscriptionWorkbenchSheet } from "../../components/TranscriptionWorkbenchSheet";
 import { ManagedSummaryCard } from "../../components/admin/ManagedSummaryCard";
 import { CategoryTreePicker } from "../../components/admin/CategoryTreePicker";
@@ -180,7 +181,7 @@ function pendingFromFile(file: File, profileId: string): PendingVideo {
   };
 }
 
-export function AdminMediaPage() {
+export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const [deletingMediaId, setDeletingMediaId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MediaAsset | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<MediaAsset | null>(null);
@@ -201,11 +202,16 @@ export function AdminMediaPage() {
   const [dragging, setDragging] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [discardPromptOpen, setDiscardPromptOpen] = useState(false);
+  const [discardPromptMode, setDiscardPromptMode] = useState<"close" | "cancel">("close");
   const [categories, setCategories] = useState<ManagedCategory[]>([]);
   const [targetCategoryId, setTargetCategoryId] = useState("cat-05");
   const [conflictReview, setConflictReview] = useState<MediaUploadPreflightEntry[] | null>(null);
   const [conflictChoices, setConflictChoices] = useState<Record<string, MediaConflictChoice>>({});
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
+  const [mediaPage, setMediaPage] = useState(0);
+  const [mediaPageSize, setMediaPageSize] = useState(10);
+  const [selectedMediaIds, setSelectedMediaIds] = useState<string[]>([]);
   const [lastLoadedAt, setLastLoadedAt] = useState<number | null>(null);
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
@@ -336,11 +342,20 @@ export function AdminMediaPage() {
     if (filter === "publishing") return asset.publication_status === "publishing";
     return job?.status === "failed" || asset.status === "failed" || asset.publication_status === "publication_failed" || asset.publication_index_status === "failed";
   };
-  const visibleMediaAssets = mediaAssets.filter((asset) => {
+  const transcriptionTaskAssets = mediaAssets.filter((asset) =>
+    Boolean(asset.transcription_job_id) || jobsByMediaId.has(asset.media_id) || asset.status === "failed",
+  );
+  const visibleMediaAssets = transcriptionTaskAssets.filter((asset) => {
     return matchesMediaFilter(asset, mediaFilter);
   });
+  const mediaPageCount = Math.max(1, Math.ceil(visibleMediaAssets.length / mediaPageSize));
+  const pagedMediaAssets = visibleMediaAssets.slice(mediaPage * mediaPageSize, (mediaPage + 1) * mediaPageSize);
+  const pageIds = pagedMediaAssets.map((asset) => asset.media_id);
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedMediaIds.includes(id));
+  useEffect(() => { setMediaPage(0); setSelectedMediaIds([]); }, [mediaFilter, mediaPageSize]);
+  useEffect(() => { if (mediaPage >= mediaPageCount) setMediaPage(Math.max(0, mediaPageCount - 1)); }, [mediaPage, mediaPageCount]);
   const filterCounts = mediaFilterOptions.reduce<Record<MediaFilter, number>>((counts, [value]) => {
-    counts[value] = mediaAssets.filter((asset) => matchesMediaFilter(asset, value)).length;
+    counts[value] = transcriptionTaskAssets.filter((asset) => matchesMediaFilter(asset, value)).length;
     return counts;
   }, { all: 0, processing: 0, review: 0, publishing: 0, failed: 0 });
   const selectedAsset = selectedMediaId ? mediaAssets.find((asset) => asset.media_id === selectedMediaId) ?? null : null;
@@ -495,7 +510,16 @@ export function AdminMediaPage() {
       }
       updatePending(item.id, { state: "succeeded", transferRatio: 1, error: null });
     } catch (e: any) {
-      updatePending(item.id, { state: "failed", error: e?.message || String(e) });
+        const mediaHints: Record<string, string> = {
+          media_audio_empty: "视频没有可用音频内容，请选择包含声音的文件。",
+          media_audio_preparation_failed: "视频音频无法解码，请确认包含音轨，或重新导出为 H.264 + AAC MP4。",
+          media_audio_invalid_output: "音频转换结果无效，请重新导出视频后重试。",
+          media_audio_preparation_timeout: "音频准备超时，请压缩视频或重新导出后重试。",
+          media_audio_source_missing: "视频文件无法读取，请重新上传。",
+          media_storage_unavailable: "服务器暂时无法准备视频音频，请稍后重试。",
+        };
+        const code = typeof e?.code === "string" ? e.code : null;
+        updatePending(item.id, { state: "failed", error: mediaHints[code || ""] || e?.message || String(e) });
     }
   }
 
@@ -634,11 +658,24 @@ export function AdminMediaPage() {
   const batchSettledCount = activeBatchItems.filter((item) => item.state === "succeeded" || item.state === "skipped" || item.state === "failed").length;
   const batchUploadingCount = activeBatchItems.filter((item) => item.state === "uploading").length;
   const batchPreparingCount = activeBatchItems.filter((item) => item.state === "preparing").length;
-  const hasUploadDraft = pending.length > 0 || submitting;
+  const settledUploadStates = new Set<UploadState>(["succeeded", "skipped"]);
+  const allUploadItemsSettled = pending.length > 0 && pending.every((item) => settledUploadStates.has(item.state));
+  const hasUploadDraft = submitting || pending.some((item) => !settledUploadStates.has(item.state));
   const resetUploadDraft = () => { setStep(1); setMode(null); setPending([]); setEditingId(null); setSubmitting(false); setActiveBatchIds([]); setUploadError(null); setConflictReview(null); setConflictChoices({}); };
+  const requestDiscardUpload = (mode: "close" | "cancel") => {
+    setDiscardPromptMode(mode);
+    setDiscardPromptOpen(true);
+  };
+  const confirmDiscardUpload = () => {
+    resetUploadDraft();
+    setDiscardPromptOpen(false);
+    setUploadDialogOpen(false);
+  };
   const requestUploadDialogClose = (open: boolean) => {
     if (open) { setUploadDialogOpen(true); return; }
-    if (hasUploadDraft && !submitting && !window.confirm("当前上传流程尚未完成，关闭窗口后进度会保留。点击“确定”关闭并保留进度，点击“取消”继续操作。")) return;
+    if (submitting) { setUploadDialogOpen(false); return; }
+    if (allUploadItemsSettled) { resetUploadDraft(); setUploadDialogOpen(false); return; }
+    if (hasUploadDraft) { requestDiscardUpload("close"); return; }
     setUploadDialogOpen(false);
   };
 
@@ -646,9 +683,8 @@ export function AdminMediaPage() {
     <section className="space-y-6" aria-labelledby="admin-media-title">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-ui-xs font-medium text-primary">内容管理</p>
-          <h1 id="admin-media-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">视频管理</h1>
-          <p className="mt-1 max-w-3xl text-ui-sm text-muted-foreground">分步骤批量上传视频，并选择人工 Markdown 或受控转录方案。</p>
+          <h1 id="admin-media-title" className="sr-only">转录任务</h1>
+          <p className="max-w-3xl text-ui-sm text-muted-foreground">视频由资料列表上传，在这里跟踪转录、审核、发布、专属索引和恢复操作。</p>
         </div>
         <a className={buttonVariants({ variant: "outline" })} href="/admin/asr"><Settings2 className="size-4" />转录配置</a>
       </header>
@@ -656,20 +692,25 @@ export function AdminMediaPage() {
       {schemeError && <Alert variant="destructive" role="alert"><AlertTitle>转录方案加载失败</AlertTitle><AlertDescription>{schemeError}</AlertDescription></Alert>}
 
       <Dialog open={uploadDialogOpen} onOpenChange={requestUploadDialogClose}>
-      <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
-      <Card className="border-0 shadow-none">
-        <CardHeader className="p-4 pb-3 sm:p-5 sm:pb-4">
-          <CardTitle className="text-ui-lg">上传视频与转写</CardTitle>
-          <CardDescription className="mt-1">自动转录成功不代表已经审核、发布或进入索引。</CardDescription>
+      <DialogContent className="flex max-h-[min(90vh,52rem)] max-w-5xl flex-col gap-0 overflow-hidden p-0">
+        <div className="shrink-0 border-b border-border px-4 py-4 sm:px-6 sm:py-5">
+          <div className="flex items-start justify-between gap-4 pr-8">
+            <div className="min-w-0">
+              <DialogTitle className="text-ui-lg sm:text-ui-xl">上传视频与转写</DialogTitle>
+              <DialogDescription className="mt-1">自动转录成功不代表已经审核、发布或进入索引。</DialogDescription>
+            </div>
+            {allUploadItemsSettled && <Badge variant="success" className="shrink-0"><CheckCircle2 className="size-3.5" />本批次已完成</Badge>}
+          </div>
           <ol className="mt-3 grid grid-cols-3 gap-1.5 sm:gap-2" aria-label="上传步骤">
             {["上传视频", "转写方式", "配置并提交"].map((label, index) => (
-              <li key={label} className={`rounded-ui-md border px-2 py-1.5 text-ui-xs sm:px-3 sm:py-2 sm:text-ui-sm ${step === index + 1 ? "border-primary bg-primary/10 font-medium text-primary" : "border-border text-muted-foreground"}`}>
+              <li key={label} className={`min-w-0 rounded-ui-md border px-2 py-2 text-ui-xs sm:px-3 sm:py-2.5 sm:text-ui-sm ${step === index + 1 ? "border-primary bg-primary/10 font-medium text-primary" : "border-border text-muted-foreground"}`}>
                 {index + 1}. {label}
               </li>
             ))}
           </ol>
-        </CardHeader>
-        <CardContent className="space-y-4 px-4 pb-4 pt-0 sm:space-y-5 sm:px-5 sm:pb-5">
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto" data-testid="media-upload-scroll-region">
+        <div className="space-y-4 px-4 py-4 sm:space-y-5 sm:px-6 sm:py-5">
           {step === 1 && (
             <>
               <div
@@ -727,19 +768,21 @@ export function AdminMediaPage() {
                 onChange={(categoryId) => { setTargetCategoryId(categoryId); setConflictReview(null); }}
                 label="发布后的归档目录"
               />
-              <div className="flex flex-wrap items-end gap-3">
-                <Button variant="outline" size="sm" onClick={() => setPending((current) => current.map((item) => ({ ...item, selected: true })))}>全选</Button>
-                <Button variant="outline" size="sm" onClick={() => setPending((current) => current.map((item) => ({ ...item, selected: false })))}>取消全选</Button>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" onClick={() => setPending((current) => current.map((item) => ({ ...item, selected: true })))}>全选</Button>
+                  <Button variant="outline" onClick={() => setPending((current) => current.map((item) => ({ ...item, selected: false })))}>取消全选</Button>
+                </div>
                 {mode === "automatic" && (
-                  <>
-                    <label className="text-ui-sm font-medium">批量转录方案
-                      <Select aria-label="批量转录方案" value={bulkProfileId} onChange={(event) => setBulkProfileId(event.target.value)} className="mt-1 min-w-64">
+                  <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(16rem,20rem)_auto] sm:items-end">
+                    <label className="min-w-0 text-ui-sm font-medium">批量转录方案
+                      <Select aria-label="批量转录方案" value={bulkProfileId} onChange={(event) => setBulkProfileId(event.target.value)} className="mt-1">
                         <option value="">请选择转录方案</option>
                         {schemes.map((scheme) => <option key={scheme.scheme_id} value={scheme.scheme_id} disabled={!scheme.enabled || scheme.archived || scheme.availability !== "available"}>{scheme.name}{scheme.availability !== "available" ? "（不可用）" : ""}</option>)}
                       </Select>
                     </label>
-                    <Button variant="outline" onClick={() => setPending((current) => current.map((item) => item.selected ? { ...item, profileId: bulkProfileId, requestId: createRequestId(), state: "waiting", error: null } : item))}>应用到已选择视频</Button>
-                  </>
+                    <Button variant="outline" className="w-full sm:w-auto" onClick={() => setPending((current) => current.map((item) => item.selected ? { ...item, profileId: bulkProfileId, requestId: createRequestId(), state: "waiting", error: null } : item))}>应用到已选择视频</Button>
+                  </div>
                 )}
               </div>
 
@@ -747,10 +790,11 @@ export function AdminMediaPage() {
                 {pending.map((item) => {
                   const validationError = validateItem(item);
                   const scheme = schemes.find((entry) => entry.scheme_id === item.profileId);
+                  const itemSettled = settledUploadStates.has(item.state);
                   return (
                     <div key={item.id} className="rounded-ui-xl border border-border p-4">
                       <div className="flex gap-3">
-                        <input aria-label={`选择 ${item.file.name}`} type="checkbox" checked={item.selected} onChange={(event) => updatePending(item.id, { selected: event.target.checked })} />
+                        {!itemSettled && <Checkbox aria-label={`选择 ${item.file.name}`} checked={item.selected} onChange={(event) => updatePending(item.id, { selected: event.target.checked })} />}
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium">{item.file.name}</p>
                           <p className="text-ui-xs text-muted-foreground">{formatBytes(item.file.size)}</p>
@@ -779,7 +823,13 @@ export function AdminMediaPage() {
                           />
                         </div>
                       )}
-                      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                      {itemSettled ? (
+                        <dl className="mt-3 grid gap-x-5 gap-y-2 border-t border-border pt-3 text-ui-xs sm:grid-cols-3">
+                          <div className="min-w-0"><dt className="text-muted-foreground">视频标题</dt><dd className="mt-0.5 truncate font-medium text-foreground" title={item.title}>{item.title}</dd></div>
+                          <div className="min-w-0"><dt className="text-muted-foreground">源文件名</dt><dd className="mt-0.5 truncate font-medium text-foreground" title={item.originalFilename}>{item.originalFilename}</dd></div>
+                          <div className="min-w-0"><dt className="text-muted-foreground">{mode === "automatic" ? "转录方案" : "人工转写"}</dt><dd className="mt-0.5 truncate font-medium text-foreground" title={mode === "automatic" ? scheme?.name : item.transcriptFile?.name}>{mode === "automatic" ? scheme?.name || "历史方案" : item.transcriptFile?.name || "未绑定"}</dd></div>
+                        </dl>
+                      ) : <><div className="mt-3 grid gap-3 lg:grid-cols-2">
                         <label className="text-ui-sm font-medium">视频标题
                           <Input aria-label={`${item.file.name} 的视频标题`} className="mt-1" value={item.title} disabled={submitting || item.state === "succeeded"} onChange={(event) => updatePending(item.id, { title: event.target.value, requestId: createRequestId(), state: "waiting", error: null })} />
                         </label>
@@ -808,7 +858,7 @@ export function AdminMediaPage() {
                           </div>
                         )}
                       </div>
-                      {(item.error || validationError) && <p className="mt-2 text-ui-xs text-destructive">{item.error || validationError}</p>}
+                      {(item.error || validationError) && <p className="mt-2 text-ui-xs text-destructive">{item.error || validationError}</p>}</>}
                     </div>
                   );
                 })}
@@ -843,18 +893,51 @@ export function AdminMediaPage() {
                 </div>
               )}
 
-              <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={submitting} onClick={() => setStep(2)}>返回选择方式</Button><Button variant="ghost" disabled={submitting} onClick={() => { if (window.confirm("确定取消本次上传并清空已选择的文件吗？")) { resetUploadDraft(); setUploadDialogOpen(false); } }}>取消上传</Button></div>
-                <div className="text-right">
-                  <p className="mb-2 text-ui-xs text-muted-foreground">{mode === "manual" ? "保持现有人工 Markdown 上传与索引路径。" : "每个文件使用独立幂等键；最多并发上传 2 个。"}</p>
-                  <Button disabled={!canSubmit || !targetCategoryId} onClick={() => void submitBatch()}>{submitting ? "正在批量提交…" : conflictReview ? "按选择上传" : mode === "manual" ? "上传视频与人工转写" : "上传并创建自动转录任务"}</Button>
-                </div>
-              </div>
             </>
           )}
-        </CardContent>
-      </Card>
+        </div>
+        </div>
+        {step === 3 && mode && (
+          <div className="shrink-0 border-t border-border bg-popover px-4 py-4 sm:px-6" data-testid="media-upload-action-bar">
+            {!allUploadItemsSettled && <p className="mb-3 text-ui-xs text-muted-foreground sm:text-right">{mode === "manual" ? "保持现有人工 Markdown 上传与索引路径。" : "每个文件使用独立幂等键；最多并发上传 2 个。"}</p>}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <Button variant="outline" className="w-full sm:w-auto" disabled={submitting || allUploadItemsSettled} onClick={() => setStep(2)}><ArrowLeft className="size-4" />返回选择方式</Button>
+                {!allUploadItemsSettled && <Button variant="destructive" className="w-full sm:w-auto" disabled={submitting} onClick={() => requestDiscardUpload("cancel")}><Trash2 className="size-4" />放弃本次上传</Button>}
+              </div>
+              {allUploadItemsSettled ? (
+                <Button className="w-full sm:w-auto" onClick={() => requestUploadDialogClose(false)}><CheckCircle2 className="size-4" />完成并关闭</Button>
+              ) : (
+                <Button className="w-full sm:w-auto" disabled={!canSubmit || !targetCategoryId} onClick={() => void submitBatch()}>{submitting ? "正在批量提交…" : conflictReview ? "按选择上传" : mode === "manual" ? "上传视频与人工转写" : "上传并创建自动转录任务"}</Button>
+              )}
+            </div>
+          </div>
+        )}
       </DialogContent>
+      </Dialog>
+
+      <Dialog open={discardPromptOpen} onOpenChange={setDiscardPromptOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{discardPromptMode === "cancel" ? "放弃本次上传？" : "暂时关闭上传流程？"}</DialogTitle>
+            <DialogDescription>
+              {discardPromptMode === "cancel"
+                ? "已提交的任务不会被撤回；未提交的视频将从当前浏览器流程中清除。"
+                : "可保留未提交的视频和填写内容供下次继续，也可放弃并清空本次上传。"}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col-reverse sm:flex-row">
+            <Button variant="outline" className="w-full sm:w-auto" onClick={() => setDiscardPromptOpen(false)}>继续操作</Button>
+            {discardPromptMode === "cancel" ? (
+              <Button variant="destructive" className="w-full sm:w-auto" onClick={confirmDiscardUpload}>放弃并清空</Button>
+            ) : (
+              <>
+                <Button variant="destructive" className="w-full sm:w-auto" onClick={confirmDiscardUpload}>关闭并放弃</Button>
+                <Button className="w-full sm:w-auto" onClick={() => { setDiscardPromptOpen(false); setUploadDialogOpen(false); }}>关闭并保留</Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
 
       {editingItem && (
@@ -877,33 +960,46 @@ export function AdminMediaPage() {
         </div>
         <Card className="overflow-hidden shadow-surface">
           <div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
-            <div className="min-w-0"><h2 id="media-assets-title" className="text-ui-base font-semibold">媒体资源</h2><p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-ui-xs text-muted-foreground"><span>共 {mediaAssets.length} 个视频</span><span>·</span><span>按每次提交分别记录媒体与处理进度；同名文件不会合并。</span></p></div>
+            <div className="min-w-0"><h2 id="media-assets-title" className="text-ui-base font-semibold">视频资源</h2><p className="mt-1 text-ui-xs text-muted-foreground">视频由资料列表上传，在这里跟踪转录、审核、发布、专属索引和恢复操作。</p></div>
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
               <Button size="sm" variant="outline" aria-label="刷新媒体资源" title="刷新媒体资源" disabled={loading} onClick={() => void refreshMediaState()}><RefreshCw className="size-4" aria-hidden="true" />刷新列表</Button>
-              <Button size="sm" onClick={() => setUploadDialogOpen(true)}><Upload className="size-4" />{hasUploadDraft ? `继续上传${pending.length ? `（${pending.length}）` : ""}` : "上传视频"}</Button>
+              <IconButton label="批量操作" tooltip="批量操作" className="border border-border" disabled={!selectedMediaIds.length}><MoreHorizontal className="size-4" /></IconButton>
+              <a className="inline-flex size-control-md items-center justify-center rounded-ui-md border border-border" href="/admin/asr" aria-label="转录配置" title="转录配置"><Settings2 className="size-4" /></a>
+              {!embedded && <Button size="sm" onClick={() => setUploadDialogOpen(true)}><Upload className="size-4" />{hasUploadDraft ? `继续上传${pending.length ? `（${pending.length}）` : ""}` : "上传视频"}</Button>}
             </div>
           </div>
-          <p className="border-b border-border px-4 py-3 text-ui-xs text-muted-foreground sm:px-5">当前显示 {visibleMediaAssets.length} / {mediaAssets.length} 条记录{lastLoadedAt ? ` · 最近刷新 ${new Date(lastLoadedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : ""}。</p>
         {jobsError && <Alert role="alert"><AlertTitle>任务状态暂时无法刷新</AlertTitle><AlertDescription>{jobsError}</AlertDescription></Alert>}
         {loadError ? <ErrorState title="媒体资源加载失败" description={loadError} action={<Button variant="outline" size="sm" onClick={refresh}>重新加载</Button>} />
           : loading ? <Card><LoadingState className="min-h-48" label="正在加载媒体资源…" /></Card>
-          : mediaAssets.length === 0 ? <EmptyState title="暂无媒体资源" description="完成向导后，视频和各阶段状态会显示在这里。" />
+          : transcriptionTaskAssets.length === 0 ? <EmptyState title="暂无转录任务" description="在资料列表为视频选择转录方案后，任务和各阶段状态会显示在这里。" />
           : <>
-            <div className="hidden grid-cols-[minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] gap-4 border-b border-border bg-surface-muted px-5 py-3 text-ui-xs font-medium text-muted-foreground lg:grid" data-testid="media-record-header">
-              <span>媒体信息</span><span>处理进度</span><span>最近提交</span><span>操作</span>
+            <div className="hidden grid-cols-[2rem_minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] gap-4 border-b border-border bg-surface-muted px-5 py-3 text-ui-xs font-medium text-muted-foreground lg:grid" data-testid="media-record-header">
+              <Checkbox aria-label="选择当前页视频" checked={allPageSelected} onChange={() => setSelectedMediaIds(allPageSelected ? [] : pageIds)} /><span>媒体信息</span><span>处理进度</span><span>最近提交</span><span>操作</span>
             </div>
             <ul className="divide-y divide-border" aria-label="视频处理记录">
-              {visibleMediaAssets.map((asset) => {
+              {pagedMediaAssets.map((asset) => {
                 const job = jobsByMediaId.get(asset.media_id);
                 const sameNameCount = mediaAssets.filter((item) => item.original_filename === asset.original_filename).length;
-                const canDelete = asset.status === "failed" && !job;
+                const availableActions = new Set(asset.available_actions || []);
+                const disabledActions = asset.disabled_actions || {};
+                const hasServerCapabilities = Array.isArray(asset.available_actions);
+                const isExternal = asset.storage_kind === "external";
+                const canCancel = hasServerCapabilities ? availableActions.has("cancel_transcription") : job?.status === "pending" || job?.status === "running";
+                const canRetry = hasServerCapabilities ? availableActions.has("retry_transcription") : (job?.status === "failed" || job?.status === "cancelled") && job.failure?.retryable !== false;
+                const canDelete = !isExternal && (hasServerCapabilities ? availableActions.has("delete_failed") : asset.status === "failed" && !job);
+                const canReplace = !isExternal && (hasServerCapabilities ? availableActions.has("replace_media") : asset.publication_status === "published");
+                const canArchive = !isExternal && (hasServerCapabilities ? availableActions.has("archive_media") : asset.publication_status === "published");
+                const showCancel = canCancel || job?.status === "pending" || job?.status === "running";
+                const showRetry = canRetry || job?.status === "failed" || job?.status === "cancelled";
+                const showPublishedActions = canReplace || canArchive || asset.publication_status === "published";
                 return <li key={asset.media_id} className="p-4 sm:p-5" data-testid="media-record-row">
-                  <div className="grid gap-4 lg:grid-cols-[minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] lg:items-start">
+                  <div className="grid gap-4 lg:grid-cols-[2rem_minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] lg:items-start">
+                    <Checkbox aria-label={`选择“${asset.title}”`} checked={selectedMediaIds.includes(asset.media_id)} onChange={() => setSelectedMediaIds((current) => current.includes(asset.media_id) ? current.filter((id) => id !== asset.media_id) : [...current, asset.media_id])} />
                     <div className="min-w-0">
                       <p className="truncate font-medium" title={asset.title}>{asset.title}</p>
                       <p className="mt-1 truncate font-mono text-ui-xs text-muted-foreground" title={asset.original_filename}>{asset.original_filename}</p>
                       <p className="mt-1 truncate text-ui-xs text-muted-foreground" title={categories.find((category) => category.id === asset.category_id)?.full_path}>{categories.find((category) => category.id === asset.category_id)?.full_path || "尚未选择归档目录"}</p>
-                      <div className="mt-2 flex flex-wrap gap-2 text-ui-xs text-muted-foreground"><span>{formatBytes(asset.file_size)}</span>{sameNameCount > 1 && <Badge variant="secondary">同名记录 {sameNameCount} 条</Badge>}{asset.replacement_source_media_id && <Badge variant={asset.replacement_status === "activated" ? "success" : asset.replacement_status === "failed" ? "destructive" : "warning"}>{asset.replacement_status === "activated" ? "替换已生效" : asset.replacement_status === "failed" ? "替换候选失败" : "替换候选"}</Badge>}{asset.replacement_candidate_media_id && asset.replacement_status === "pending" && <Badge variant="warning">替换处理中</Badge>}</div>
+                      <div className="mt-2 flex flex-wrap gap-2 text-ui-xs text-muted-foreground"><span>{formatBytes(asset.file_size)}</span>{isExternal && <Badge variant="secondary">共享目录视频 · 只读</Badge>}{sameNameCount > 1 && <Badge variant="secondary">同名记录 {sameNameCount} 条</Badge>}{asset.replacement_source_media_id && <Badge variant={asset.replacement_status === "activated" ? "success" : asset.replacement_status === "failed" ? "destructive" : "warning"}>{asset.replacement_status === "activated" ? "替换已生效" : asset.replacement_status === "failed" ? "替换候选失败" : "替换候选"}</Badge>}{asset.replacement_candidate_media_id && asset.replacement_status === "pending" && <Badge variant="warning">替换处理中</Badge>}</div>
                     </div>
                     <div className="min-w-0 space-y-2">
                       <div className="flex flex-wrap items-center gap-2"><StatusBadge value={job?.status || asset.status} meta={job ? jobStatusMeta : mediaStatusMeta} /></div>
@@ -913,19 +1009,21 @@ export function AdminMediaPage() {
                     </div>
                     <p className="text-ui-xs text-muted-foreground"><span className="sr-only">提交时间：</span>{formatAdminDate(asset.created_at)}</p>
                     <div className="flex flex-wrap gap-1.5 lg:justify-end" aria-label={`媒体操作：${asset.title}`}>
-                      <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => openWorkbench(asset.media_id)}>进入转写工作台</Button>
+                      <IconButton label="进入转写工作台" tooltip="进入转写工作台" className="border border-border" onClick={() => openWorkbench(asset.media_id)}><Film className="size-4" /></IconButton>
                       {asset.catalog_item_id && asset.current_version_id && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => { setMoveTarget(asset); setMoveCategoryId(""); setMoveError(null); }}>调整目录</Button>}
-                      {(job?.status === "pending" || job?.status === "running") && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => void cancelJob(job)}>取消</Button>}
-                      {(job?.status === "failed" || job?.status === "cancelled") && job.failure?.retryable !== false && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => void retryJob(job)}>重试</Button>}
-                      {canDelete && <Button className="min-h-10 sm:min-h-0" size="sm" variant="destructive" disabled={deletingMediaId === asset.media_id} onClick={() => setDeleteTarget(asset)}>{deletingMediaId === asset.media_id ? "删除中" : "完整删除"}</Button>}
-                      {asset.publication_status === "published" && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => { setArchiveTarget(asset); setArchiveAcknowledged(false); }}>移入回收站</Button>}
+                      {showCancel && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" title={canCancel ? "取消当前转录任务" : disabledActions.cancel_transcription || "当前状态不可取消"} disabled={!job || !canCancel || deletingMediaId === asset.media_id} onClick={() => job && void cancelJob(job)}>取消</Button>}
+                      {showRetry && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" title={canRetry ? "按原转录方案重试" : disabledActions.retry_transcription || "当前状态不可重试"} disabled={!job || !canRetry || deletingMediaId === asset.media_id} onClick={() => job && void retryJob(job)}>重试</Button>}
+                      {showPublishedActions && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" title={canReplace ? "上传候选视频并创建转录任务" : disabledActions.replace_media || "当前状态不可替换"} disabled={!canReplace || deletingMediaId === asset.media_id} onClick={() => setReplaceSourceMediaId(asset.media_id)}>替换视频</Button>}
+                      {asset.status === "failed" && <Button className="min-h-10 sm:min-h-0" size="sm" variant="destructive" title={canDelete ? "删除失败视频及其原文件" : disabledActions.delete_failed || "当前失败记录不可删除"} disabled={!canDelete || deletingMediaId === asset.media_id} onClick={() => setDeleteTarget(asset)}>{deletingMediaId === asset.media_id ? "删除中" : "完整删除"}</Button>}
+                      {showPublishedActions && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" title={canArchive ? "移入资料回收站" : disabledActions.archive_media || "当前状态不可归档"} disabled={!canArchive || deletingMediaId === asset.media_id} onClick={() => { setArchiveTarget(asset); setArchiveAcknowledged(false); }}>移入回收站</Button>}
                     </div>
                   </div>
                 </li>;
               })}
             </ul>
           </>}
-        {visibleMediaAssets.length === 0 && mediaAssets.length > 0 && <EmptyState title="没有符合条件的媒体" description="请切换其他快捷筛选条件。" />}
+        {visibleMediaAssets.length === 0 && transcriptionTaskAssets.length > 0 && <EmptyState title="没有符合条件的媒体" description="请切换其他快捷筛选条件。" />}
+        <div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><p className="text-ui-xs text-muted-foreground">当前显示 {visibleMediaAssets.length ? mediaPage * mediaPageSize + 1 : 0} - {Math.min((mediaPage + 1) * mediaPageSize, visibleMediaAssets.length)} / {visibleMediaAssets.length} 条记录{lastLoadedAt ? ` · 最近刷新 ${new Date(lastLoadedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : ""}。</p><div className="flex flex-wrap items-center gap-2"><label className="flex items-center gap-2 text-ui-xs text-muted-foreground">每页<Select aria-label="每页视频条数" className="h-control-sm w-20" value={String(mediaPageSize)} onChange={(event) => setMediaPageSize(Number(event.target.value))}><option value="10">10 条</option><option value="20">20 条</option><option value="50">50 条</option></Select></label><Button size="sm" variant="outline" disabled={mediaPage === 0} onClick={() => setMediaPage((value) => value - 1)}>上一页</Button><Select aria-label="跳转视频页码" className="h-control-sm w-24" value={String(mediaPage + 1)} onChange={(event) => setMediaPage(Number(event.target.value) - 1)}>{Array.from({ length: mediaPageCount }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 页</option>)}</Select><Button size="sm" variant="outline" disabled={mediaPage + 1 >= mediaPageCount} onClick={() => setMediaPage((value) => value + 1)}>下一页</Button></div></div>
         </Card>
       </section>
 

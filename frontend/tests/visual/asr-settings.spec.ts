@@ -48,6 +48,15 @@ test.describe("转录配置", () => {
       path: testInfo.outputPath(`asr-settings-disabled-${viewport.width}x${viewport.height}.png`),
       fullPage: true,
     });
+
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await installAdminRoutes(page, "asr_identity_unavailable");
+    await page.goto("/admin/asr");
+    await expect(page.getByText("服务正常").first()).toBeVisible();
+    await page.getByRole("button", { name: "发布记录" }).click();
+    await expect(page.getByText("发布身份暂不可验证，请等待转录服务完成兼容升级。")).toBeVisible();
+    await expect(page.getByRole("button", { name: "申请发布" })).toBeDisabled();
+    await expectNoBodyOverflow(page);
   });
 
   test("发布申请显示忙碌和成功反馈", async ({ page }) => {

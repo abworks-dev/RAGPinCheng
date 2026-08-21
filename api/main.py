@@ -17,7 +17,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
-from src.config import CONTENT_MANAGEMENT_ENABLED, RERANK_ENABLED
+from src.config import CONTENT_MANAGEMENT_ENABLED, RERANK_ENABLED, EXTERNAL_MEDIA_SCAN_POLL_SECONDS
 from src.config import ASR_ENABLED, ASR_SERVICE_TOKEN
 
 from .auth import bootstrap_admin_from_env
@@ -42,6 +42,11 @@ from .content_publication import (
     recover_content_publications_on_boot,
     run_content_publication,
 )
+from .content_bulk_operations import (
+    cleanup_expired_archives,
+    recover_bulk_operations_on_boot,
+    stop_bulk_operation_worker,
+)
 from .routes import router as core_router
 from .routes_admin import router as admin_router
 from .routes_admin_asr import router as admin_asr_router
@@ -50,6 +55,7 @@ from .routes_chat import router as chat_router
 from .routes_content import router as content_router
 from .routes_media import router as media_router
 from .routes_media_transcript import router as media_transcript_router
+from .routes_external_media import router as external_media_router, run_due_external_scans
 from .routes_transcription import (
     build_transcription_service,
     recover_publications_on_boot,
@@ -94,6 +100,8 @@ async def _trash_cleanup_loop() -> None:
         try:
             await asyncio.sleep(SWEEPER_INTERVAL_SECONDS)
             result = await asyncio.to_thread(run_automatic_cleanup)
+            if CONTENT_MANAGEMENT_ENABLED:
+                await asyncio.to_thread(cleanup_expired_archives)
             if result:
                 logger.info(
                     "automatic trash cleanup %s: %d succeeded, %d failed",
@@ -103,6 +111,17 @@ async def _trash_cleanup_loop() -> None:
             break
         except Exception:
             logger.exception("automatic trash cleanup iteration failed (non-fatal)")
+
+
+async def _external_media_scan_loop() -> None:
+    while True:
+        try:
+            await asyncio.sleep(EXTERNAL_MEDIA_SCAN_POLL_SECONDS)
+            await asyncio.to_thread(run_due_external_scans)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.exception("external media scan iteration failed (non-fatal)")
 
 
 @asynccontextmanager
@@ -159,6 +178,7 @@ async def lifespan(app: FastAPI):
 
     sweeper_task = asyncio.create_task(_sweeper_loop())
     trash_cleanup_task = asyncio.create_task(_trash_cleanup_loop())
+    external_media_scan_task = asyncio.create_task(_external_media_scan_loop())
     # Indexing worker: started before resuming pending jobs so the queue
     # has a consumer ready when resume_pending_on_boot enqueues them.
     configure_publication_runner(run_publication_index_job)
@@ -174,6 +194,7 @@ async def lifespan(app: FastAPI):
     if CONTENT_MANAGEMENT_ENABLED:
         recover_content_publications_on_boot(enqueue_content_publication)
         recover_reclassifications_on_boot(enqueue_content_reclassification)
+        recover_bulk_operations_on_boot()
     configure_transcription_worker(build_transcription_service)
     transcription_runtime_ready = ASR_ENABLED and bool(ASR_SERVICE_TOKEN)
     if transcription_runtime_ready:
@@ -195,8 +216,14 @@ async def lifespan(app: FastAPI):
             await trash_cleanup_task
         except (asyncio.CancelledError, Exception):
             pass
+        external_media_scan_task.cancel()
+        try:
+            await external_media_scan_task
+        except (asyncio.CancelledError, Exception):
+            pass
         if transcription_runtime_ready:
             await stop_transcription_worker()
+        await asyncio.to_thread(stop_bulk_operation_worker)
         await stop_worker()
         configure_publication_runner(None)
         configure_content_publication_runner(None)
@@ -229,6 +256,7 @@ app.include_router(admin_asr_router, prefix="/api")
 app.include_router(media_router, prefix="/api")
 app.include_router(media_transcript_router, prefix="/api")
 app.include_router(transcription_router, prefix="/api")
+app.include_router(external_media_router, prefix="/api")
 
 
 # ── React SPA hosting ──────────────────────────────────────────────────────

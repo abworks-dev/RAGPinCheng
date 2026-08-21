@@ -103,8 +103,16 @@ services:
       OFFICE_PARSE_TIMEOUT_SECONDS: ${OFFICE_PARSE_TIMEOUT_SECONDS:-120}
       OFFICE_MIN_FREE_DISK_MB: ${OFFICE_MIN_FREE_DISK_MB:-1024}
       CONTENT_ROOT: /app/content
+      CONTENT_BULK_ARCHIVE_ROOT: ${CONTENT_BULK_ARCHIVE_ROOT:-/app/content/.bulk-archives}
+      CONTENT_BULK_ARCHIVE_MAX_BYTES: ${CONTENT_BULK_ARCHIVE_MAX_BYTES:-10737418240}
+      CONTENT_BULK_ARCHIVE_RESERVE_BYTES: ${CONTENT_BULK_ARCHIVE_RESERVE_BYTES:-2147483648}
+      CONTENT_BULK_ARCHIVE_RETENTION_SECONDS: ${CONTENT_BULK_ARCHIVE_RETENTION_SECONDS:-21600}
       DOCS_DIR: /app/docs
       MEDIA_DIR: /app/media
+      EXTERNAL_MEDIA_ROOTS_JSON: ${EXTERNAL_MEDIA_ROOTS_JSON:-}
+      EXTERNAL_MEDIA_UNC_ROOTS_JSON: ${EXTERNAL_MEDIA_UNC_ROOTS_JSON:-{}}
+      EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE: ${EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE:-10000}
+      EXTERNAL_MEDIA_SCAN_POLL_SECONDS: ${EXTERNAL_MEDIA_SCAN_POLL_SECONDS:-60}
       TRANSCRIPTION_ARTIFACT_DIR: ${TRANSCRIPTION_ARTIFACT_DIR:-/app/data/transcription-artifacts}
       CONTENT_MANAGEMENT_ENABLED: ${CONTENT_MANAGEMENT_ENABLED:-false}
       CONTENT_HEAD_ENFORCEMENT: ${CONTENT_HEAD_ENFORCEMENT:-compat}
@@ -117,6 +125,8 @@ services:
       - ${MEDIA_HOST_PATH:-../media}:/app/media
       # 受管资料库。生产通过 CONTENT_HOST_PATH 固定宿主机目录；本地默认仍在仓库旁。
       - ${CONTENT_HOST_PATH:-../content}:/app/content
+      # Read-only roots for administrator-configured external SMB sources.
+      - ${EXTERNAL_SOURCES_HOST_PATH:-../external-sources}:/app/external-sources:ro
       # 源 PDF 文档 — 只在容器内执行 scripts/build_index.py 时需要。
       # 读写挂载，MinerU 拆分后的 PDF 可以写回原目录。
       - ${DOCS_HOST_PATH:-../content/legacy-docs}:/app/docs

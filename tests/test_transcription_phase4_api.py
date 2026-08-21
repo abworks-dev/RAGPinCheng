@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from pydantic import ValidationError
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 
 from api.auth import CurrentUser, require_admin, require_csrf_admin
 from api.routes_admin import delete_failed_media_asset, router as admin_router, upload_media
@@ -339,5 +342,60 @@ def test_automatic_upload_replays_existing_request_when_asr_is_now_unavailable(
         assert replayed.transcription_job_id == job.id
         assert conn.execute("SELECT COUNT(*) FROM media_assets").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM transcription_jobs").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_automatic_upload_prepares_staged_video_before_media_insert(tmp_path, monkeypatch):
+    import api.routes_admin as routes_admin
+
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    seed_admin_user(conn)
+    media_root = (tmp_path / "media").resolve()
+    prepared_sources: list[Path] = []
+
+    class FakePreparer:
+        def prepare(self, media_id: str, *, source_path: Path | None = None):
+            assert source_path is not None
+            assert source_path == media_root / media_id / "original.mp4"
+            assert source_path.is_file()
+            prepared_sources.append(source_path)
+
+    class FakeService:
+        preparer = FakePreparer()
+
+        @staticmethod
+        def resolve_profile(_profile_id, _operation):
+            return None
+
+        @staticmethod
+        def create_pending_job(**_kwargs):
+            return SimpleNamespace(id="123e4567-e89b-42d3-a456-426614174399")
+
+    monkeypatch.setattr(routes_admin, "MEDIA_DIR", media_root)
+    monkeypatch.setattr(routes_admin, "ASR_ENABLED", True)
+    monkeypatch.setattr(routes_admin, "ASR_SERVICE_TOKEN", "fixture-token")
+    monkeypatch.setattr(routes_admin, "build_transcription_service", lambda: FakeService())
+    monkeypatch.setattr(routes_admin, "enqueue_transcription", lambda _job_id: None)
+
+    try:
+        result = asyncio.run(
+            upload_media(
+                UploadFile(file=io.BytesIO(b"new-video"), filename="new-training.mp4"),
+                "新培训视频",
+                None,
+                "fixture-profile",
+                "123e4567-e89b-42d3-a456-426614174398",
+                CurrentUser(1, "admin", "Admin", "admin", "csrf"),
+                conn,
+                category_id="cat-05",
+            )
+        )
+        assert result.status == "uploaded"
+        assert prepared_sources == [media_root / result.media_id / "original.mp4"]
+        assert (media_root / result.media_id / "original.mp4").read_bytes() == b"new-video"
+        assert conn.execute(
+            "SELECT status FROM media_assets WHERE media_id=?", (result.media_id,)
+        ).fetchone()[0] == "uploaded"
     finally:
         conn.close()

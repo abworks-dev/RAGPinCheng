@@ -47,21 +47,67 @@ class FakeResponse:
         return json.dumps(self._payload).encode("utf-8")
 
 
+def diagnostics_payload(profiles: tuple[str, ...]) -> dict[str, object]:
+    return {
+        "enabled": True,
+        "queue_depth": 0,
+        "queue_limit": 8,
+        "oom_latched": False,
+        "consecutive_failures": 0,
+        "failure_limit": 3,
+        "pause_reason": None,
+        "profiles": [
+            {
+                "service_profile_id": profile,
+                "available": True,
+                "unavailable_reason_code": None,
+            }
+            for profile in profiles
+        ],
+    }
+
+
+def identities_payload(profiles: tuple[str, ...]) -> dict[str, object]:
+    return {
+        "schema_version": "asr-profile-identities/1",
+        "profiles": [
+            {
+                "service_profile_id": profile,
+                "provider_key": "whisperx" if profile == MODULE.WHISPERX_PROFILE else "synthetic",
+                "profile_config_hash": "a" * 64,
+                "prompt_asset_id": None,
+                "qualification_policy": "whisperx-r3/1" if profile == MODULE.WHISPERX_PROFILE else "not-required",
+            }
+            for profile in profiles
+        ],
+    }
+
+
+def contract_response(request, profiles: tuple[str, ...]) -> FakeResponse:
+    if request.full_url.endswith("/v1/diagnostics"):
+        return FakeResponse(diagnostics_payload(profiles))
+    if request.full_url.endswith("/v1/profile-identities"):
+        return FakeResponse(identities_payload(profiles))
+    raise AssertionError(f"unexpected URL: {request.full_url}")
+
+
 def fake_opener(request, *, timeout):
     assert timeout == 10.0
     if request.full_url.endswith("/health"):
         assert "Authorization" not in request.headers
         return FakeResponse({"status": "ok", "api_version": "asr-service/1"})
-    assert request.full_url.endswith("/v1/capabilities")
     assert request.headers["Authorization"] == "Bearer shared-token"
-    return FakeResponse(
-        {
-            "api_version": "asr-service/1",
-            "service_profiles": ["funasr-sensevoice-small-v1"],
-            "max_upload_part_bytes": 8388608,
-            "max_input_bytes": 2147483648,
-        }
-    )
+    profiles = (MODULE.SENSEVOICE_PROFILE,)
+    if request.full_url.endswith("/v1/capabilities"):
+        return FakeResponse(
+            {
+                "api_version": "asr-service/1",
+                "service_profiles": list(profiles),
+                "max_upload_part_bytes": 8388608,
+                "max_input_bytes": 2147483648,
+            }
+        )
+    return contract_response(request, profiles)
 
 
 def test_ubuntu_verifier_keeps_backend_disabled_and_validates_cross_node(tmp_path: Path):
@@ -79,6 +125,8 @@ def test_ubuntu_verifier_keeps_backend_disabled_and_validates_cross_node(tmp_pat
         "service_profiles": ["funasr-sensevoice-small-v1"],
         "ubuntu_asr_enabled": False,
         "token_match": True,
+        "diagnostics_verified": True,
+        "profile_identities_verified": True,
     }
 
 
@@ -86,19 +134,22 @@ def test_ubuntu_verifier_accepts_exact_faster_whisper_then_sensevoice_contract(
     tmp_path: Path,
 ):
     def dual_profile_opener(request, *, timeout):
+        profiles = (
+            MODULE.FASTER_WHISPER_PROFILE,
+            MODULE.SENSEVOICE_PROFILE,
+        )
         if request.full_url.endswith("/health"):
             return FakeResponse({"status": "ok", "api_version": "asr-service/1"})
-        return FakeResponse(
-            {
-                "api_version": "asr-service/1",
-                "service_profiles": [
-                    "faster-whisper-large-v3-turbo-v1",
-                    "funasr-sensevoice-small-v1",
-                ],
-                "max_upload_part_bytes": 8388608,
-                "max_input_bytes": 2147483648,
-            }
-        )
+        if request.full_url.endswith("/v1/capabilities"):
+            return FakeResponse(
+                {
+                    "api_version": "asr-service/1",
+                    "service_profiles": list(profiles),
+                    "max_upload_part_bytes": 8388608,
+                    "max_input_bytes": 2147483648,
+                }
+            )
+        return contract_response(request, profiles)
 
     env_file = tmp_path / "prod.env"
     env_file.write_text(valid_env(), encoding="utf-8")
@@ -118,20 +169,23 @@ def test_ubuntu_verifier_accepts_exact_faster_whisper_then_sensevoice_contract(
 
 def test_ubuntu_verifier_accepts_exact_whisperx_admission_contract(tmp_path: Path):
     def whisperx_profile_opener(request, *, timeout):
+        profiles = (
+            MODULE.FASTER_WHISPER_PROFILE,
+            MODULE.SENSEVOICE_PROFILE,
+            MODULE.WHISPERX_PROFILE,
+        )
         if request.full_url.endswith("/health"):
             return FakeResponse({"status": "ok", "api_version": "asr-service/1"})
-        return FakeResponse(
-            {
-                "api_version": "asr-service/1",
-                "service_profiles": [
-                    "faster-whisper-large-v3-turbo-v1",
-                    "funasr-sensevoice-small-v1",
-                    "whisperx-large-v3-zh-align-v2",
-                ],
-                "max_upload_part_bytes": 8388608,
-                "max_input_bytes": 2147483648,
-            }
-        )
+        if request.full_url.endswith("/v1/capabilities"):
+            return FakeResponse(
+                {
+                    "api_version": "asr-service/1",
+                    "service_profiles": list(profiles),
+                    "max_upload_part_bytes": 8388608,
+                    "max_input_bytes": 2147483648,
+                }
+            )
+        return contract_response(request, profiles)
 
     env_file = tmp_path / "prod.env"
     env_file.write_text(valid_env(), encoding="utf-8")
@@ -512,6 +566,7 @@ def test_asr_startup_diagnostic_is_manual_read_only_and_sanitized():
     assert "Get-NetTCPConnection -LocalPort 8200 -State Listen" in script
     assert '"http://127.0.0.1:8200/health"' in script
     assert '"http://127.0.0.1:8200/v1/diagnostics"' in script
+    assert '"http://127.0.0.1:8200/v1/profile-identities"' in script
     assert "ConvertTo-SafeDiagnosticLine" in script
     assert "IsNullOrWhiteSpace" in script
     assert "sanitized_log_lines" in script
@@ -525,6 +580,8 @@ def test_asr_startup_diagnostic_is_manual_read_only_and_sanitized():
     assert "scheduler_oom_latched" in script
     assert "scheduler_consecutive_failures" in script
     assert "scheduler_queue_depth" in script
+    assert "profile_identities_outcome" in script
+    assert "profile_identities_schema_version" in script
     assert '"scheduler_paused"' in script
     assert "task_root_binding_missing" in script
     assert "production_services_modified = $false" in script

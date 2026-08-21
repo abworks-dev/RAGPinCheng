@@ -16,6 +16,8 @@ export type PdfPreviewReturnTarget = "managed-content-detail" | "managed-content
 export interface PdfPreviewState {
   /** The parent_id of the source to preview, or null if closed. */
   parentId: string | null;
+  /** The managed version_id used by renderers that do not depend on an index parent. */
+  versionId: string | null;
   /** The document title shown in the panel header. */
   title: string;
   /** The document type for choosing the correct renderer. */
@@ -31,6 +33,7 @@ export interface PdfPreviewState {
 interface PdfPreviewContextValue {
   state: PdfPreviewState;
   open: (parentId: string, title: string, docType?: string, pageNumber?: number, location?: PdfPreviewLocation, returnTo?: PdfPreviewReturnTarget | null) => void;
+  openXMind: (versionId: string, title: string, returnTo?: PdfPreviewReturnTarget | null) => void;
   close: () => void;
   setPage: (page: number) => void;
 }
@@ -40,6 +43,7 @@ const PdfPreviewContext = createContext<PdfPreviewContextValue | null>(null);
 export function PdfPreviewProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<PdfPreviewState>({
     parentId: null,
+    versionId: null,
     title: "",
     docType: "pdf",
     pageNumber: 1,
@@ -50,13 +54,21 @@ export function PdfPreviewProvider({ children }: { children: React.ReactNode }) 
   const open = useCallback(
     (parentId: string, title: string, docType = "pdf", pageNumber = 1, location: PdfPreviewLocation = {}, returnTo: PdfPreviewReturnTarget | null = null) => {
       window.dispatchEvent(new CustomEvent("resource-preview-open", { detail: { kind: "document" } }));
-      setState({ parentId, title, docType, pageNumber, location, returnTo });
+      setState({ parentId, versionId: null, title, docType, pageNumber, location, returnTo });
+    },
+    [],
+  );
+
+  const openXMind = useCallback(
+    (versionId: string, title: string, returnTo: PdfPreviewReturnTarget | null = null) => {
+      window.dispatchEvent(new CustomEvent("resource-preview-open", { detail: { kind: "document" } }));
+      setState({ parentId: null, versionId, title, docType: "xmind", pageNumber: 1, location: {}, returnTo });
     },
     [],
   );
 
   const close = useCallback(() => {
-    setState({ parentId: null, title: "", docType: "pdf", pageNumber: 1, location: {}, returnTo: null });
+    setState({ parentId: null, versionId: null, title: "", docType: "pdf", pageNumber: 1, location: {}, returnTo: null });
   }, []);
 
   const setPage = useCallback((page: number) => {
@@ -64,8 +76,8 @@ export function PdfPreviewProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   const value = useMemo<PdfPreviewContextValue>(
-    () => ({ state, open, close, setPage }),
-    [state, open, close, setPage],
+    () => ({ state, open, openXMind, close, setPage }),
+    [state, open, openXMind, close, setPage],
   );
 
   return (
