@@ -5735,6 +5735,45 @@ export function AdminManagedContentPage() {
                 <p className="mr-auto text-ui-sm">
                   已选择 <strong>{trashSelected.length}</strong> 份资料
                 </p>
+                <Button
+                  size="sm"
+                  className="max-sm:h-control-md"
+                  disabled={Boolean(busyAction) || !can("trash.restore")}
+                  title={!can("trash.restore") ? "当前账号没有恢复资料权限" : undefined}
+                  onClick={() => {
+                    setTrashBulkTarget("original");
+                    setTrashPreflight([]);
+                    setTrashPreflightOpen(true);
+                  }}
+                >
+                  <ArchiveRestore className="size-4" />
+                  恢复所选（{trashSelected.length}）
+                </Button>
+                {can("trash.purge") && (
+                  <ActionsMenu
+                    disabled={Boolean(busyAction)}
+                    triggerLabel="回收站处置菜单"
+                    menuLabel="回收站批量操作"
+                    options={[
+                      {
+                        key: "trash-purge-selected",
+                        label: `永久删除所选（${trashSelected.length}）`,
+                        icon: <Trash2 className="size-4" />,
+                        destructive: true,
+                        onSelect: () => void openTrashPurge(),
+                      },
+                    ]}
+                  />
+                )}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="max-sm:h-control-md"
+                  disabled={Boolean(busyAction)}
+                  onClick={() => setTrashSelected([])}
+                >
+                  取消选择
+                </Button>
               </div>
             )}
           </div>
