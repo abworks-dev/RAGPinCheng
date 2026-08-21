@@ -628,10 +628,25 @@ jobs:
                   "WHERE g.is_system=1 AND g.is_active=1 "
                   "ORDER BY g.group_key,i.permission"
               ).fetchall()
-          assert version == CURRENT_SCHEMA_VERSION
-          assert [tuple(row) for row in categories] == expected_categories
-          assert active_jobs == 0
-          assert active_reclassifications == 0
+          assert version == CURRENT_SCHEMA_VERSION, {
+              "check": "schema_version",
+              "expected": CURRENT_SCHEMA_VERSION,
+              "actual": version,
+          }
+          actual_categories = [tuple(row) for row in categories]
+          assert actual_categories == expected_categories, {
+              "check": "root_categories",
+              "expected": expected_categories,
+              "actual": actual_categories,
+          }
+          assert active_jobs == 0, {
+              "check": "active_index_jobs",
+              "actual": active_jobs,
+          }
+          assert active_reclassifications == 0, {
+              "check": "active_reclassifications",
+              "actual": active_reclassifications,
+          }
           actual_groups = {}
           for group_key, display_name, permission in permission_groups:
               actual_groups.setdefault((group_key, display_name), set())
@@ -643,7 +658,11 @@ jobs:
               in SYSTEM_CONTENT_PERMISSION_GROUPS.items()
           }
           unexpected_group_names = actual_groups.keys() ^ expected_groups.keys()
-          assert not unexpected_group_names, sorted(unexpected_group_names)
+          assert not unexpected_group_names, {
+              "check": "permission_group_names",
+              "unexpected": sorted(unexpected_group_names),
+              "actual": sorted(actual_groups),
+          }
           retained_legacy_permissions = {}
           for group, expected_permissions in expected_groups.items():
               actual_permissions = actual_groups[group]
