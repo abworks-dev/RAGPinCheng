@@ -130,6 +130,9 @@ def update_source(
     _admin: CurrentUser = Depends(require_csrf_admin),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ExternalMediaSourceDTO:
+    linked = conn.execute("SELECT id FROM category_nodes WHERE external_source_id=?", (source_id,)).fetchone()
+    if linked is not None and body.target_category_id != linked["id"]:
+        raise HTTPException(status_code=409, detail="共享文件夹的目标分类不能单独修改")
     _validate_source_targets(conn, body.target_category_id, body.default_scheme_id)
     now = int(time.time())
     changed = conn.execute(

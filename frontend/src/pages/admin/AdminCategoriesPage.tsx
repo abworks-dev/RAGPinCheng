@@ -21,6 +21,7 @@ import { adminContentApi } from "../../api/admin/content";
 import { adminMediaApi } from "../../api/admin/media";
 import { CategoryDeleteDialog } from "../../components/admin/CategoryDeleteDialog";
 import { CategoryTreePicker } from "../../components/admin/CategoryTreePicker";
+import { ExternalMediaSourcesPanel } from "../../components/admin/ExternalMediaSourcesPanel";
 import { useAuth } from "../../context/AuthContext";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
@@ -133,6 +134,7 @@ export function AdminCategoriesPage() {
   const [deleteTarget, setDeleteTarget] = useState<ManagedCategory | null>(null);
   const nodeRefs = useRef(new Map<string, HTMLDivElement>());
   const isAdmin = state.status === "authed" && state.user.role === "admin";
+  const canManageExternalSources = isAdmin && typeof adminMediaApi.externalRoots === "function";
   const canForceDelete = isAdmin || (state.status === "authed" && state.user.content_permissions?.includes("category.force_delete"));
 
   const selectedCategory = categories.find((category) => category.id === selectedId) || null;
@@ -504,7 +506,7 @@ export function AdminCategoriesPage() {
           <IconButton label={refreshing ? "刷新中" : "刷新"} onClick={requestRefresh} disabled={loading || refreshing}>
             <RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />
           </IconButton>
-          <Button variant="outline" onClick={() => void openSharedFolder()} className="flex-1 sm:flex-none"><Network className="size-4" />新建共享文件夹</Button>
+          {isAdmin && <Button variant="outline" onClick={() => void openSharedFolder()} className="flex-1 sm:flex-none"><Network className="size-4" />新建共享文件夹</Button>}
           <Button onClick={() => requestCreate()} className="flex-1 sm:flex-none"><Plus className="size-4" />新增分类</Button>
         </div>
       </header>
@@ -555,6 +557,8 @@ export function AdminCategoriesPage() {
           )}
         </section>
       )}
+
+      {canManageExternalSources && !error && <ExternalMediaSourcesPanel categories={categories} schemes={sharedSchemes} onOpenWorkbench={() => undefined} onMediaChanged={async () => { await load(true); }} />}
 
       <Sheet open={sharedOpen} onOpenChange={(open) => { if (!sharedSaving) setSharedOpen(open); }}>
         <SheetContent className="max-w-xl overflow-y-auto">

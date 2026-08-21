@@ -972,11 +972,12 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
                 const availableActions = new Set(asset.available_actions || []);
                 const disabledActions = asset.disabled_actions || {};
                 const hasServerCapabilities = Array.isArray(asset.available_actions);
+                const isExternal = asset.storage_kind === "external";
                 const canCancel = hasServerCapabilities ? availableActions.has("cancel_transcription") : job?.status === "pending" || job?.status === "running";
                 const canRetry = hasServerCapabilities ? availableActions.has("retry_transcription") : (job?.status === "failed" || job?.status === "cancelled") && job.failure?.retryable !== false;
-                const canDelete = hasServerCapabilities ? availableActions.has("delete_failed") : asset.status === "failed" && !job;
-                const canReplace = hasServerCapabilities ? availableActions.has("replace_media") : asset.publication_status === "published";
-                const canArchive = hasServerCapabilities ? availableActions.has("archive_media") : asset.publication_status === "published";
+                const canDelete = !isExternal && (hasServerCapabilities ? availableActions.has("delete_failed") : asset.status === "failed" && !job);
+                const canReplace = !isExternal && (hasServerCapabilities ? availableActions.has("replace_media") : asset.publication_status === "published");
+                const canArchive = !isExternal && (hasServerCapabilities ? availableActions.has("archive_media") : asset.publication_status === "published");
                 const showCancel = canCancel || job?.status === "pending" || job?.status === "running";
                 const showRetry = canRetry || job?.status === "failed" || job?.status === "cancelled";
                 const showPublishedActions = canReplace || canArchive || asset.publication_status === "published";
@@ -986,7 +987,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
                       <p className="truncate font-medium" title={asset.title}>{asset.title}</p>
                       <p className="mt-1 truncate font-mono text-ui-xs text-muted-foreground" title={asset.original_filename}>{asset.original_filename}</p>
                       <p className="mt-1 truncate text-ui-xs text-muted-foreground" title={categories.find((category) => category.id === asset.category_id)?.full_path}>{categories.find((category) => category.id === asset.category_id)?.full_path || "尚未选择归档目录"}</p>
-                      <div className="mt-2 flex flex-wrap gap-2 text-ui-xs text-muted-foreground"><span>{formatBytes(asset.file_size)}</span>{sameNameCount > 1 && <Badge variant="secondary">同名记录 {sameNameCount} 条</Badge>}{asset.replacement_source_media_id && <Badge variant={asset.replacement_status === "activated" ? "success" : asset.replacement_status === "failed" ? "destructive" : "warning"}>{asset.replacement_status === "activated" ? "替换已生效" : asset.replacement_status === "failed" ? "替换候选失败" : "替换候选"}</Badge>}{asset.replacement_candidate_media_id && asset.replacement_status === "pending" && <Badge variant="warning">替换处理中</Badge>}</div>
+                      <div className="mt-2 flex flex-wrap gap-2 text-ui-xs text-muted-foreground"><span>{formatBytes(asset.file_size)}</span>{isExternal && <Badge variant="secondary">共享目录视频 · 只读</Badge>}{sameNameCount > 1 && <Badge variant="secondary">同名记录 {sameNameCount} 条</Badge>}{asset.replacement_source_media_id && <Badge variant={asset.replacement_status === "activated" ? "success" : asset.replacement_status === "failed" ? "destructive" : "warning"}>{asset.replacement_status === "activated" ? "替换已生效" : asset.replacement_status === "failed" ? "替换候选失败" : "替换候选"}</Badge>}{asset.replacement_candidate_media_id && asset.replacement_status === "pending" && <Badge variant="warning">替换处理中</Badge>}</div>
                     </div>
                     <div className="min-w-0 space-y-2">
                       <div className="flex flex-wrap items-center gap-2"><StatusBadge value={job?.status || asset.status} meta={job ? jobStatusMeta : mediaStatusMeta} /></div>

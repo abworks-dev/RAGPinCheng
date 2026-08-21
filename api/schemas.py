@@ -421,8 +421,6 @@ class CreateManagedCategoryRequest(BaseModel):
     sort_order: int = Field(default=0, ge=0, le=999_999)
     target_position: int | None = Field(default=None, ge=1, le=99_999)
     confirm_number_shift: bool = False
-    category_kind: Literal["folder", "shared_folder"] = "folder"
-    external_source_id: str | None = None
 
 
 class CreateSharedFolderRequest(BaseModel):

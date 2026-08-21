@@ -428,7 +428,7 @@ def list_categories(conn: sqlite3.Connection, *, include_inactive: bool = False)
 
 def _category_delete_preview(conn: sqlite3.Connection, category_id: str) -> dict[str, object]:
     category = conn.execute(
-        """SELECT id,parent_id,display_name,version FROM category_nodes
+        """SELECT id,parent_id,display_name,version,category_kind FROM category_nodes
            WHERE id=? AND deleted_at IS NULL""",
         (category_id,),
     ).fetchone()
@@ -486,7 +486,8 @@ def _category_delete_preview(conn: sqlite3.Connection, category_id: str) -> dict
         "active_upload_count": active_upload_count,
         "active_reclassification_count": active_reclassification_count,
         "renumbered_sibling_count": renumber_count,
-        "can_delete": blockers == 0,
+        "can_delete": blockers == 0 and category["category_kind"] != "shared_folder",
+        "category_kind": str(category["category_kind"] or "folder"),
         "subtree_ids": subtree_ids,
     }
 
@@ -550,7 +551,7 @@ def _category_force_delete_preview(conn: sqlite3.Connection, category_id: str) -
         "active_content_count": sum(1 for row in documents if row["archived_at"] is None),
         "upload_batch_count": upload_batch_count,
         "media_transcript_count": media_count,
-        "can_force_delete": not protected_category and media_count == 0,
+        "can_force_delete": not protected_category and media_count == 0 and base.get("category_kind") != "shared_folder",
         "protected_category": protected_category,
     })
     return base
@@ -580,6 +581,8 @@ def force_delete_category(
         if typed_path != str(preview["full_path"]):
             raise ValueError("category_force_delete_path_confirmation_required")
         if not bool(preview["can_force_delete"]):
+            if preview.get("category_kind") == "shared_folder":
+                raise ValueError("shared_folder_category_delete_blocked")
             if preview["protected_category"]:
                 raise ValueError("category_force_delete_protected")
             raise ValueError("category_force_delete_media_blocked")
@@ -960,7 +963,7 @@ def update_category(
         conn.execute("BEGIN IMMEDIATE")
     try:
         category = conn.execute(
-            "SELECT parent_id,chat_search_enabled,chat_filter_selectable "
+            "SELECT parent_id,chat_search_enabled,chat_filter_selectable,category_kind,external_source_id "
             "FROM category_nodes WHERE id=?",
             (category_id,),
         ).fetchone()
@@ -1027,6 +1030,11 @@ def update_category(
             if conn.execute("SELECT 1 FROM category_nodes WHERE id=?", (category_id,)).fetchone() is None:
                 raise ValueError("category_not_found")
             raise ValueError("category_version_conflict")
+        if category["category_kind"] == "shared_folder" and category["external_source_id"]:
+            conn.execute(
+                "UPDATE external_media_sources SET enabled=? WHERE id=?",
+                (int(is_active), category["external_source_id"]),
+            )
         audit_event(conn, "category.updated", actor_user_id=actor_user_id, category_id=category_id)
         conn.commit()
     except Exception:

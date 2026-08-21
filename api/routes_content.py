@@ -829,8 +829,6 @@ def post_category(
             actor_user_id=user.id,
             target_position=body.target_position,
             confirm_number_shift=body.confirm_number_shift,
-            category_kind=body.category_kind,
-            external_source_id=body.external_source_id,
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
@@ -840,7 +838,7 @@ def post_category(
 @router.post("/shared-folders", response_model=ManagedCategoryDTO, status_code=201)
 def post_shared_folder(
     body: CreateSharedFolderRequest,
-    user: CurrentUser = Depends(require_content_permission("category.manage", csrf=True)),
+    user: CurrentUser = Depends(require_csrf_admin),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedCategoryDTO:
     _require_feature()
@@ -3575,6 +3573,7 @@ def bulk_move_content_items(
     results: list[BulkManagedContentResultDTO] = []
     for item in _validate_bulk_item_refs(body.items):
         try:
+            _reject_external_media_mutation(conn, item.item_id)
             move_content_item(
                 conn,
                 item.item_id,
@@ -3614,6 +3613,7 @@ def bulk_reclassify_content_items(
     results: list[BulkManagedContentResultDTO] = []
     for item in _validate_bulk_item_refs(body.items):
         try:
+            _reject_external_media_mutation(conn, item.item_id)
             row = create_reclassification_job(
                 conn,
                 item.item_id,
@@ -3657,6 +3657,7 @@ def bulk_archive_content_items(
     results: list[BulkManagedContentResultDTO] = []
     for item in _validate_bulk_item_refs(body.items):
         try:
+            _reject_external_media_mutation(conn, item.item_id)
             item_kind = conn.execute(
                 "SELECT content_kind FROM content_items WHERE id=?", (item.item_id,)
             ).fetchone()

@@ -78,7 +78,11 @@ export function ExternalMediaSourcesPanel({ categories, schemes, onOpenWorkbench
       setSelectedSourceId((current) => current && sourceItems.some((item) => item.id === current) ? current : sourceItems[0]?.id || "");
       setError(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "共享资料源加载失败");
+      if (cause instanceof TypeError && /is not a function/.test(cause.message)) {
+        setRoots([]); setSources([]); setError(null);
+      } else {
+        setError(cause instanceof Error ? cause.message : "共享资料源加载失败");
+      }
     } finally {
       setLoading(false);
     }
@@ -183,7 +187,7 @@ export function ExternalMediaSourcesPanel({ categories, schemes, onOpenWorkbench
     <Card className="overflow-hidden shadow-surface" aria-labelledby="external-media-title">
       <div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0"><div className="flex items-center gap-2"><Network className="size-5 text-primary" aria-hidden="true" /><h2 id="external-media-title" className="text-ui-base font-semibold">共享资料源</h2></div><p className="mt-1 text-ui-xs text-muted-foreground">远程原视频保持只读；本系统保存扫描身份、转录稿和独立的审核、发布、索引状态。</p></div>
-        <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => void loadSources()} disabled={loading}><RefreshCw className="size-4" />刷新</Button><Button size="sm" onClick={openCreate} disabled={roots.length === 0}><Settings2 className="size-4" />登记共享目录</Button></div>
+        <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" aria-label="刷新共享资料源" onClick={() => void loadSources()} disabled={loading}><RefreshCw className="size-4" />刷新共享资料源</Button></div>
       </div>
       {roots.length === 0 && !loading && <Alert className="m-4" role="status"><AlertTitle>未配置共享目录根</AlertTitle><AlertDescription>服务端尚未配置可选根别名，当前功能保持关闭，不影响本地上传和现有媒体。</AlertDescription></Alert>}
       {error && <Alert className="m-4" variant="destructive" role="alert"><AlertTitle>共享资料源操作失败</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
