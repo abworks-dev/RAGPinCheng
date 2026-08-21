@@ -1,9 +1,11 @@
-import { Captions, FileCode2, FileSpreadsheet, FileText, FileType2, Film, Folder, Network, Presentation } from "lucide-react";
+import { Captions, FileCode2, FileSpreadsheet, FileText, FileType2, Film, Folder, FolderSync, Network, Presentation } from "lucide-react";
 
-export function ManagedItemType({ docType, folder = false, compact = false }: { docType?: string | null; folder?: boolean; compact?: boolean }) {
+export function ManagedItemType({ docType, folder = false, sharedFolder = false, compact = false }: { docType?: string | null; folder?: boolean; sharedFolder?: boolean; compact?: boolean }) {
   const widthClass = compact ? "w-16" : "w-20";
   if (folder) {
-    return <div className={`flex ${widthClass} flex-col items-center gap-1 text-center text-ui-xs font-medium text-muted-foreground`}><Folder className="size-6 text-primary" aria-hidden="true" /><span>文件夹</span></div>;
+    const Icon = sharedFolder ? FolderSync : Folder;
+    const label = sharedFolder ? "共享文件夹" : "文件夹";
+    return <div className={`flex ${widthClass} flex-col items-center gap-1 text-center text-ui-xs font-medium text-muted-foreground`} title={label}><Icon className={`size-6 ${sharedFolder ? "text-info" : "text-primary"}`} aria-hidden="true" /><span>{label}</span></div>;
   }
 
   const definition = ({

@@ -7007,7 +7007,7 @@ export function AdminManagedContentPage() {
                               />
                             </td>
                             <td className="px-1 py-3">
-                              <ManagedItemType folder compact />
+                              <ManagedItemType folder sharedFolder={folder.category_kind === "shared_folder"} compact />
                             </td>
                             <td className="max-w-xs px-1.5 py-3">
                               <button

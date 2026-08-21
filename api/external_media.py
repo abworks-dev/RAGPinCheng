@@ -18,6 +18,7 @@ from .media_storage import (
     normalize_external_relative_path,
     resolve_beneath,
 )
+from .media_transcript_catalog import ensure_media_transcript_catalog_item
 
 VIDEO_EXTENSIONS = frozenset({".mp4"})
 
@@ -234,6 +235,7 @@ def reconcile_source(
             seen_paths.add(item.relative_path)
             existing = current_by_path.get(item.relative_path)
             if existing is not None and existing["fingerprint"] == item.fingerprint:
+                ensure_media_transcript_catalog_item(conn, media_id=str(existing["media_id"]), now=timestamp)
                 conn.execute(
                     """UPDATE external_media_entries SET last_seen_at=?,updated_at=?,missing_since=NULL
                        WHERE id=?""",
@@ -304,6 +306,7 @@ def reconcile_source(
                     timestamp,
                 ),
             )
+            ensure_media_transcript_catalog_item(conn, media_id=media_id, now=timestamp)
             if existing is not None:
                 _register_replacement_if_published(
                     conn,
