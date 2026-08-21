@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import sqlite3
 import tempfile
 import httpx
@@ -109,8 +110,8 @@ def _build_legacy_doc(source_path: Path, doc_type: str, on_status: StatusFn, *, 
         doc = _build_docx_doc(converted, on_status, parsed_dir=parsed_dir)
     elif doc_type == "xls":
         doc = _build_xlsx_doc(converted, on_status, parsed_dir=parsed_dir, write_preview=write_preview)
-        preview = converted.with_suffix(".preview.xlsx")
-        if write_preview and preview.is_file(): preview.replace(source_path.with_suffix(".preview.xlsx"))
+        if write_preview:
+            shutil.copyfile(converted, source_path.with_suffix(".preview.xlsx"))
     else:
         doc = _build_pptx_doc(converted, on_status, parsed_dir=parsed_dir, write_preview=write_preview)
         preview = converted.with_suffix(".preview.pdf")
@@ -348,11 +349,7 @@ def _build_xlsx_doc(
         finally:
             # Clean up the recalculated temp file
             if recalc_path and recalc_path.exists():
-                if write_preview:
-                    recalc_path.rename(source_path.with_suffix(".preview.xlsx"))
-                    logger.info("saved preview XLSX: %s", source_path.with_suffix(".preview.xlsx").name)
-                else:
-                    recalc_path.unlink()
+                recalc_path.unlink()
 
         md_path.write_text(markdown, encoding="utf-8")
 

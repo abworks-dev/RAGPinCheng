@@ -23,6 +23,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "docx-preview": "^0.3.0",
+    "exceljs": "^4.4.0",
     "katex": "^0.16.47",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
@@ -35,8 +36,8 @@
     "remark-math": "^6.0.0",
     "simple-mind-map": "0.14.0-fix.3",
     "sonner": "^2.0.7",
-    "tailwind-merge": "^3.6.0",
-    "xlsx": "^0.18.5"
+    "ssf": "^0.11.2",
+    "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",

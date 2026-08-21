@@ -4134,7 +4134,7 @@ export function AdminManagedContentPage() {
     );
     const targets = trashItems.filter(
       (item) =>
-        trashSelected.includes(item.version_id) &&
+        trashSelected.includes(item.item_id) &&
         readyIds.has(item.version_id),
     );
     if (targets.length === 0) return;
@@ -4150,7 +4150,7 @@ export function AdminManagedContentPage() {
       const failedIds = result.results
         .filter((entry) => entry.status === "failed")
         .map((entry) => entry.version_id);
-      setTrashSelected(failedIds);
+      setTrashSelected(trashItems.filter((item) => failedIds.includes(item.version_id)).map((item) => item.item_id));
       setTrashPreflightOpen(false);
       setTrashPreflight([]);
       setTrashBulkTarget("original");
@@ -4173,7 +4173,7 @@ export function AdminManagedContentPage() {
 
   const preflightBulkRestore = async () => {
     const targets = trashItems.filter((item) =>
-      trashSelected.includes(item.version_id),
+      trashSelected.includes(item.item_id),
     );
     if (targets.length === 0) return;
     setBusyAction("restore-preflight");
@@ -4196,7 +4196,7 @@ export function AdminManagedContentPage() {
 
   const openTrashPurge = async () => {
     const targets = trashItems.filter((item) =>
-      trashSelected.includes(item.version_id),
+      trashSelected.includes(item.item_id),
     );
     if (targets.length === 0) return;
     setBusyAction("purge-preflight");
@@ -5491,12 +5491,12 @@ export function AdminManagedContentPage() {
     const trashPageCount = Math.max(1, Math.ceil(trashTotal / PAGE_SIZE));
     const trashAllSelected =
       trashItems.length > 0 &&
-      trashItems.every((item) => trashSelected.includes(item.version_id));
+      trashItems.every((item) => trashSelected.includes(item.item_id));
     const toggleAllTrash = () =>
       setTrashSelected(
         trashAllSelected
           ? []
-          : trashItems.map((item) => item.version_id),
+          : trashItems.map((item) => item.item_id),
       );
     const retentionText = (item: ManagedContentItem) =>
       item.retention_status === "overdue"
@@ -5823,7 +5823,7 @@ export function AdminManagedContentPage() {
                         item.source_rel_path !== item.original_filename
                           ? item.source_rel_path
                           : null;
-                      const checked = trashSelected.includes(item.version_id);
+                      const checked = trashSelected.includes(item.item_id);
                       return (
                         <tr
                           key={item.item_id}
@@ -5836,11 +5836,11 @@ export function AdminManagedContentPage() {
                                 checked={checked}
                                 onChange={() =>
                                   setTrashSelected((current) =>
-                                    current.includes(item.version_id)
+                                    current.includes(item.item_id)
                                       ? current.filter(
-                                          (id) => id !== item.version_id,
+                                          (id) => id !== item.item_id,
                                         )
-                                      : [...current, item.version_id],
+                                      : [...current, item.item_id],
                                   )
                                 }
                               />
@@ -5919,7 +5919,7 @@ export function AdminManagedContentPage() {
                     item.source_rel_path !== item.original_filename
                       ? item.source_rel_path
                       : null;
-                  const checked = trashSelected.includes(item.version_id);
+                  const checked = trashSelected.includes(item.item_id);
                   return (
                     <li
                       key={item.item_id}
@@ -5933,11 +5933,11 @@ export function AdminManagedContentPage() {
                             checked={checked}
                             onChange={() =>
                               setTrashSelected((current) =>
-                                current.includes(item.version_id)
+                                current.includes(item.item_id)
                                   ? current.filter(
-                                      (id) => id !== item.version_id,
+                                      (id) => id !== item.item_id,
                                     )
-                                  : [...current, item.version_id],
+                                    : [...current, item.item_id],
                               )
                             }
                           />
