@@ -125,7 +125,9 @@ def build_transcription_service() -> TranscriptionApplicationService:
         try:
             return resolve_media_path(conn, media_id).path
         except MediaStorageError as exc:
-            raise ContractValidationError("media_input_unavailable", "media_id") from exc
+            # Preserve the storage reason so external-source enqueue failures are
+            # actionable (for example, a stale SMB identity versus an unmounted root).
+            raise ContractValidationError(str(exc), "media_id") from exc
         finally:
             conn.close()
 
