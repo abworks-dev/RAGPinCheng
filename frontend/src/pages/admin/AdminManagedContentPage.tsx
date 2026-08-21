@@ -55,7 +55,6 @@ import { CategoryCascader } from "../../components/admin/CategoryCascader";
 import { Button, buttonVariants } from "../../components/ui/button";
 import {
   Card,
-  CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
@@ -1017,7 +1016,7 @@ function UploadTasksPanel({
         </div>
       )}
       <Card className="overflow-hidden shadow-surface">
-        <div className="grid gap-3 border-b border-border px-4 py-4 sm:px-5 lg:grid-cols-[minmax(13rem,1fr)_minmax(16rem,2fr)_auto] lg:items-end">
+        <div className="grid gap-3 border-b border-border px-4 py-4 sm:px-5 xl:grid-cols-[minmax(13rem,1fr)_24rem_auto] xl:items-end" data-testid="upload-task-toolbar">
           <div>
             <h2
               id="upload-tasks-title"
@@ -1025,9 +1024,7 @@ function UploadTasksPanel({
             >
               上传任务
             </h2>
-            <p className="mt-1 text-ui-xs text-muted-foreground">
-              查看文件和文件夹上传进度、结果与失败明细。
-            </p>
+            <p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-ui-xs text-muted-foreground"><span>共 {total} 个任务</span><span role="status" aria-live="polite">· {selected.length > 0 ? <>已选择 <strong>{selected.length}</strong> 个，单次最多 20 个</> : <>未选择任务，单次最多 20 个</>}</span></p>
           </div>
           <form
             className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end"
@@ -1060,7 +1057,7 @@ function UploadTasksPanel({
               搜索
             </Button>
           </form>
-          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+          <div className="flex shrink-0 flex-wrap items-center gap-2 xl:justify-end">
             <Button
               size="sm"
               variant="outline"
@@ -1102,20 +1099,6 @@ function UploadTasksPanel({
                 ]}
               />
             )}
-            <span
-              className="text-ui-xs text-muted-foreground"
-              role="status"
-              aria-live="polite"
-            >
-              共 {total} 个任务 ·{" "}
-              {selected.length > 0 ? (
-                <>
-                  已选择 <strong>{selected.length}</strong> 个
-                </>
-              ) : (
-                <>未选择任务</>
-              )}
-            </span>
           </div>
         </div>
         {error && (
@@ -6523,29 +6506,11 @@ export function AdminManagedContentPage() {
         aria-label="资料状态概览"
       >
         {[
-          [
-            "全部资料",
-            Object.values(counts).reduce((sum, value) => sum + value, 0),
-          ],
-          ["待确认", counts.awaiting_review || 0],
-          ["已确认", counts.approved || 0],
-          ["已发布", counts.published || 0],
-        ].map(([label, value]) => (
-          <Card key={label} className="overflow-hidden shadow-surface">
-            <CardContent className="relative p-4 pt-4">
-              <span
-                className="absolute inset-x-0 top-0 h-1 bg-primary/80"
-                aria-hidden="true"
-              />
-              <p className="text-ui-xs font-medium text-muted-foreground">
-                {label}
-              </p>
-              <p className="mt-2 text-ui-xl font-semibold tabular-nums text-foreground">
-                {value}
-              </p>
-            </CardContent>
-          </Card>
-        ))}
+          { label: "全部资料", value: Object.values(counts).reduce((sum, value) => sum + value, 0), icon: <FileText className="size-4" /> },
+          { label: "待确认", value: counts.awaiting_review || 0, icon: <AlertTriangle className="size-4" />, tone: "warning" as const },
+          { label: "已确认", value: counts.approved || 0, icon: <CheckCircle2 className="size-4" />, tone: "success" as const },
+          { label: "已发布", value: counts.published || 0, icon: <Rocket className="size-4" />, tone: "success" as const },
+        ].map((summary) => <ManagedSummaryCard key={summary.label} label={summary.label} value={summary.value} icon={summary.icon} tone={summary.tone} />)}
       </section>
 
       {!enabled && !loading && (

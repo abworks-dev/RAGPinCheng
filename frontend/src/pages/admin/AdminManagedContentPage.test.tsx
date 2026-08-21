@@ -347,10 +347,11 @@ describe("AdminManagedContentPage", () => {
 
     expect(await screen.findByTestId(`managed-folder-row-${category.id}`)).toBeInTheDocument();
     const overview = screen.getByRole("region", { name: "资料状态概览" });
-    expect(within(overview).getByText("全部资料").parentElement).toHaveTextContent("8");
-    expect(within(overview).getByText("待确认").parentElement).toHaveTextContent("3");
-    expect(within(overview).getByText("已确认").parentElement).toHaveTextContent("1");
-    expect(within(overview).getByText("已发布").parentElement).toHaveTextContent("2");
+    expect(within(overview).getByText("全部资料").parentElement?.parentElement).toHaveTextContent("8");
+    expect(within(overview).getByText("待确认").parentElement?.parentElement).toHaveTextContent("3");
+    expect(within(overview).getByText("已确认").parentElement?.parentElement).toHaveTextContent("1");
+    expect(within(overview).getByText("已发布").parentElement?.parentElement).toHaveTextContent("2");
+    expect(overview.querySelectorAll("svg")).toHaveLength(4);
     expect(screen.queryByText("standard.pdf · v1")).not.toBeInTheDocument();
     expect(screen.getByText("共 0 份，第 1 / 1 页")).toBeInTheDocument();
   });
@@ -2269,6 +2270,10 @@ describe("AdminManagedContentPage", () => {
 
     render(<AdminManagedContentPage />);
     expect(await screen.findByText("03 公司内部标准 / 02 文件夹上传测试")).toBeInTheDocument();
+    const toolbar = screen.getByTestId("upload-task-toolbar");
+    expect(within(toolbar).getByText("共 1 个任务")).toBeInTheDocument();
+    expect(within(toolbar).getByRole("searchbox", { name: "搜索上传任务" })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("button", { name: "刷新任务" })).toBeInTheDocument();
     expect(screen.getByText("未完成 1 个")).toBeInTheDocument();
     const failedRow = screen.getByTestId("upload-task-row");
     const failedActions = within(failedRow).getAllByRole("button");
