@@ -4,6 +4,7 @@ from __future__ import annotations
 import sqlite3
 import time
 import uuid
+from fastapi import BackgroundTasks
 from pathlib import PurePosixPath
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -262,6 +263,7 @@ def enqueue_source_entries(
     *,
     entry_ids: tuple[str, ...] | None,
     created_by: int,
+    background_tasks: BackgroundTasks | None = None,
 ) -> ExternalMediaEnqueueResult:
     if not ASR_ENABLED or not ASR_SERVICE_TOKEN:
         raise ExternalMediaError("asr_unavailable")
@@ -281,14 +283,34 @@ def enqueue_source_entries(
         params.extend(entry_ids)
     rows = conn.execute(
         f"""SELECT e.id,e.media_id,e.fingerprint FROM external_media_entries e
+             JOIN media_assets m ON m.media_id=e.media_id
              WHERE e.source_id=? AND e.availability='available' {identity_filter}
+               AND m.status='uploaded'
                AND NOT EXISTS (SELECT 1 FROM transcription_jobs j WHERE j.media_id=e.media_id)
              ORDER BY e.discovered_at,e.id LIMIT 500""",
         params,
     ).fetchall()
+    # Reserve selected media before returning. Audio preparation is synchronous
+    # inside create_pending_job and must not block the HTTP request for a large
+    # SMB tree. The worker below creates each job and records any failure.
+    media_ids = [str(row["media_id"]) for row in rows]
+    if media_ids:
+        conn.executemany(
+            "UPDATE media_assets SET status='transcribing',error=NULL,updated_at=? WHERE media_id=? AND status='uploaded'",
+            [(int(time.time()), media_id) for media_id in media_ids],
+        )
+        conn.commit()
+
+    task_args = ([dict(row) for row in rows], str(source_id), str(source["default_scheme_id"]), str(profile_id), created_by)
+    if background_tasks is None:
+        process_external_enqueue_rows(*task_args)
+    else:
+        background_tasks.add_task(process_external_enqueue_rows, *task_args)
+    return ExternalMediaEnqueueResult(requested=len(rows), enqueued=len(rows), failed=0, failures={})
+
+
+def process_external_enqueue_rows(rows: list[dict[str, object]], source_id: str, scheme_id: str, profile_id: str, created_by: int) -> None:
     service = build_transcription_service()
-    failures: dict[str, str] = {}
-    enqueued = 0
     for row in rows:
         entry_id = str(row["id"])
         request_key = external_request_key(entry_id, str(row["fingerprint"]))
@@ -296,28 +318,26 @@ def enqueue_source_entries(
             job = service.create_pending_job(
                 media_id=str(row["media_id"]),
                 profile_id=profile_id,
-                scheme_id=str(source["default_scheme_id"]),
+                scheme_id=scheme_id,
                 request_idempotency_key=request_key,
                 created_by=created_by,
             )
-            conn.execute(
-                "UPDATE media_assets SET status='transcribing',error=NULL,updated_at=? WHERE media_id=?",
-                (int(time.time()), row["media_id"]),
-            )
-            conn.commit()
             enqueue_transcription(job.id)
-            enqueued += 1
         except (ContractValidationError, StoreConflictError, OSError) as exc:
-            failures[entry_id] = str(exc)
-    return ExternalMediaEnqueueResult(
-        requested=len(rows), enqueued=enqueued, failed=len(failures), failures=failures
-    )
+            failure = str(exc)
+            worker_conn = connect()
+            try:
+                worker_conn.execute("UPDATE media_assets SET status='failed',error=?,updated_at=? WHERE media_id=?", (failure, int(time.time()), row["media_id"]))
+                worker_conn.commit()
+            finally:
+                worker_conn.close()
 
 
 @router.post("/sources/{source_id}/enqueue", response_model=ExternalMediaEnqueueResult)
 def enqueue_entries(
     source_id: str,
     body: ExternalMediaEnqueueRequest,
+    background_tasks: BackgroundTasks,
     admin: CurrentUser = Depends(require_csrf_admin),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ExternalMediaEnqueueResult:
@@ -327,6 +347,7 @@ def enqueue_entries(
             source_id,
             entry_ids=None if body.entry_ids is None else tuple(body.entry_ids),
             created_by=admin.id,
+            background_tasks=background_tasks,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="外部媒体源不存在") from exc
