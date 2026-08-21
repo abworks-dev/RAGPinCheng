@@ -240,4 +240,17 @@ describe("SourceWorkspace video sources", () => {
     expect(bulkDownload).not.toHaveBeenCalled();
     expect(toastSuccess).toHaveBeenCalledWith("已开始下载 1 份来源文件", expect.any(Object));
   });
+
+  it("allows closing the dialog while a download is being prepared", async () => {
+    let resolveDownload!: (value: { blob: Blob; filename: string }) => void;
+    downloadFile.mockReturnValue(new Promise((resolve) => { resolveDownload = resolve; }));
+    const source = { ...spreadsheetSource, content_version_id: "version-slow" };
+    renderWorkspace(source);
+    fireEvent.click(screen.getByRole("button", { name: "下载来源文件" }));
+    fireEvent.click(screen.getByRole("button", { name: "下载" }));
+    expect(screen.getByRole("button", { name: "正在打包…" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    expect(screen.queryByRole("dialog", { name: "下载来源文件" })).not.toBeInTheDocument();
+    resolveDownload({ blob: new Blob(["file"]), filename: "source.xlsx" });
+  });
 });
