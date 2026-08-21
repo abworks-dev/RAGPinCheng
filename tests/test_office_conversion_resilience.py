@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import types
 import zipfile
+import asyncio
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -13,7 +14,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from services.libreoffice.app import _cleanup_dirs, _select_conversion_output, app
+from services.libreoffice.app import MAX_FILE_SIZE, _cleanup_dirs, _save_upload, _select_conversion_output, app
 from src.office_convert import (
     OfficeConversionError,
     _run_conversion_process,
@@ -227,3 +228,25 @@ def test_service_rejects_unapproved_target_format_before_conversion():
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Unsupported conversion: .pptx to docx"
+
+
+def test_service_upload_limit_matches_large_business_files_without_buffering(tmp_path: Path):
+    from starlette.datastructures import UploadFile
+
+    assert MAX_FILE_SIZE == 2000 * 1024 * 1024
+    source = UploadFile(filename="large.pptx", file=__import__("io").BytesIO(b"x" * (2 * 1024 * 1024)))
+    destination = tmp_path / "large.pptx"
+    with patch("services.libreoffice.app.MAX_FILE_SIZE", 3 * 1024 * 1024):
+        asyncio.run(_save_upload(source, destination))
+    assert destination.stat().st_size == 2 * 1024 * 1024
+
+
+def test_service_upload_limit_cleans_partial_file(tmp_path: Path):
+    from starlette.datastructures import UploadFile
+
+    source = UploadFile(filename="oversize.pptx", file=__import__("io").BytesIO(b"x" * (2 * 1024 * 1024)))
+    destination = tmp_path / "oversize.pptx"
+    with patch("services.libreoffice.app.MAX_FILE_SIZE", 1024 * 1024):
+        with pytest.raises(HTTPException, match="File too large"):
+            asyncio.run(_save_upload(source, destination))
+    assert not destination.exists()
