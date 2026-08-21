@@ -8,7 +8,7 @@ from pathlib import PurePosixPath
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from src.config import ASR_ENABLED, ASR_SERVICE_TOKEN, EXTERNAL_MEDIA_ROOTS
+from src.config import ASR_ENABLED, ASR_SERVICE_TOKEN, EXTERNAL_MEDIA_ROOTS, EXTERNAL_MEDIA_UNC_ROOTS, resolve_external_unc_path
 from src.transcription.types import ContractValidationError
 
 from .auth import CurrentUser, require_admin, require_csrf_admin
@@ -87,12 +87,17 @@ def create_source(
     admin: CurrentUser = Depends(require_csrf_admin),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ExternalMediaSourceDTO:
-    if body.root_alias not in EXTERNAL_MEDIA_ROOTS:
-        raise HTTPException(status_code=409, detail="所选共享目录根别名未在服务端配置")
     try:
-        relative_path = normalize_external_relative_path(body.relative_path, allow_empty=True)
+        if body.unc_path:
+            root_alias, unc_relative = resolve_external_unc_path(body.unc_path, EXTERNAL_MEDIA_UNC_ROOTS)
+            relative_path = normalize_external_relative_path(unc_relative, allow_empty=True)
+        else:
+            root_alias = body.root_alias
+            if root_alias not in EXTERNAL_MEDIA_ROOTS:
+                raise ValueError("external_root_unconfigured")
+            relative_path = normalize_external_relative_path(body.relative_path, allow_empty=True)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="共享目录相对路径不合法") from exc
+        raise HTTPException(status_code=400, detail="共享目录路径不合法或不在服务端白名单内") from exc
     _validate_source_targets(conn, body.target_category_id, body.default_scheme_id)
     now = int(time.time())
     source_id = str(uuid.uuid4())
@@ -105,7 +110,7 @@ def create_source(
             (
                 source_id,
                 body.name.strip(),
-                body.root_alias,
+                root_alias,
                 relative_path,
                 body.target_category_id,
                 body.default_scheme_id,
