@@ -419,7 +419,7 @@ function ManagedJobsTable({
                       onClick={() => onRetry(job)}
                     >
                       <Rocket className={cn("size-4", retrying && "animate-pulse")} />
-                      {retrying ? "重试中…" : "重新发布"}
+                      {retrying ? "发布中…" : "重新发布"}
                     </Button>
                   </div>
                 </td>
