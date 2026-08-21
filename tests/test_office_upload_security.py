@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import zipfile
 from pathlib import Path
 
@@ -12,6 +13,41 @@ from api.routes_admin import (
     _verify_office_signature,
 )
 from src.office_security import has_valid_office_signature
+
+
+_RELATIONSHIP_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+_PACKAGE_RELATIONSHIP = (
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/package"
+)
+
+
+def _zip_bytes(entries: dict[str, bytes | str]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, payload in entries.items():
+            archive.writestr(name, payload)
+    return buffer.getvalue()
+
+
+def _chart_pptx(embedded_payload: bytes) -> bytes:
+    return _zip_bytes({
+        "[Content_Types].xml": "<Types />",
+        "ppt/charts/chart1.xml": "<chart />",
+        "ppt/charts/_rels/chart1.xml.rels": (
+            f'<Relationships xmlns="{_RELATIONSHIP_NS}">'
+            f'<Relationship Id="rId1" Type="{_PACKAGE_RELATIONSHIP}" '
+            'Target="../embeddings/Microsoft_Excel_Worksheet1.xlsx"/>'
+            "</Relationships>"
+        ),
+        "ppt/embeddings/Microsoft_Excel_Worksheet1.xlsx": embedded_payload,
+    })
+
+
+def _safe_embedded_xlsx() -> bytes:
+    return _zip_bytes({
+        "[Content_Types].xml": "<Types />",
+        "xl/workbook.xml": "<workbook />",
+    })
 
 
 def test_office_signature_rejects_non_zip_and_accepts_ooxml(tmp_path: Path):
@@ -82,3 +118,55 @@ def test_office_relationship_scan_preserves_case_sensitive_member_names(tmp_path
 
     assert _check_office_external_links_or_embeds(safe) is None
     assert _check_office_external_links_or_embeds(external) == "office_external_link"
+
+
+def test_chart_linked_embedded_xlsx_is_allowed(tmp_path: Path):
+    path = tmp_path / "chart.pptx"
+    path.write_bytes(_chart_pptx(_safe_embedded_xlsx()))
+
+    assert _check_office_external_links_or_embeds(path) is None
+
+
+def test_unreferenced_embedded_xlsx_is_rejected(tmp_path: Path):
+    path = tmp_path / "unreferenced.pptx"
+    path.write_bytes(_zip_bytes({
+        "[Content_Types].xml": "<Types />",
+        "ppt/embeddings/workbook.xlsx": _safe_embedded_xlsx(),
+    }))
+
+    assert _check_office_external_links_or_embeds(path) == "office_embedded_object"
+
+
+def test_chart_linked_embedded_xlsx_external_link_is_rejected(tmp_path: Path):
+    path = tmp_path / "external-chart.pptx"
+    nested = _zip_bytes({
+        "[Content_Types].xml": "<Types />",
+        "xl/workbook.xml": "<workbook />",
+        "xl/_rels/workbook.xml.rels": (
+            f'<Relationships xmlns="{_RELATIONSHIP_NS}">'
+            '<Relationship Id="rId1" TargetMode="External" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink" '
+            'Target="https://example.invalid/data.xlsx"/>'
+            "</Relationships>"
+        ),
+    })
+    path.write_bytes(_chart_pptx(nested))
+
+    assert _check_office_external_links_or_embeds(path) == "office_external_link"
+
+
+def test_chart_linked_embedded_xlsx_nested_embedding_is_rejected(tmp_path: Path):
+    path = tmp_path / "nested-chart.pptx"
+    path.write_bytes(_chart_pptx(_zip_bytes({
+        "[Content_Types].xml": "<Types />",
+        "xl/embeddings/oleObject1.bin": b"synthetic",
+    })))
+
+    assert _check_office_external_links_or_embeds(path) == "office_embedded_object"
+
+
+def test_chart_linked_malformed_embedded_xlsx_is_rejected(tmp_path: Path):
+    path = tmp_path / "malformed-chart.pptx"
+    path.write_bytes(_chart_pptx(b"not-a-zip"))
+
+    assert _check_office_external_links_or_embeds(path) == "office_package_invalid"

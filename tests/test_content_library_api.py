@@ -2209,6 +2209,59 @@ def test_managed_xmind_upload_rejects_invalid_archive(content_api):
         conn.close()
 
 
+def test_managed_chart_pptx_upload_accepts_safe_embedded_workbook_and_rejects_ole(content_api):
+    client, sessions, _queued, db_path = content_api
+    relationship_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+    package_type = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/package"
+
+    workbook_bytes = io.BytesIO()
+    with zipfile.ZipFile(workbook_bytes, "w") as workbook:
+        workbook.writestr("[Content_Types].xml", "<Types />")
+        workbook.writestr("xl/workbook.xml", "<workbook />")
+
+    chart_bytes = io.BytesIO()
+    with zipfile.ZipFile(chart_bytes, "w") as chart:
+        chart.writestr("[Content_Types].xml", "<Types />")
+        chart.writestr("ppt/charts/chart1.xml", "<chart />")
+        chart.writestr(
+            "ppt/charts/_rels/chart1.xml.rels",
+            f'<Relationships xmlns="{relationship_ns}">'
+            f'<Relationship Id="rId1" Type="{package_type}" '
+            'Target="../embeddings/Microsoft_Excel_Worksheet1.xlsx"/>'
+            "</Relationships>",
+        )
+        chart.writestr(
+            "ppt/embeddings/Microsoft_Excel_Worksheet1.xlsx",
+            workbook_bytes.getvalue(),
+        )
+
+    ole_bytes = io.BytesIO()
+    with zipfile.ZipFile(ole_bytes, "w") as ole:
+        ole.writestr("[Content_Types].xml", "<Types />")
+        ole.writestr("ppt/embeddings/oleObject1.bin", b"synthetic")
+
+    response = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[
+            ("files", ("chart.pptx", chart_bytes.getvalue(), "application/octet-stream")),
+            ("files", ("ole.pptx", ole_bytes.getvalue(), "application/octet-stream")),
+        ],
+        **_auth(sessions, "admin", csrf=True),
+    )
+
+    assert response.status_code == 200
+    entries = response.json()["entries"]
+    assert entries[0]["status"] == "accepted"
+    assert entries[1]["status"] == "skipped"
+    assert entries[1]["reason_code"] == "office_embedded_object"
+    conn = connect(db_path)
+    try:
+        assert conn.execute("SELECT count(*) FROM content_versions").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
 def test_managed_upload_skips_office_but_accepts_markdown_when_disabled(content_api, monkeypatch):
     client, sessions, _queued, db_path = content_api
     monkeypatch.setattr(routes_content, "OFFICE_PROCESSING_ENABLED", False)
