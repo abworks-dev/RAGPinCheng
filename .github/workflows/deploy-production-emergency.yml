@@ -396,6 +396,7 @@ jobs:
           GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEPLOY_COMMIT_SHA: ${{ inputs.deploy_commit_sha }}
           DEPLOY_HTTP_PROXY: ${{ vars.DEPLOY_HTTP_PROXY }}
+          SCHEMA_MIGRATION_ACTION: APPLY_PENDING
         run: |
           set -euo pipefail
           if [ "${CONTENT_HEAD_ENFORCEMENT}" = "strict" ] || \

@@ -198,10 +198,11 @@ class TestDeployGitSafety(unittest.TestCase):
 
     def test_emergency_app_deploy_explicitly_applies_pending_schema_migrations(self):
         workflow = self.emergency_workflow
-        self.assertIn("SCHEMA_MIGRATION_ACTION: APPLY_PENDING", workflow)
+        deploy_app = workflow.split("  deploy-app:", 1)[1]
+        self.assertIn("SCHEMA_MIGRATION_ACTION: APPLY_PENDING", deploy_app)
         self.assertLess(
-            workflow.index("SCHEMA_MIGRATION_ACTION: APPLY_PENDING"),
-            workflow.index('bash "${REPO_PATH}/scripts/deploy-app.sh"'),
+            deploy_app.index("SCHEMA_MIGRATION_ACTION: APPLY_PENDING"),
+            deploy_app.index('bash "${REPO_PATH}/scripts/deploy-app.sh"'),
         )
 
     def test_production_deploy_workflows_share_the_app_mutation_lock(self):
