@@ -597,7 +597,8 @@ jobs:
               ("04", "项目资料"),
               ("05", "培训资料"),
               ("06", "项目经验与案例"),
-              ("99", "待确认资料"),
+              ("07", "内部教学视频"),
+              ("08", "待确认资料"),
           ]
           assert CONTENT_MANAGEMENT_ENABLED is True
           assert CONTENT_HEAD_ENFORCEMENT in {"compat", "strict"}
