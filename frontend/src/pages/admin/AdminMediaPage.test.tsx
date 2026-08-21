@@ -588,7 +588,7 @@ describe("AdminMediaPage wizard", () => {
 
     expect(await screen.findByText("已进入转录任务")).toBeInTheDocument();
     expect(screen.queryByText("待转录视频")).not.toBeInTheDocument();
-    expect(screen.getByText(/当前显示 1 \/ 1 条记录/)).toBeInTheDocument();
+    expect(screen.getByText(/当前显示 1 - 1 \/ 1 条记录/)).toBeInTheDocument();
   });
 
   it("shows the transcription-task empty state when the library only has pending videos", async () => {
@@ -605,7 +605,7 @@ describe("AdminMediaPage wizard", () => {
     render(<AdminMediaPage embedded />);
 
     expect(await screen.findByText("暂无转录任务")).toBeInTheDocument();
-    expect(screen.getByText("共 0 个任务")).toBeInTheDocument();
+    expect(screen.getByText(/当前显示 0 - 0 \/ 0 条记录/)).toBeInTheDocument();
   });
 
   it("keeps a permanent transcription failure retry button disabled from server capabilities", async () => {
