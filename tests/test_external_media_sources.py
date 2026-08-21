@@ -50,6 +50,30 @@ def test_unc_root_mapping_accepts_unicode_path_and_rejects_escape_or_unknown_sha
         resolve_external_unc_path(r"\\192.168.0.252\其他共享\视频", roots)
 
 
+def test_create_external_source_accepts_full_unc_path_within_configured_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    share = tmp_path / "share"
+    share.mkdir()
+    conn, _ = _source_database(tmp_path, share)
+    scheme_id = conn.execute("SELECT id FROM transcription_schemes ORDER BY sort_order LIMIT 1").fetchone()[0]
+    monkeypatch.setattr(routes_external_media, "EXTERNAL_MEDIA_ROOTS", {"training": share})
+    monkeypatch.setattr(
+        routes_external_media,
+        "EXTERNAL_MEDIA_UNC_ROOTS",
+        {"training": (r"\\192.168.0.252\项目工程".casefold(), share)},
+    )
+    body = routes_external_media.ExternalMediaSourceCreate(
+        name="内部教学视频",
+        unc_path=r"\\192.168.0.252\项目工程\品成知识库\1.2内部教学视频（MP4）",
+        target_category_id="cat-05",
+        default_scheme_id=scheme_id,
+    )
+    admin = type("Admin", (), {"id": None})()
+    created = routes_external_media.create_source(body, admin, conn)
+    assert created.root_alias == "training"
+    assert created.relative_path == "品成知识库/1.2内部教学视频（MP4）"
+    conn.close()
+
+
 def test_scan_reconciles_add_change_missing_recovery_and_outage(tmp_path: Path) -> None:
     share = tmp_path / "share"
     (share / "课程").mkdir(parents=True)

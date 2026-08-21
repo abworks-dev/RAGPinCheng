@@ -1,10 +1,28 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage, Source } from "../types";
 import { SourceWorkspace } from "./SourceWorkspace";
 
 const videoPlayerOpen = vi.hoisted(() => vi.fn());
 const documentPreviewOpen = vi.hoisted(() => vi.fn());
+const downloadFile = vi.hoisted(() => vi.fn());
+const bulkDownload = vi.hoisted(() => vi.fn());
+const toastInfo = vi.hoisted(() => vi.fn());
+const toastSuccess = vi.hoisted(() => vi.fn());
+const toastError = vi.hoisted(() => vi.fn());
+
+vi.mock("../api/client", () => ({
+  api: {
+    downloadManagedContentFile: downloadFile,
+    bulkDownloadManagedContent: bulkDownload,
+    downloadManagedMedia: vi.fn(),
+    sendFeedback: vi.fn(),
+  },
+}));
+
+vi.mock("./ui/toast", () => ({
+  toast: { info: toastInfo, success: toastSuccess, error: toastError },
+}));
 
 vi.mock("../hooks/usePdfPreview", () => ({
   usePdfPreview: () => ({ open: documentPreviewOpen }),
@@ -70,6 +88,11 @@ describe("SourceWorkspace video sources", () => {
     vi.restoreAllMocks();
     videoPlayerOpen.mockReset();
     documentPreviewOpen.mockReset();
+    downloadFile.mockReset();
+    bulkDownload.mockReset();
+    toastInfo.mockReset();
+    toastSuccess.mockReset();
+    toastError.mockReset();
   });
   it("uses the video card treatment without exposing the binding suffix", () => {
     renderWorkspace();
@@ -191,5 +214,30 @@ describe("SourceWorkspace video sources", () => {
 
     expect(screen.getByRole("button", { name: "复制全部来源" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "下载来源文件" })).toBeDisabled();
+  });
+
+  it("deduplicates repeated citations for one source file and reports download with toasts", async () => {
+    downloadFile.mockResolvedValue({ blob: new Blob(["file"]), filename: "构件清单.xlsx" });
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn().mockReturnValue("blob:file") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const source = { ...spreadsheetSource, content_version_id: "version-1" };
+    const messages: ChatMessage[] = [{
+      id: "assistant-1",
+      role: "assistant",
+      content: "回答",
+      sources: [source, { ...source, parent_id: "spreadsheet-source-2", section_path: "第二节" }],
+    }];
+    render(<SourceWorkspace messages={messages} conversationId="conversation-1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "下载来源文件" }));
+    expect(within(screen.getByRole("dialog", { name: "下载来源文件" })).getAllByRole("button", { name: "构件清单" })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "下载" }));
+
+    expect(await screen.findByRole("dialog", { name: "下载来源文件" })).not.toBeVisible();
+    expect(downloadFile).toHaveBeenCalledOnce();
+    expect(downloadFile).toHaveBeenCalledWith("version-1", "构件清单");
+    expect(bulkDownload).not.toHaveBeenCalled();
+    expect(toastSuccess).toHaveBeenCalledWith("已开始下载 1 份来源文件", expect.any(Object));
   });
 });

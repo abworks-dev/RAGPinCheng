@@ -1280,8 +1280,9 @@ class ExternalMediaSourceCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=100)
-    root_alias: str = Field(min_length=1, max_length=64)
+    root_alias: str = Field(default="", max_length=64)
     relative_path: str = Field(default="", max_length=1000)
+    unc_path: str | None = Field(default=None, max_length=2000)
     target_category_id: str = Field(min_length=1, max_length=100)
     default_scheme_id: str = Field(min_length=1, max_length=100)
     auto_enqueue: bool = False
