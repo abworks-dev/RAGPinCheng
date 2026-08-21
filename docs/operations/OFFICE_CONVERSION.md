@@ -86,7 +86,7 @@ docker compose -f docker/docker-compose.yml exec libreoffice sh -lc "du -sh /dat
 
 部署级开关 `OFFICE_PROCESSING_ENABLED` 默认值为 `true`。设置为 `false` 并重启 backend 后，系统会阻止新的 DOCX/XLSX/PPTX 上传、server import、发布、重试和 Worker 实际处理；PDF、Markdown、转录稿以及既有 Office 资料的检索、原文件和预览读取不受影响。管理后台系统概览仅向系统管理员显示当前状态。
 
-Office 解析还会拒绝包含外部链接、OLE/嵌入对象、宏或异常压缩包的 OOXML 文件。`OFFICE_PARSE_TIMEOUT_SECONDS`（默认 120 秒）限制 Docling/openpyxl 解析时长，`OFFICE_MIN_FREE_DISK_MB`（默认 1024 MB）作为新解析任务的最低剩余磁盘阈值；触发时任务会记录可重试的失败原因，后台概览显示磁盘状态。
+Office 解析还会拒绝包含外部链接、OLE/未授权嵌入对象、宏或异常压缩包的 OOXML 文件；PowerPoint 图表关系引用且递归安全检查通过的嵌入 `.xlsx` 是唯一允许的嵌入例外。`OFFICE_PARSE_TIMEOUT_SECONDS`（默认 120 秒）限制 Docling/openpyxl 解析时长，`OFFICE_MIN_FREE_DISK_MB`（默认 1024 MB）作为新解析任务的最低剩余磁盘阈值；触发时任务会记录可重试的失败原因，后台概览显示磁盘状态。
 
 关闭开关不会删除、隐藏或重建既有文件、索引和派生产物。入口返回稳定错误码 `office_processing_disabled`，已排队但尚未执行的 Office 任务由 Worker 标记为失败。恢复时将开关设回 `true`、重启 backend，再由管理员重新上传、发布或重试失败任务。
 
