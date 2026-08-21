@@ -13,6 +13,8 @@ import {
   Presentation,
   Video,
   Download,
+  Square,
+  CheckSquare,
 } from "lucide-react";
 import { api } from "../api/client";
 import { usePdfPreview } from "../hooks/usePdfPreview";
@@ -29,6 +31,8 @@ import {
 } from "./citations";
 import { FeedbackDialog, type FeedbackSubmission } from "./FeedbackDialog";
 import { sourceSetsFromMessages } from "./sourceSelection";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
+import { Button } from "./ui/button";
 import {
   cleanSourceSection,
   formatSourcesAsMarkdown,
@@ -93,6 +97,7 @@ export function SourceWorkspace({
   const source = activeSet?.sources[activeIndex] || activeSet?.sources[0];
   const safeIndex = source ? Math.max(0, activeSet!.sources.indexOf(source)) : 0;
   const [exportStatus, setExportStatus] = useState<string | null>(null);
+  const [downloadOpen, setDownloadOpen] = useState(false);
 
   useEffect(() => setExportStatus(null), [activeMessageId]);
 
@@ -106,20 +111,7 @@ export function SourceWorkspace({
     }
   };
 
-  const downloadAllSources = () => {
-    if (!activeSet?.sources.length) return;
-    try {
-      const url = URL.createObjectURL(new Blob([formatSourcesAsMarkdown(activeSet.sources)], { type: "text/markdown;charset=utf-8" }));
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = "回答来源.md";
-      anchor.click();
-      URL.revokeObjectURL(url);
-      setExportStatus(`已下载 ${activeSet.sources.length} 项来源`);
-    } catch {
-      setExportStatus("下载来源失败，请稍后重试。");
-    }
-  };
+  const downloadAllSources = () => { if (activeSet?.sources.length) setDownloadOpen(true); };
 
   useEffect(() => {
     if (latest && !sets.some((set) => set.messageId === activeMessageId)) {
@@ -245,8 +237,39 @@ export function SourceWorkspace({
           searchQuery={activeSet.searchQuery}
         />
       </div>
+      <SourceDownloadDialog sources={activeSet.sources} open={downloadOpen} onOpenChange={setDownloadOpen} onStatus={setExportStatus} />
     </aside>
   );
+}
+
+function SourceDownloadDialog({ sources, open, onOpenChange, onStatus }: { sources: Source[]; open: boolean; onOpenChange: (open: boolean) => void; onStatus: (status: string | null) => void }) {
+  const downloadable = sources.filter((source) => source.content_version_id || source.media_id);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (open) setSelected(downloadable.map((source) => source.parent_id)); }, [open, sources]);
+  const toggle = (id: string) => setSelected((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
+  const trigger = (blob: Blob, filename: string) => { const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = filename; anchor.click(); URL.revokeObjectURL(url); };
+  const download = async () => {
+    const chosen = downloadable.filter((source) => selected.includes(source.parent_id));
+    if (!chosen.length) return;
+    setBusy(true); onStatus(null);
+    try {
+      if (chosen.length === 1) {
+        const source = chosen[0];
+        const result = source.content_version_id
+          ? await api.downloadManagedContentFile(source.content_version_id, source.doc_title)
+          : await api.downloadManagedMedia(source.content_item_id || source.media_id!, "all", `${source.doc_title}.zip`);
+        trigger(result.blob, result.filename);
+      } else {
+        const versions = chosen.map((source) => source.content_version_id).filter((id): id is string => Boolean(id));
+        if (versions.length !== chosen.length) throw new Error("批量下载仅支持已登记的资料文件，请分开下载视频来源");
+        const result = await api.bulkDownloadManagedContent(versions); trigger(result.blob, result.filename);
+      }
+      onStatus(`已开始下载 ${chosen.length} 项来源`); onOpenChange(false);
+    } catch (error) { onStatus(error instanceof Error ? error.message : "下载来源失败，请稍后重试。"); }
+    finally { setBusy(false); }
+  };
+  return <Dialog open={open} onOpenChange={(value) => { if (!busy) onOpenChange(value); }}><DialogContent><DialogHeader><DialogTitle>下载来源文件</DialogTitle><DialogDescription>选择要下载的来源文件，默认已全选。</DialogDescription></DialogHeader><div className="max-h-72 space-y-2 overflow-y-auto">{downloadable.map((source) => <button key={source.parent_id} type="button" onClick={() => toggle(source.parent_id)} className="flex w-full items-center gap-2 rounded-ui-md border border-border px-3 py-2 text-left text-xs hover:bg-secondary">{selected.includes(source.parent_id) ? <CheckSquare className="size-4 text-primary" /> : <Square className="size-4 text-muted-foreground" />}<span className="min-w-0 truncate">{sourceDisplayTitle(source)}</span></button>)}{!downloadable.length && <p className="text-xs text-muted-foreground">当前来源没有可下载文件。</p>}</div><DialogFooter><Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>取消</Button><Button disabled={busy || !selected.length} onClick={() => void download()}>{busy ? "正在打包…" : "下载"}</Button></DialogFooter></DialogContent></Dialog>;
 }
 
 function WorkspaceHeader({ count, onCopy, onDownload, status }: { count: number; onCopy: () => void; onDownload: () => void; status: string | null }) {
@@ -261,7 +284,7 @@ function WorkspaceHeader({ count, onCopy, onDownload, status }: { count: number;
         <button type="button" onClick={onCopy} disabled={!count} aria-label="复制全部来源" title="复制全部来源" className="inline-flex size-8 items-center justify-center rounded-ui-md border border-border text-muted-foreground hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40">
           <ClipboardCopy className="size-4" />
         </button>
-        <button type="button" onClick={onDownload} disabled={!count} aria-label="下载来源 Markdown" title="下载来源 Markdown" className="inline-flex size-8 items-center justify-center rounded-ui-md border border-border text-muted-foreground hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40">
+        <button type="button" onClick={onDownload} disabled={!count} aria-label="下载来源文件" title="下载来源文件" className="inline-flex size-8 items-center justify-center rounded-ui-md border border-border text-muted-foreground hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40">
           <Download className="size-4" />
         </button>
       </div>
@@ -329,6 +352,18 @@ function SourceDetail({
     } catch {
       setStatus("复制失败，请手动选择原文。");
     }
+  };
+
+  const downloadSource = async () => {
+    try {
+      const result = source.content_version_id
+        ? await api.downloadManagedContentFile(source.content_version_id, source.doc_title)
+        : source.media_id
+          ? await api.downloadManagedMedia(source.content_item_id || source.media_id, "all", `${source.doc_title}.zip`)
+          : null;
+      if (!result) throw new Error("当前来源没有可下载文件");
+      const url = URL.createObjectURL(result.blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = result.filename; anchor.click(); URL.revokeObjectURL(url);
+    } catch (error) { setStatus(error instanceof Error ? error.message : "下载文件失败，请稍后重试。"); }
   };
 
   const submitReport = async ({ reason, note }: FeedbackSubmission) => {
@@ -431,7 +466,7 @@ function SourceDetail({
           </button>
         )}
       </div>
-      <div className="mt-5 grid grid-cols-1 gap-2">
+      <div className="mt-4 grid grid-cols-2 gap-2">
         <button
           type="button"
           onClick={copySource}
@@ -440,6 +475,7 @@ function SourceDetail({
           {copied ? <Check className="size-3.5 text-success" /> : <Clipboard className="size-3.5" />}
           {copied ? "已复制" : "复制来源"}
         </button>
+        <button type="button" onClick={() => void downloadSource()} disabled={!source.content_version_id && !source.media_id} className="inline-flex h-9 items-center justify-center gap-1.5 rounded-ui-md border border-border px-3 text-xs font-medium text-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-40"><Download className="size-3.5" />下载文件</button>
       </div>
       {status && <p className="mt-2 text-xs text-muted-foreground">{status}</p>}
     </div>

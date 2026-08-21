@@ -129,21 +129,15 @@ describe("SourceWorkspace video sources", () => {
   it("copies and downloads all sources for the active answer only", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
-    const createObjectURL = vi.fn().mockReturnValue("blob:sources");
-    const revokeObjectURL = vi.fn();
-    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL });
-    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL });
-    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
     renderWorkspace(spreadsheetSource);
 
     fireEvent.click(screen.getByRole("button", { name: "复制全部来源" }));
     expect(await screen.findByRole("status")).toHaveTextContent("已复制 1 项来源");
     expect(writeText).toHaveBeenCalledWith(expect.stringContaining("## 1. 构件清单"));
 
-    fireEvent.click(screen.getByRole("button", { name: "下载来源 Markdown" }));
-    expect(createObjectURL).toHaveBeenCalledOnce();
-    expect(click).toHaveBeenCalledOnce();
-    expect(revokeObjectURL).toHaveBeenCalledWith("blob:sources");
+    fireEvent.click(screen.getByRole("button", { name: "下载来源文件" }));
+    expect(screen.getByRole("dialog", { name: "下载来源文件" })).toBeInTheDocument();
+    expect(screen.getByText("当前来源没有可下载文件。")).toBeInTheDocument();
   });
 
   it("exports only the explicitly selected answer sources", async () => {
@@ -196,6 +190,6 @@ describe("SourceWorkspace video sources", () => {
     render(<SourceWorkspace messages={[]} conversationId="conversation-1" />);
 
     expect(screen.getByRole("button", { name: "复制全部来源" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "下载来源 Markdown" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "下载来源文件" })).toBeDisabled();
   });
 });
