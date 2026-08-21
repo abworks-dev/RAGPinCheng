@@ -206,6 +206,22 @@ def test_ole_relationship_to_non_ole_named_target_is_rejected(tmp_path: Path):
     assert _check_office_external_links_or_embeds(path) == "office_embedded_object"
 
 
+def test_ole_relationship_missing_target_is_invalid_package(tmp_path: Path):
+    path = tmp_path / "missing-ole-target.pptx"
+    path.write_bytes(_zip_bytes({
+        "[Content_Types].xml": "<Types />",
+        "ppt/slides/slide1.xml": "<slide />",
+        "ppt/slides/_rels/slide1.xml.rels": (
+            f'<Relationships xmlns="{_RELATIONSHIP_NS}">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject" '
+            'Target="../oleObject1.bin"/>'
+            "</Relationships>"
+        ),
+    }))
+
+    assert _check_office_external_links_or_embeds(path) == "office_package_invalid"
+
+
 def test_chart_package_relationship_type_must_be_known(tmp_path: Path):
     path = tmp_path / "custom-package.pptx"
     path.write_bytes(_zip_bytes({
@@ -218,6 +234,23 @@ def test_chart_package_relationship_type_must_be_known(tmp_path: Path):
             "</Relationships>"
         ),
         "ppt/embeddings/workbook.xlsx": _safe_embedded_xlsx(),
+    }))
+
+    assert _check_office_external_links_or_embeds(path) == "office_embedded_object"
+
+
+def test_chart_package_relationship_must_target_embedded_xlsx(tmp_path: Path):
+    path = tmp_path / "chart-payload.pptx"
+    path.write_bytes(_zip_bytes({
+        "[Content_Types].xml": "<Types />",
+        "ppt/charts/chart1.xml": "<chart />",
+        "ppt/objects/payload.bin": b"synthetic",
+        "ppt/charts/_rels/chart1.xml.rels": (
+            f'<Relationships xmlns="{_RELATIONSHIP_NS}">'
+            f'<Relationship Id="rId1" Type="{_PACKAGE_RELATIONSHIP}" '
+            'Target="../objects/payload.bin"/>'
+            "</Relationships>"
+        ),
     }))
 
     assert _check_office_external_links_or_embeds(path) == "office_embedded_object"

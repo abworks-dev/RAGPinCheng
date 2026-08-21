@@ -213,11 +213,20 @@ def _scan_archive(
                 return "office_package_invalid"
             if target_mode == "external" or is_external:
                 return "office_external_link"
-            if relationship_type.endswith(_OLE_RELATIONSHIP_SUFFIXES):
-                return "office_embedded_object"
             resolved_target = _resolve_internal_target(source, target)
             if not target.startswith("#") and resolved_target not in name_set:
                 return "office_package_invalid"
+            if relationship_type.endswith(_OLE_RELATIONSHIP_SUFFIXES):
+                return "office_embedded_object"
+            if (
+                _is_chart_part(source)
+                and relationship_type in _PACKAGE_RELATIONSHIP_TYPES
+                and (
+                    not _is_embedded_member(resolved_target)
+                    or not resolved_target.lower().endswith(".xlsx")
+                )
+            ):
+                return "office_embedded_object"
             relationships.append((source, relationship_type, target, resolved_target))
 
     embedded_names = [
