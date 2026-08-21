@@ -992,10 +992,12 @@ export function AdminManagedContentPage() {
     ACTIVE_RECLASSIFICATION_STATUSES.has(item.reclassification_status || ""),
   );
   useEffect(() => {
-    if (!hasActiveReclassification || view !== "library") return undefined;
+    // Upload progress owns the visible busy state; avoid replacing the whole listing
+    // while XHR progress events are updating the upload surface.
+    if (!hasActiveReclassification || view !== "library" || uploading) return undefined;
     const timer = window.setInterval(() => { void load(); }, 2000);
     return () => window.clearInterval(timer);
-  }, [hasActiveReclassification, load, view]);
+  }, [hasActiveReclassification, load, view, uploading]);
 
   const loadTrash = useCallback(async () => {
     if (!can("trash.view")) return;
