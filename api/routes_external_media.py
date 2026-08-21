@@ -19,6 +19,8 @@ from .media_upload_conflicts import require_active_category
 from .routes_transcription import build_transcription_service
 from .schemas import (
     ExternalMediaEnqueueRequest,
+    ExternalMediaEnqueuePreview,
+    ExternalMediaEnqueuePreviewItem,
     ExternalMediaEnqueueResult,
     ExternalMediaEntryDTO,
     ExternalMediaEntryListDTO,
@@ -330,6 +332,30 @@ def enqueue_entries(
         raise HTTPException(status_code=404, detail="外部媒体源不存在") from exc
     except ExternalMediaError as exc:
         raise HTTPException(status_code=503, detail="自动转录当前不可用或转录方案失效") from exc
+
+@router.post("/sources/{source_id}/enqueue-preview", response_model=ExternalMediaEnqueuePreview)
+def preview_enqueue_entries(
+    source_id: str,
+    body: ExternalMediaEnqueueRequest,
+    _admin: CurrentUser = Depends(require_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ExternalMediaEnqueuePreview:
+    if conn.execute("SELECT 1 FROM external_media_sources WHERE id=?", (source_id,)).fetchone() is None:
+        raise HTTPException(status_code=404, detail="外部媒体源不存在")
+    params: list[object] = [source_id]
+    filter_sql = ""
+    if body.entry_ids is not None:
+        if not body.entry_ids:
+            return ExternalMediaEnqueuePreview(items=[], selected_count=0)
+        filter_sql = f" AND e.id IN ({','.join('?' for _ in body.entry_ids)})"
+        params.extend(body.entry_ids)
+    rows = conn.execute(f"""SELECT e.id,e.relative_path,e.file_size,e.modified_ns,
+        EXISTS(SELECT 1 FROM transcription_jobs j WHERE j.media_id=e.media_id) AS has_job,
+        EXISTS(SELECT 1 FROM transcription_jobs j WHERE j.media_id=e.media_id AND j.audio_sha256<>e.fingerprint) AS changed
+        FROM external_media_entries e WHERE e.source_id=? AND e.availability='available' {filter_sql}
+        ORDER BY e.relative_path COLLATE NOCASE LIMIT 500""", params).fetchall()
+    items = [ExternalMediaEnqueuePreviewItem(entry_id=str(r["id"]), relative_path=str(r["relative_path"]), file_size=int(r["file_size"]), modified_ns=int(r["modified_ns"]), state="updated" if r["changed"] else "already_transcribed" if r["has_job"] else "new", selected=not bool(r["has_job"]) or bool(r["changed"])) for r in rows]
+    return ExternalMediaEnqueuePreview(items=items, selected_count=sum(item.selected for item in items))
 
 
 def run_due_external_scans() -> None:

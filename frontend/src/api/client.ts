@@ -1059,6 +1059,7 @@ export const api = {
   scanExternalMediaSource: (sourceId: string) => jsonFetch<ExternalMediaScan>(`/api/admin/external-media/sources/${encodeURIComponent(sourceId)}/scan`, { method: "POST", body: JSON.stringify({}) }),
   listExternalMediaEntries: (sourceId: string, parent = "") => jsonFetch<ExternalMediaEntryList>(`/api/admin/external-media/sources/${encodeURIComponent(sourceId)}/entries?parent=${encodeURIComponent(parent)}`),
   enqueueExternalMedia: (sourceId: string, entryIds?: string[]) => jsonFetch<ExternalMediaEnqueueResult>(`/api/admin/external-media/sources/${encodeURIComponent(sourceId)}/enqueue`, { method: "POST", body: JSON.stringify({ entry_ids: entryIds ?? null }) }),
+  previewEnqueueExternalMedia: (sourceId: string, entryIds?: string[]) => jsonFetch<ExternalMediaEnqueuePreview>(`/api/admin/external-media/sources/${encodeURIComponent(sourceId)}/enqueue-preview`, { method: "POST", body: JSON.stringify({ entry_ids: entryIds ?? null }) }),
   preflightMediaUpload: (body: {
     category_id: string;
     items: Array<{ client_id: string; title: string; original_filename: string }>;

@@ -1362,6 +1362,18 @@ class ExternalMediaEnqueueRequest(BaseModel):
 
     entry_ids: list[str] | None = Field(default=None, max_length=500)
 
+class ExternalMediaEnqueuePreviewItem(BaseModel):
+    entry_id: str
+    relative_path: str
+    file_size: int
+    modified_ns: int
+    state: Literal["new", "updated", "already_transcribed"]
+    selected: bool
+
+class ExternalMediaEnqueuePreview(BaseModel):
+    items: list[ExternalMediaEnqueuePreviewItem]
+    selected_count: int
+
 
 class ExternalMediaEnqueueResult(BaseModel):
     requested: int
