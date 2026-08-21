@@ -348,13 +348,13 @@ def list_categories(conn: sqlite3.Connection, *, include_inactive: bool = False)
     rows = conn.execute(
         f"""WITH RECURSIVE paths AS (
                 SELECT id,category_key,parent_id,display_code,display_name,sort_order,
-                       level,is_active,chat_search_enabled,chat_filter_selectable,
+                       category_kind,external_source_id,level,is_active,chat_search_enabled,chat_filter_selectable,
                        version,created_at,updated_at,
                        display_code || ' ' || display_name AS full_path
                 FROM category_nodes WHERE parent_id IS NULL AND deleted_at IS NULL
                 UNION ALL
                 SELECT c.id,c.category_key,c.parent_id,c.display_code,c.display_name,c.sort_order,
-                       c.level,c.is_active,c.chat_search_enabled,c.chat_filter_selectable,
+                       c.category_kind,c.external_source_id,c.level,c.is_active,c.chat_search_enabled,c.chat_filter_selectable,
                        c.version,c.created_at,c.updated_at,
                        p.full_path || ' / ' || c.display_code || ' ' || c.display_name
                 FROM category_nodes c JOIN paths p ON p.id=c.parent_id
@@ -370,6 +370,9 @@ def list_categories(conn: sqlite3.Connection, *, include_inactive: bool = False)
                                 ON v.id=h.current_version_id AND v.media_id=m.media_id
                               WHERE m.media_id=i.media_id AND m.status<>'archived'
                                 AND v.publication_status='published'
+                            ) OR EXISTS (
+                              SELECT 1 FROM media_assets m
+                              WHERE m.media_id=i.media_id AND m.storage_kind='external' AND m.status<>'archived'
                             )
                           )) AS item_count,
                    (SELECT count(*) FROM category_nodes child
@@ -396,14 +399,17 @@ def list_categories(conn: sqlite3.Connection, *, include_inactive: bool = False)
                     WHERE i.category_id IN (SELECT id FROM descendants)
                       AND i.archived_at IS NULL
                       AND (
-                        i.content_kind='document' OR EXISTS (
-                          SELECT 1 FROM media_assets m
+                            i.content_kind='document' OR EXISTS (
+                              SELECT 1 FROM media_assets m
                           JOIN media_transcript_heads h ON h.media_id=m.media_id
                           JOIN transcript_versions v
                             ON v.id=h.current_version_id AND v.media_id=m.media_id
                           WHERE m.media_id=i.media_id AND m.status<>'archived'
                             AND v.publication_status='published'
-                        )
+                            ) OR EXISTS (
+                              SELECT 1 FROM media_assets m
+                              WHERE m.media_id=i.media_id AND m.storage_kind='external' AND m.status<>'archived'
+                            )
                       )) AS total_item_count
             FROM paths p {where}
             """
