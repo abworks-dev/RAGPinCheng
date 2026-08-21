@@ -192,7 +192,7 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("compose run --rm --no-deps backend python -m scripts.migrate_app_schema", deploy)
         self.assertIn("--action \"${SCHEMA_MIGRATION_ACTION}\"", deploy)
         self.assertLess(
-            deploy.index("scripts/migrate_app_schema.py"),
+            deploy.index("scripts.migrate_app_schema"),
             deploy.index("compose up -d --no-deps --force-recreate backend"),
         )
 
