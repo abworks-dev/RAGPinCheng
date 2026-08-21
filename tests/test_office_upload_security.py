@@ -170,3 +170,72 @@ def test_chart_linked_malformed_embedded_xlsx_is_rejected(tmp_path: Path):
     path.write_bytes(_chart_pptx(b"not-a-zip"))
 
     assert _check_office_external_links_or_embeds(path) == "office_package_invalid"
+
+
+def test_chart_relationship_requires_existing_source_part(tmp_path: Path):
+    path = tmp_path / "missing-source.pptx"
+    path.write_bytes(_zip_bytes({
+        "[Content_Types].xml": "<Types />",
+        "ppt/charts/_rels/fake.xml.rels": (
+            f'<Relationships xmlns="{_RELATIONSHIP_NS}">'
+            f'<Relationship Id="rId1" Type="{_PACKAGE_RELATIONSHIP}" '
+            'Target="../embeddings/workbook.xlsx"/>'
+            "</Relationships>"
+        ),
+        "ppt/embeddings/workbook.xlsx": _safe_embedded_xlsx(),
+    }))
+
+    assert _check_office_external_links_or_embeds(path) == "office_package_invalid"
+
+
+def test_internal_relationship_requires_existing_target_part(tmp_path: Path):
+    path = tmp_path / "missing-target.pptx"
+    path.write_bytes(_zip_bytes({
+        "[Content_Types].xml": "<Types />",
+        "ppt/presentation.xml": "<presentation />",
+        "ppt/_rels/presentation.xml.rels": (
+            f'<Relationships xmlns="{_RELATIONSHIP_NS}">'
+            '<Relationship Id="rId1" Type="http://example.invalid/internal" '
+            'Target="missing.xml"/>'
+            "</Relationships>"
+        ),
+    }))
+
+    assert _check_office_external_links_or_embeds(path) == "office_package_invalid"
+
+
+def test_malformed_content_types_are_rejected_as_invalid_package(tmp_path: Path):
+    path = tmp_path / "malformed-content-types.pptx"
+    path.write_bytes(_zip_bytes({"[Content_Types].xml": "<Types"}))
+
+    assert _check_office_external_links_or_embeds(path) == "office_package_invalid"
+
+
+def test_malformed_external_hyperlink_is_rejected_as_invalid_package(tmp_path: Path):
+    path = tmp_path / "malformed-link.pptx"
+    path.write_bytes(_zip_bytes({
+        "[Content_Types].xml": "<Types />",
+        "ppt/presentation.xml": "<presentation />",
+        "ppt/_rels/presentation.xml.rels": (
+            f'<Relationships xmlns="{_RELATIONSHIP_NS}">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" '
+            'Target="http://["/>'
+            "</Relationships>"
+        ),
+    }))
+
+    assert _check_office_external_links_or_embeds(path) == "office_package_invalid"
+
+
+def test_relationship_dtd_is_rejected_as_invalid_package(tmp_path: Path):
+    path = tmp_path / "relationship-dtd.pptx"
+    path.write_bytes(_zip_bytes({
+        "[Content_Types].xml": "<Types />",
+        "ppt/presentation.xml": "<presentation />",
+        "ppt/_rels/presentation.xml.rels": (
+            f'<!DOCTYPE Relationships [<!ENTITY unsafe "x">]>'
+            f'<Relationships xmlns="{_RELATIONSHIP_NS}"/>'
+        ),
+    }))
+
+    assert _check_office_external_links_or_embeds(path) == "office_package_invalid"
