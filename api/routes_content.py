@@ -3926,7 +3926,7 @@ def list_content_index_jobs(
                   o.size_bytes AS file_size,
                   CASE WHEN h.current_version_id=v.id THEN 1 ELSE 0 END AS is_current_head,
                   CASE WHEN """ + latest_attempt + """ THEN 1 ELSE 0 END AS is_latest_attempt""" + base +
-        f" {where} ORDER BY j.created_at DESC,j.id LIMIT ? OFFSET ?",
+        f" {where} ORDER BY CASE WHEN j.status='failed' THEN 0 WHEN j.status IN ('pending','uploading','queued_mineru','parsing','chunking','summarizing','embedding') THEN 1 ELSE 2 END, j.updated_at DESC,j.id LIMIT ? OFFSET ?",
         [*params, limit, offset],
     ).fetchall()
     total = int(conn.execute(cte + " SELECT count(*)" + base + f" {where}", params).fetchone()[0])
