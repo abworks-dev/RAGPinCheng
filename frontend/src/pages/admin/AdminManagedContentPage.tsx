@@ -2483,7 +2483,7 @@ export function AdminManagedContentPage() {
   );
   useManagedContentLiveRefresh({
     active: hasActiveReclassification || hasActivePublication,
-    enabled: view === "library",
+    enabled: view === "library" && !uploading,
     refresh: load,
   });
 
