@@ -67,6 +67,7 @@ jobs:
           DOCS_HOST_PATH: ${{ vars.PRODUCTION_DOCS_HOST_PATH }}
           MEDIA_HOST_PATH: ${{ vars.PRODUCTION_MEDIA_HOST_PATH }}
           SOURCE_DECOUPLING_COMPLETE: ${{ vars.SOURCE_DECOUPLING_COMPLETE }}
+          SCHEMA_MIGRATION_ACTION: APPLY_PENDING
         run: |
           set -euo pipefail
           [ "${CONFIRM_PRODUCTION}" = "DEPLOY" ] || {

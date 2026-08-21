@@ -196,6 +196,14 @@ class TestDeployGitSafety(unittest.TestCase):
             deploy.index("compose up -d --no-deps --force-recreate backend"),
         )
 
+    def test_emergency_app_deploy_explicitly_applies_pending_schema_migrations(self):
+        workflow = self.emergency_workflow
+        self.assertIn("SCHEMA_MIGRATION_ACTION: APPLY_PENDING", workflow)
+        self.assertLess(
+            workflow.index("SCHEMA_MIGRATION_ACTION: APPLY_PENDING"),
+            workflow.index('bash "${REPO_PATH}/scripts/deploy-app.sh"'),
+        )
+
     def test_production_deploy_workflows_share_the_app_mutation_lock(self):
         for workflow in (self.emergency_workflow, self.app_only_workflow):
             self.assertIn("group: production-app-manual-v1", workflow)
