@@ -22,4 +22,3 @@ The change is limited to the shared OOXML safety checker and synthetic regressio
 ## Verification
 
 Run the Office security and managed/legacy upload tests, then run the targeted Python syntax/import checks. Confirm the safe chart fixture is accepted and unsafe OLE, external-link, malformed, and unreferenced-embedding fixtures remain rejected.
-
