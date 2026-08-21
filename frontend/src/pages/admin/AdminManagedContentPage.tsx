@@ -1650,7 +1650,7 @@ function ActionsMenu({
             ref={menuRef}
             role="menu"
             aria-label={menuLabel}
-            className={`fixed z-dropdown overflow-hidden rounded-ui-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-overlay ${compact ? "w-52" : "w-44"}`}
+            className={`fixed z-dropdown overflow-hidden rounded-ui-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-overlay ${compact ? "w-52" : "w-56"}`}
             style={position}
             onKeyDown={handleMenuKeyDown}
           >
@@ -1685,7 +1685,7 @@ function ActionsMenu({
                     aria-disabled={option.disabled || undefined}
                     disabled={option.disabled}
                     title={option.disabled ? option.disabledReason : undefined}
-                    className={`flex w-full items-center gap-2.5 rounded-ui-md px-2.5 py-2 text-left text-ui-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40 ${option.destructive ? "text-destructive hover:bg-destructive/10" : "hover:bg-surface-muted"}`}
+                    className={`flex w-full items-center gap-2.5 whitespace-nowrap rounded-ui-md px-2.5 py-2 text-left text-ui-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40 ${option.destructive ? "text-destructive hover:bg-destructive/10" : "hover:bg-surface-muted"}`}
                     onClick={() => {
                       setOpen(false);
                       option.onSelect?.();
@@ -5804,9 +5804,9 @@ export function AdminManagedContentPage() {
                         </th>
                       )}
                       {([ ["title", "资料"], ["category", "原目录"], ["status", "原状态"], ["source", "来源"], ["retention", "保留期限"], ["archivedAt", "移入回收站"] ] as [TrashSortKey, string][]).map(([key, label]) => (
-                        <th key={key} aria-sort={trashSort.key === key ? trashSort.direction === "asc" ? "ascending" : "descending" : "none"} className="px-3 py-3 font-medium">
+                        <th key={key} aria-sort={trashSort.key === key ? trashSort.direction === "asc" ? "ascending" : "descending" : "none"} className={`px-3 py-3 font-medium ${key === "category" ? "w-[15%]" : key === "source" ? "w-[12%]" : key === "status" ? "w-[8rem]" : ""}`}>
                           <button type="button" className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => toggleTrashSort(key)}>
-                            {label}{trashSortIcon(key)}
+                            <span className="whitespace-nowrap">{label}</span>{trashSortIcon(key)}
                           </button>
                         </th>
                       ))}
