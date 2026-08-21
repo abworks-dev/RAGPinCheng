@@ -169,7 +169,8 @@ export function ExternalMediaSourcesPanel({ categories, schemes, onOpenWorkbench
     setBusy("enqueue"); setNotice(null); setError(null);
     try {
       const result = await adminMediaApi.enqueueExternal(selectedSource.id, ids);
-      setNotice(`本批已加入 ${result.enqueued} 个转录任务${result.failed ? `，${result.failed} 个失败` : ""}${result.requested >= 500 ? "。如仍有待处理视频，可再次执行" : ""}。`);
+      const failureHint = result.failed && result.failures ? Object.values(result.failures).slice(0, 3).join("；") : "";
+      setNotice(`本批已加入 ${result.enqueued} 个转录任务${result.failed ? `，${result.failed} 个失败${failureHint ? `（原因：${failureHint}）` : ""}` : ""}${result.requested >= 500 ? "。如仍有待处理视频，可再次执行" : ""}。`);
       setPreview(null);
       await Promise.all([loadEntries(selectedSource.id, parent), onMediaChanged()]);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "批量加入转录队列失败"); }
