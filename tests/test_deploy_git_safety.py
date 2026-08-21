@@ -204,7 +204,7 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("EMERGENCY_SCHEMA status=ready", workflow)
         self.assertIn("schema_migration=APPLY_PENDING", workflow)
         self.assertLess(
-            deploy_app.index("SCHEMA_MIGRATION_ACTION: APPLY_PENDING"),
+            deploy_app.index("SCHEMA_MIGRATION_ACTION: BLOCK_PENDING"),
             deploy_app.index('bash "${REPO_PATH}/scripts/deploy-app.sh"'),
         )
 
