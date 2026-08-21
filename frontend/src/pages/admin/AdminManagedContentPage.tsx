@@ -5752,7 +5752,7 @@ export function AdminManagedContentPage() {
                 {can("trash.purge") && (
                   <ActionsMenu
                     disabled={Boolean(busyAction)}
-                    triggerLabel="批量操作"
+                    triggerLabel="回收站批量操作"
                     menuLabel="回收站批量操作"
                     options={[
                       {
