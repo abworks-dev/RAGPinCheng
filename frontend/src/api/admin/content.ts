@@ -4,6 +4,7 @@ export const adminContentApi = {
   capabilities: (...args: Parameters<typeof api.managedContentCapabilities>) => api.managedContentCapabilities(...args),
   categories: (...args: Parameters<typeof api.managedCategories>) => api.managedCategories(...args),
   createCategory: (...args: Parameters<typeof api.createManagedCategory>) => api.createManagedCategory(...args),
+  createSharedFolder: (...args: Parameters<typeof api.createSharedFolder>) => api.createSharedFolder(...args),
   updateCategory: (...args: Parameters<typeof api.updateManagedCategory>) => api.updateManagedCategory(...args),
   renameCategory: (...args: Parameters<typeof api.renameManagedCategory>) => api.renameManagedCategory(...args),
   updateCategorySortOrder: (...args: Parameters<typeof api.updateManagedCategorySortOrder>) => api.updateManagedCategorySortOrder(...args),

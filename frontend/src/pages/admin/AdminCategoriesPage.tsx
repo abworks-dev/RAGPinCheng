@@ -9,6 +9,7 @@ import {
   FolderTree,
   ListOrdered,
   Move,
+  Network,
   Plus,
   RefreshCw,
   Save,
@@ -17,8 +18,10 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { adminContentApi } from "../../api/admin/content";
+import { adminMediaApi } from "../../api/admin/media";
 import { CategoryDeleteDialog } from "../../components/admin/CategoryDeleteDialog";
 import { CategoryTreePicker } from "../../components/admin/CategoryTreePicker";
+import { ExternalMediaSourcesPanel } from "../../components/admin/ExternalMediaSourcesPanel";
 import { useAuth } from "../../context/AuthContext";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
@@ -32,7 +35,7 @@ import { LoadingState } from "../../components/ui/loading-state";
 import { Select } from "../../components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../../components/ui/sheet";
 import { toast } from "../../components/ui/toast";
-import type { ManagedCategory } from "../../types";
+import type { ExternalMediaRoot, ManagedCategory, TranscriptionSchemeOption } from "../../types";
 import {
   buildCategoryTree,
   compareManagedCategories,
@@ -52,6 +55,7 @@ type CategoryDraft = {
   chat_filter_selectable: boolean;
 };
 type CategoryCreateDraft = { parent_id: string; display_name: string; target_position: string };
+type SharedFolderDraft = { parent_id: string; display_name: string; root_alias: string; relative_path: string; default_scheme_id: string };
 type PendingAction =
   | { kind: "select"; id: string }
   | { kind: "refresh" }
@@ -105,6 +109,12 @@ export function AdminCategoriesPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [sharedOpen, setSharedOpen] = useState(false);
+  const [sharedSaving, setSharedSaving] = useState(false);
+  const [sharedError, setSharedError] = useState<string | null>(null);
+  const [sharedRoots, setSharedRoots] = useState<ExternalMediaRoot[]>([]);
+  const [sharedSchemes, setSharedSchemes] = useState<TranscriptionSchemeOption[]>([]);
+  const [sharedDraft, setSharedDraft] = useState<SharedFolderDraft>({ parent_id: "", display_name: "", root_alias: "", relative_path: "", default_scheme_id: "" });
   const [createDraft, setCreateDraft] = useState<CategoryCreateDraft>({ parent_id: "", display_name: "", target_position: "1" });
   const [createSaving, setCreateSaving] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -124,6 +134,7 @@ export function AdminCategoriesPage() {
   const [deleteTarget, setDeleteTarget] = useState<ManagedCategory | null>(null);
   const nodeRefs = useRef(new Map<string, HTMLDivElement>());
   const isAdmin = state.status === "authed" && state.user.role === "admin";
+  const canManageExternalSources = isAdmin && typeof adminMediaApi.externalRoots === "function";
   const canForceDelete = isAdmin || (state.status === "authed" && state.user.content_permissions?.includes("category.force_delete"));
 
   const selectedCategory = categories.find((category) => category.id === selectedId) || null;
@@ -262,6 +273,26 @@ export function AdminCategoriesPage() {
     setCreateError(null);
     setCreateConfirming(false);
     setCreateOpen(true);
+  };
+
+  const openSharedFolder = async () => {
+    setSharedError(null);
+    try {
+      const [roots, schemes] = await Promise.all([adminMediaApi.externalRoots(), adminContentApi.transcriptionSchemes()]);
+      const available = schemes.filter((item) => item.enabled && !item.archived && item.availability === "available");
+      setSharedRoots(roots); setSharedSchemes(available);
+      setSharedDraft({ parent_id: "", display_name: "", root_alias: roots[0]?.alias || "", relative_path: "", default_scheme_id: available[0]?.scheme_id || "" });
+    } catch (cause) { setSharedError(cause instanceof Error ? cause.message : "共享目录配置加载失败"); }
+    setSharedOpen(true);
+  };
+
+  const createSharedFolder = async () => {
+    setSharedSaving(true); setSharedError(null);
+    try {
+      const created = await adminContentApi.createSharedFolder({ ...sharedDraft, parent_id: sharedDraft.parent_id || null });
+      await load(true); setSelectedId(created.id); setSharedOpen(false); toast.success("共享文件夹已创建");
+    } catch (cause) { setSharedError(cause instanceof Error ? cause.message : "共享文件夹创建失败"); }
+    finally { setSharedSaving(false); }
   };
 
   const confirmDiscard = () => {
@@ -475,6 +506,7 @@ export function AdminCategoriesPage() {
           <IconButton label={refreshing ? "刷新中" : "刷新"} onClick={requestRefresh} disabled={loading || refreshing}>
             <RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />
           </IconButton>
+          {isAdmin && <Button variant="outline" onClick={() => void openSharedFolder()} className="flex-1 sm:flex-none"><Network className="size-4" />新建共享文件夹</Button>}
           <Button onClick={() => requestCreate()} className="flex-1 sm:flex-none"><Plus className="size-4" />新增分类</Button>
         </div>
       </header>
@@ -525,6 +557,24 @@ export function AdminCategoriesPage() {
           )}
         </section>
       )}
+
+      {canManageExternalSources && !error && <ExternalMediaSourcesPanel categories={categories} schemes={sharedSchemes} onOpenWorkbench={() => undefined} onMediaChanged={async () => { await load(true); }} />}
+
+      <Sheet open={sharedOpen} onOpenChange={(open) => { if (!sharedSaving) setSharedOpen(open); }}>
+        <SheetContent className="max-w-xl overflow-y-auto">
+          <SheetHeader><SheetTitle>新建共享文件夹</SheetTitle><SheetDescription>只读扫描服务端白名单目录中的 MP4 视频，不修改远程文件。</SheetDescription></SheetHeader>
+          <div className="space-y-4 p-6">
+            {sharedError && <Alert variant="destructive" role="alert"><AlertTitle>共享文件夹创建失败</AlertTitle><AlertDescription>{sharedError}</AlertDescription></Alert>}
+            {sharedRoots.length === 0 && <Alert role="status"><AlertTitle>未配置共享目录根</AlertTitle><AlertDescription>请先在服务端配置可选根别名。</AlertDescription></Alert>}
+            <Field label="父分类"><Select value={sharedDraft.parent_id} onChange={(event) => setSharedDraft({ ...sharedDraft, parent_id: event.target.value })}><option value="">一级分类</option>{categories.filter((item) => item.is_active && item.category_kind !== "shared_folder").map((item) => <option key={item.id} value={item.id}>{item.full_path}</option>)}</Select></Field>
+            <Field label="显示名称"><Input value={sharedDraft.display_name} maxLength={100} onChange={(event) => setSharedDraft({ ...sharedDraft, display_name: event.target.value })} placeholder="例如 培训视频共享目录" /></Field>
+            <Field label="共享根别名"><Select value={sharedDraft.root_alias} onChange={(event) => setSharedDraft({ ...sharedDraft, root_alias: event.target.value })}><option value="">请选择</option>{sharedRoots.map((root) => <option key={root.alias} value={root.alias}>{root.alias}</option>)}</Select></Field>
+            <Field label="相对目录"><Input value={sharedDraft.relative_path} onChange={(event) => setSharedDraft({ ...sharedDraft, relative_path: event.target.value })} placeholder="可留空，例如 2026/培训" /></Field>
+            <Field label="默认转录方案"><Select value={sharedDraft.default_scheme_id} onChange={(event) => setSharedDraft({ ...sharedDraft, default_scheme_id: event.target.value })}><option value="">请选择</option>{sharedSchemes.map((scheme) => <option key={scheme.scheme_id} value={scheme.scheme_id}>{scheme.name}</option>)}</Select></Field>
+            <Button className="w-full" onClick={() => void createSharedFolder()} disabled={sharedSaving || !sharedDraft.display_name.trim() || !sharedDraft.root_alias || !sharedDraft.default_scheme_id}>{sharedSaving ? "创建中…" : "创建共享文件夹"}</Button>
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <Sheet open={createOpen} onOpenChange={(open) => { if (!open && !createSaving) { setCreateOpen(false); setCreateConfirming(false); } }}>
         <SheetContent className="max-w-xl overflow-y-auto">
@@ -679,11 +729,11 @@ function CategoryTreeNodeView({
     >
       <span className="flex w-11 shrink-0 items-center gap-1">
         {hasChildren ? <button type="button" aria-label={isExpanded ? `收起${category.display_name}` : `展开${category.display_name}`} title={isExpanded ? "收起" : "展开"} onClick={(event) => { event.stopPropagation(); onToggle(category.id); }} className="inline-flex size-6 items-center justify-center rounded-ui-sm text-muted-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{isExpanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}</button> : <span className="size-6" aria-hidden="true" />}
-        {hasChildren && isExpanded ? <FolderOpen className="size-4 text-primary/80" aria-hidden="true" /> : <Folder className="size-4 text-muted-foreground" aria-hidden="true" />}
+        <span className="relative inline-flex size-4 shrink-0">{hasChildren && isExpanded ? <FolderOpen className="size-4 text-primary/80" aria-hidden="true" /> : <Folder className="size-4 text-muted-foreground" aria-hidden="true" />}{category.category_kind === "shared_folder" && <Network className="absolute -right-2 -top-1 size-2.5 text-primary" aria-label="共享文件夹" />}</span>
       </span>
       <span className="flex min-w-0 flex-1 items-center gap-2">
         <span className={`inline-flex w-11 shrink-0 items-center gap-1 text-ui-xs font-medium ${category.is_active ? "text-success" : "text-muted-foreground"}`}><span className={`size-2 rounded-full ${category.is_active ? "bg-success" : "bg-muted-foreground/60"}`} aria-hidden="true" />{category.is_active ? "启用" : "停用"}</span>
-        <span className={`min-w-0 flex-1 break-words tabular-nums ${level === 1 ? "font-semibold" : "font-medium"}`}>{category.display_code} {category.display_name}</span>
+        <span className={`min-w-0 flex-1 break-words tabular-nums ${level === 1 ? "font-semibold" : "font-medium"}`}>{category.display_code} {category.display_name}{category.category_kind === "shared_folder" && <span className="ml-2 text-ui-xs font-normal text-primary">共享文件夹</span>}</span>
         <span className="hidden w-[3.75rem] shrink-0 text-right text-ui-xs tabular-nums text-muted-foreground sm:block">{category.item_count} 份{hasChildren ? ` · ${children.length} 项` : ""}</span>
         <span className="hidden w-[7.25rem] shrink-0 flex-wrap items-center justify-end gap-x-1 gap-y-0 sm:inline-flex" aria-label="问答与筛选状态">
           <Badge aria-label={category.chat_search_effective === false ? "企业知识问答关闭" : "企业知识问答开启"} variant={category.chat_search_effective === false ? "secondary" : "success"} className={category.chat_search_effective === false ? "line-through" : undefined}>问答</Badge>

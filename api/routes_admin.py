@@ -2043,10 +2043,12 @@ def preview_media_asset(
 def archive_media_asset(media_id: str, admin: CurrentUser = Depends(require_csrf_admin), conn: sqlite3.Connection = Depends(get_db)) -> DeleteManagedContentResponse:
     try: validate_uuid(media_id, "media_id")
     except ContractValidationError: raise HTTPException(status_code=404, detail="媒体不存在")
-    row = conn.execute("""SELECT i.id AS item_id,h.current_version_id AS version_id
+    row = conn.execute("""SELECT i.id AS item_id,h.current_version_id AS version_id,m.storage_kind
                          FROM content_items i JOIN media_transcript_heads h ON h.media_id=i.media_id
+                         JOIN media_assets m ON m.media_id=i.media_id
                          WHERE i.media_id=? AND i.content_kind='media_transcript' AND i.archived_at IS NULL""", (media_id,)).fetchone()
     if row is None: raise HTTPException(status_code=409, detail="该视频没有可归档的已发布转写资料")
+    if row["storage_kind"] == "external": raise HTTPException(status_code=409, detail="共享目录视频为只读来源，不能移入回收站")
     try:
         result = archive_content_item(conn, str(row["item_id"]), expected_version_id=str(row["version_id"]), actor_user_id=admin.id, can_archive_draft=True, can_archive_published=True)
     except ValueError as exc:

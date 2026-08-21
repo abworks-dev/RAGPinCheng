@@ -1301,6 +1301,16 @@ MIGRATIONS = (
         ),
     ),
     Migration(34, "unbounded_managed_category_depth", ("RELAX_CATEGORY_NODE_LEVEL_CHECK",)),
+    Migration(
+        35,
+        "shared_folder_category_metadata",
+        (
+            "ALTER TABLE category_nodes ADD COLUMN category_kind TEXT NOT NULL DEFAULT 'folder' CHECK (category_kind IN ('folder','shared_folder'))",
+            "ALTER TABLE category_nodes ADD COLUMN external_source_id TEXT REFERENCES external_media_sources(id) ON DELETE RESTRICT",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_category_nodes_external_source ON category_nodes(external_source_id) WHERE external_source_id IS NOT NULL",
+            "CREATE INDEX IF NOT EXISTS idx_category_nodes_kind ON category_nodes(category_kind)",
+        ),
+    ),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(

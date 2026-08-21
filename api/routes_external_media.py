@@ -61,7 +61,7 @@ def _source_dto(row: sqlite3.Row) -> ExternalMediaSourceDTO:
 
 def _validate_source_targets(conn: sqlite3.Connection, category_id: str, scheme_id: str) -> None:
     try:
-        require_active_category(conn, category_id)
+        require_active_category(conn, category_id, allow_shared=True)
         resolve_scheme_runtime(conn, scheme_id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail="目标目录或转录方案当前不可用") from exc
@@ -130,6 +130,9 @@ def update_source(
     _admin: CurrentUser = Depends(require_csrf_admin),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ExternalMediaSourceDTO:
+    linked = conn.execute("SELECT id FROM category_nodes WHERE external_source_id=?", (source_id,)).fetchone()
+    if linked is not None and body.target_category_id != linked["id"]:
+        raise HTTPException(status_code=409, detail="共享文件夹的目标分类不能单独修改")
     _validate_source_targets(conn, body.target_category_id, body.default_scheme_id)
     now = int(time.time())
     changed = conn.execute(

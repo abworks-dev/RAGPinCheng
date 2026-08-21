@@ -33,6 +33,7 @@ from src.config import (
     MAX_VIDEO_UPLOAD_MB,
     ROOT,
     TRANSCRIPTION_ARTIFACT_DIR,
+    EXTERNAL_MEDIA_ROOTS,
 )
 from src.office_security import find_unsafe_office_content
 from src.transcription.persistence import ManagedMarkdownRef
@@ -124,6 +125,8 @@ from .content_store import (
 from .db import get_db
 from .routes_media import safe_join
 from .media_upload_conflicts import find_media_upload_conflicts, normalize_media_title
+from .media_storage import normalize_external_relative_path
+from .transcription_schemes import resolve_scheme_runtime
 from .schemas import (
     BulkArchiveManagedContentRequest,
     BulkOperationDTO,
@@ -143,6 +146,7 @@ from .schemas import (
     UpdateTrashSettingsRequest,
     BulkDownloadManagedContentRequest,
     CreateManagedCategoryRequest,
+    CreateSharedFolderRequest,
     CreateFolderRequest,
     CreateContentPermissionGroupRequest,
     DeleteManagedContentRequest,
@@ -571,6 +575,8 @@ def _category_dto(conn: sqlite3.Connection, row: sqlite3.Row) -> ManagedCategory
         parent_id=row["parent_id"],
         display_code=row["display_code"],
         display_name=row["display_name"],
+        category_kind=str(row["category_kind"] or "folder") if "category_kind" in row.keys() else "folder",
+        external_source_id=row["external_source_id"] if "external_source_id" in row.keys() else None,
         sort_order=row["sort_order"],
         level=row["level"],
         is_active=bool(row["is_active"]),
@@ -589,6 +595,16 @@ def _category_dto(conn: sqlite3.Connection, row: sqlite3.Row) -> ManagedCategory
         total_child_count=int(row["total_child_count"]) if "total_child_count" in row.keys() else 0,
         total_item_count=int(row["total_item_count"]) if "total_item_count" in row.keys() else int(row["item_count"]) if "item_count" in row.keys() else 0,
     )
+
+
+def _reject_external_media_mutation(conn: sqlite3.Connection, item_id: str) -> None:
+    row = conn.execute(
+        """SELECT m.storage_kind FROM content_items i
+           JOIN media_assets m ON m.media_id=i.media_id WHERE i.id=?""",
+        (item_id,),
+    ).fetchone()
+    if row is not None and row["storage_kind"] == "external":
+        raise ValueError("external_media_read_only")
 
 
 def _folder_request_dto(row: sqlite3.Row) -> FolderRequestDTO:
@@ -817,6 +833,44 @@ def post_category(
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
     return _category_dto(conn, row)
+
+
+@router.post("/shared-folders", response_model=ManagedCategoryDTO, status_code=201)
+def post_shared_folder(
+    body: CreateSharedFolderRequest,
+    user: CurrentUser = Depends(require_csrf_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ManagedCategoryDTO:
+    _require_feature()
+    if body.root_alias not in EXTERNAL_MEDIA_ROOTS:
+        raise HTTPException(status_code=409, detail="所选共享目录根别名未在服务端配置")
+    try:
+        relative_path = normalize_external_relative_path(body.relative_path, allow_empty=True)
+        resolve_scheme_runtime(conn, body.default_scheme_id)
+        conn.execute("BEGIN IMMEDIATE")
+        source_id = str(uuid.uuid4())
+        now = int(time.time())
+        row = create_category(
+            conn, category_key=None, parent_id=body.parent_id,
+            display_code=next_category_display_code(conn, body.parent_id),
+            display_name=body.display_name,
+            sort_order=next_category_sort_order(conn, body.parent_id), actor_user_id=user.id,
+            target_position=body.target_position, confirm_number_shift=body.confirm_number_shift, commit=False,
+        )
+        conn.execute(
+            """INSERT INTO external_media_sources
+               (id,name,root_alias,relative_path,target_category_id,default_scheme_id,
+                auto_enqueue,scan_interval_seconds,created_by,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (source_id, body.display_name.strip(), body.root_alias, relative_path, row["id"],
+             body.default_scheme_id, int(body.auto_enqueue), body.scan_interval_seconds, user.id, now, now),
+        )
+        conn.execute("UPDATE category_nodes SET category_kind='shared_folder', external_source_id=?, version=version+1 WHERE id=?", (source_id, row["id"]))
+        conn.commit()
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        conn.rollback()
+        _raise_domain_error(exc)
+    return _category_dto(conn, conn.execute("SELECT * FROM category_nodes WHERE id=?", (row["id"],)).fetchone())
 
 
 @router.patch("/categories/{category_id}", response_model=ManagedCategoryDTO)
@@ -2321,6 +2375,10 @@ def delete_content_item(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> DeleteManagedContentResponse:
     _require_feature()
+    try:
+        _reject_external_media_mutation(conn, item_id)
+    except ValueError as exc:
+        _raise_domain_error(exc)
     item_kind = conn.execute(
         "SELECT content_kind FROM content_items WHERE id=?", (item_id,)
     ).fetchone()
@@ -2355,6 +2413,10 @@ def move_managed_content_item(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedContentItemDTO:
     _require_feature()
+    try:
+        _reject_external_media_mutation(conn, item_id)
+    except ValueError as exc:
+        _raise_domain_error(exc)
     try:
         move_content_item(
             conn,
@@ -2455,6 +2517,10 @@ def rename_managed_content_item(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedContentItemDTO:
     _require_feature()
+    try:
+        _reject_external_media_mutation(conn, item_id)
+    except ValueError as exc:
+        _raise_domain_error(exc)
     item_kind = conn.execute(
         "SELECT content_kind FROM content_items WHERE id=? AND archived_at IS NULL",
         (item_id,),
@@ -3507,6 +3573,7 @@ def bulk_move_content_items(
     results: list[BulkManagedContentResultDTO] = []
     for item in _validate_bulk_item_refs(body.items):
         try:
+            _reject_external_media_mutation(conn, item.item_id)
             move_content_item(
                 conn,
                 item.item_id,
@@ -3546,6 +3613,7 @@ def bulk_reclassify_content_items(
     results: list[BulkManagedContentResultDTO] = []
     for item in _validate_bulk_item_refs(body.items):
         try:
+            _reject_external_media_mutation(conn, item.item_id)
             row = create_reclassification_job(
                 conn,
                 item.item_id,
@@ -3589,6 +3657,7 @@ def bulk_archive_content_items(
     results: list[BulkManagedContentResultDTO] = []
     for item in _validate_bulk_item_refs(body.items):
         try:
+            _reject_external_media_mutation(conn, item.item_id)
             item_kind = conn.execute(
                 "SELECT content_kind FROM content_items WHERE id=?", (item.item_id,)
             ).fetchone()
