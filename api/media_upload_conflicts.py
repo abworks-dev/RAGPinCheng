@@ -75,9 +75,12 @@ def find_media_upload_conflicts(
     return conflicts
 
 
-def require_active_category(conn: sqlite3.Connection, category_id: str) -> None:
-    if conn.execute(
-        "SELECT 1 FROM category_nodes WHERE id=? AND is_active=1 AND deleted_at IS NULL",
+def require_active_category(conn: sqlite3.Connection, category_id: str, *, allow_shared: bool = False) -> None:
+    row = conn.execute(
+        "SELECT category_kind FROM category_nodes WHERE id=? AND is_active=1 AND deleted_at IS NULL",
         (category_id,),
-    ).fetchone() is None:
+    ).fetchone()
+    if row is None:
         raise ValueError("active_category_not_found")
+    if not allow_shared and row["category_kind"] == "shared_folder":
+        raise ValueError("shared_folder_upload_forbidden")

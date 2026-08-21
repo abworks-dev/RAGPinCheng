@@ -61,7 +61,7 @@ def _source_dto(row: sqlite3.Row) -> ExternalMediaSourceDTO:
 
 def _validate_source_targets(conn: sqlite3.Connection, category_id: str, scheme_id: str) -> None:
     try:
-        require_active_category(conn, category_id)
+        require_active_category(conn, category_id, allow_shared=True)
         resolve_scheme_runtime(conn, scheme_id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail="目标目录或转录方案当前不可用") from exc
