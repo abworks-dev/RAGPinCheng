@@ -5640,21 +5640,20 @@ export function AdminManagedContentPage() {
                 <p className="mr-auto text-ui-sm">
                   已选择 <strong>{trashSelected.length}</strong> 份资料
                 </p>
-                {can("trash.restore") && (
-                  <Button
-                    size="sm"
-                    className="max-sm:h-control-md"
-                    disabled={Boolean(busyAction)}
-                    onClick={() => {
-                      setTrashBulkTarget("original");
-                      setTrashPreflight([]);
-                      setTrashPreflightOpen(true);
-                    }}
-                  >
-                    <ArchiveRestore className="size-4" />
-                    恢复所选（{trashSelected.length}）
-                  </Button>
-                )}
+                <Button
+                  size="sm"
+                  className="max-sm:h-control-md"
+                  disabled={Boolean(busyAction) || !can("trash.restore")}
+                  title={!can("trash.restore") ? "当前账号没有恢复资料权限" : undefined}
+                  onClick={() => {
+                    setTrashBulkTarget("original");
+                    setTrashPreflight([]);
+                    setTrashPreflightOpen(true);
+                  }}
+                >
+                  <ArchiveRestore className="size-4" />
+                  恢复所选（{trashSelected.length}）
+                </Button>
                 {can("trash.purge") && (
                   <ActionsMenu
                     disabled={Boolean(busyAction)}
