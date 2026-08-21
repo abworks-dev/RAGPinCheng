@@ -56,6 +56,10 @@ def apply_production_volumes(config: dict[str, Any]) -> None:
     external_root = os.environ.get("EXTERNAL_SOURCES_HOST_PATH")
     if external_root:
         volumes.append({"type": "bind", "source": external_root, "target": "/app/external-sources", "read_only": True})
+    else:
+        existing = next((v for v in backend.get("volumes", []) if v.get("target") == "/app/external-sources"), None)
+        if existing is not None:
+            volumes.append({**existing, "read_only": True})
     backend["volumes"] = volumes
 
 
