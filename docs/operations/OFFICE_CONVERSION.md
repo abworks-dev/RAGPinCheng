@@ -16,6 +16,8 @@ LIBREOFFICE_URL=http://libreoffice:8101
 
 请求超时由 `LIBREOFFICE_TIMEOUT` 控制，默认 120 秒。新环境从仓库根目录构建并启动：
 
+转换服务的单文件上限由 `LIBREOFFICE_MAX_FILE_MB` 控制，默认 2000 MB，与管理后台默认单文件上传上限一致。大文件转换会增加临时磁盘和内存压力，生产环境调整前必须检查资源余量。
+
 ```powershell
 docker compose -f docker/docker-compose.yml build libreoffice
 docker compose -f docker/docker-compose.yml up -d libreoffice

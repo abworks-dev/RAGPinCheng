@@ -30,7 +30,7 @@ logger = logging.getLogger("libreoffice")
 app = FastAPI(title="LibreOffice Conversion Service", version="1")
 
 # Limits
-MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
+MAX_FILE_SIZE = int(os.getenv("LIBREOFFICE_MAX_FILE_MB", "2000")) * 1024 * 1024
 CONVERSION_TIMEOUT = 120  # seconds
 MAX_CONCURRENT = 2
 
@@ -132,6 +132,21 @@ def _cleanup_dirs(dirs: list[Path]) -> None:
                 p.unlink(missing_ok=True)
 
 
+async def _save_upload(upload: UploadFile, destination: Path) -> None:
+    """Persist an upload with a bounded read, avoiding a second full-size buffer."""
+    size = 0
+    try:
+        with destination.open("xb") as handle:
+            while chunk := await upload.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_FILE_SIZE:
+                    raise HTTPException(status_code=413, detail="File too large")
+                handle.write(chunk)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+
+
 def _select_conversion_output(output_dir: Path, target_format: str) -> Path:
     """Return the single expected conversion artifact after validating it."""
     expected = list(output_dir.glob(f"*.{target_format}"))
@@ -172,10 +187,6 @@ async def recalculate(file: UploadFile):
     if ext not in _RECALC_EXTS:
         raise HTTPException(status_code=400, detail=f"Unsupported format: {ext}")
 
-    content = await file.read()
-    if len(content) > MAX_FILE_SIZE:
-        raise HTTPException(status_code=413, detail="File too large")
-
     work_dir = Path(f"/data/input/{uuid.uuid4().hex}")
     output_dir = Path(f"/data/output/{uuid.uuid4().hex}")
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -186,7 +197,7 @@ async def recalculate(file: UploadFile):
     input_path = work_dir / safe_name
 
     try:
-        input_path.write_bytes(content)
+        await _save_upload(file, input_path)
 
         async with _concurrency_sem:
             # Step 1: xlsx → ods (forces recalculation)
@@ -247,10 +258,6 @@ async def convert(file: UploadFile, target_format: str = "pdf"):
             detail=f"Unsupported conversion: {ext} to {target_format}",
         )
 
-    content = await file.read()
-    if len(content) > MAX_FILE_SIZE:
-        raise HTTPException(status_code=413, detail="File too large")
-
     work_dir = Path(f"/data/input/{uuid.uuid4().hex}")
     output_dir = Path(f"/data/output/{uuid.uuid4().hex}")
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -259,7 +266,7 @@ async def convert(file: UploadFile, target_format: str = "pdf"):
     input_path = work_dir / f"input{ext}"
 
     try:
-        input_path.write_bytes(content)
+        await _save_upload(file, input_path)
 
         async with _concurrency_sem:
             await _run_libreoffice([
