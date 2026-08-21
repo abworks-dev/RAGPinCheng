@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, CheckCircle2, ClipboardCheck, FileUp, Film, LoaderCircle, RefreshCw, Rocket, Settings2, Trash2, Upload, XCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ClipboardCheck, FileUp, Film, LoaderCircle, RefreshCw, Rocket, Settings2, Trash2, Upload, XCircle, MoreHorizontal } from "lucide-react";
 import { adminMediaApi } from "../../api/admin/media";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
@@ -13,6 +13,7 @@ import { Progress } from "../../components/ui/progress";
 import { Select } from "../../components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 import { Checkbox } from "../../components/ui/checkbox";
+import { IconButton } from "../../components/ui/icon-button";
 import { TranscriptionWorkbenchSheet } from "../../components/TranscriptionWorkbenchSheet";
 import { ManagedSummaryCard } from "../../components/admin/ManagedSummaryCard";
 import { CategoryTreePicker } from "../../components/admin/CategoryTreePicker";
@@ -208,6 +209,9 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const [conflictReview, setConflictReview] = useState<MediaUploadPreflightEntry[] | null>(null);
   const [conflictChoices, setConflictChoices] = useState<Record<string, MediaConflictChoice>>({});
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
+  const [mediaPage, setMediaPage] = useState(0);
+  const [mediaPageSize, setMediaPageSize] = useState(10);
+  const [selectedMediaIds, setSelectedMediaIds] = useState<string[]>([]);
   const [lastLoadedAt, setLastLoadedAt] = useState<number | null>(null);
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
@@ -344,6 +348,12 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const visibleMediaAssets = transcriptionTaskAssets.filter((asset) => {
     return matchesMediaFilter(asset, mediaFilter);
   });
+  const mediaPageCount = Math.max(1, Math.ceil(visibleMediaAssets.length / mediaPageSize));
+  const pagedMediaAssets = visibleMediaAssets.slice(mediaPage * mediaPageSize, (mediaPage + 1) * mediaPageSize);
+  const pageIds = pagedMediaAssets.map((asset) => asset.media_id);
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedMediaIds.includes(id));
+  useEffect(() => { setMediaPage(0); setSelectedMediaIds([]); }, [mediaFilter, mediaPageSize]);
+  useEffect(() => { if (mediaPage >= mediaPageCount) setMediaPage(Math.max(0, mediaPageCount - 1)); }, [mediaPage, mediaPageCount]);
   const filterCounts = mediaFilterOptions.reduce<Record<MediaFilter, number>>((counts, [value]) => {
     counts[value] = transcriptionTaskAssets.filter((asset) => matchesMediaFilter(asset, value)).length;
     return counts;
@@ -950,23 +960,24 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
         </div>
         <Card className="overflow-hidden shadow-surface">
           <div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
-            <div className="min-w-0"><h2 id="media-assets-title" className="text-ui-base font-semibold">视频资源</h2><p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-ui-xs text-muted-foreground"><span>共 {transcriptionTaskAssets.length} 个任务</span><span>·</span><span>按每次提交分别记录媒体与处理进度；同名文件不会合并。</span></p></div>
+            <div className="min-w-0"><h2 id="media-assets-title" className="text-ui-base font-semibold">视频资源</h2><p className="mt-1 text-ui-xs text-muted-foreground">视频由资料列表上传，在这里跟踪转录、审核、发布、专属索引和恢复操作。</p></div>
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
               <Button size="sm" variant="outline" aria-label="刷新媒体资源" title="刷新媒体资源" disabled={loading} onClick={() => void refreshMediaState()}><RefreshCw className="size-4" aria-hidden="true" />刷新列表</Button>
+              <IconButton label="批量操作" tooltip="批量操作" className="border border-border" disabled={!selectedMediaIds.length}><MoreHorizontal className="size-4" /></IconButton>
+              <a className="inline-flex size-control-md items-center justify-center rounded-ui-md border border-border" href="/admin/asr" aria-label="转录配置" title="转录配置"><Settings2 className="size-4" /></a>
               {!embedded && <Button size="sm" onClick={() => setUploadDialogOpen(true)}><Upload className="size-4" />{hasUploadDraft ? `继续上传${pending.length ? `（${pending.length}）` : ""}` : "上传视频"}</Button>}
             </div>
           </div>
-          <p className="border-b border-border px-4 py-3 text-ui-xs text-muted-foreground sm:px-5">当前显示 {visibleMediaAssets.length} / {transcriptionTaskAssets.length} 条记录{lastLoadedAt ? ` · 最近刷新 ${new Date(lastLoadedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : ""}。</p>
         {jobsError && <Alert role="alert"><AlertTitle>任务状态暂时无法刷新</AlertTitle><AlertDescription>{jobsError}</AlertDescription></Alert>}
         {loadError ? <ErrorState title="媒体资源加载失败" description={loadError} action={<Button variant="outline" size="sm" onClick={refresh}>重新加载</Button>} />
           : loading ? <Card><LoadingState className="min-h-48" label="正在加载媒体资源…" /></Card>
           : transcriptionTaskAssets.length === 0 ? <EmptyState title="暂无转录任务" description="在资料列表为视频选择转录方案后，任务和各阶段状态会显示在这里。" />
           : <>
-            <div className="hidden grid-cols-[minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] gap-4 border-b border-border bg-surface-muted px-5 py-3 text-ui-xs font-medium text-muted-foreground lg:grid" data-testid="media-record-header">
-              <span>媒体信息</span><span>处理进度</span><span>最近提交</span><span>操作</span>
+            <div className="hidden grid-cols-[2rem_minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] gap-4 border-b border-border bg-surface-muted px-5 py-3 text-ui-xs font-medium text-muted-foreground lg:grid" data-testid="media-record-header">
+              <Checkbox aria-label="选择当前页视频" checked={allPageSelected} onChange={() => setSelectedMediaIds(allPageSelected ? [] : pageIds)} /><span>媒体信息</span><span>处理进度</span><span>最近提交</span><span>操作</span>
             </div>
             <ul className="divide-y divide-border" aria-label="视频处理记录">
-              {visibleMediaAssets.map((asset) => {
+              {pagedMediaAssets.map((asset) => {
                 const job = jobsByMediaId.get(asset.media_id);
                 const sameNameCount = mediaAssets.filter((item) => item.original_filename === asset.original_filename).length;
                 const availableActions = new Set(asset.available_actions || []);
@@ -982,7 +993,8 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
                 const showRetry = canRetry || job?.status === "failed" || job?.status === "cancelled";
                 const showPublishedActions = canReplace || canArchive || asset.publication_status === "published";
                 return <li key={asset.media_id} className="p-4 sm:p-5" data-testid="media-record-row">
-                  <div className="grid gap-4 lg:grid-cols-[minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] lg:items-start">
+                  <div className="grid gap-4 lg:grid-cols-[2rem_minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] lg:items-start">
+                    <Checkbox aria-label={`选择“${asset.title}”`} checked={selectedMediaIds.includes(asset.media_id)} onChange={() => setSelectedMediaIds((current) => current.includes(asset.media_id) ? current.filter((id) => id !== asset.media_id) : [...current, asset.media_id])} />
                     <div className="min-w-0">
                       <p className="truncate font-medium" title={asset.title}>{asset.title}</p>
                       <p className="mt-1 truncate font-mono text-ui-xs text-muted-foreground" title={asset.original_filename}>{asset.original_filename}</p>
@@ -997,7 +1009,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
                     </div>
                     <p className="text-ui-xs text-muted-foreground"><span className="sr-only">提交时间：</span>{formatAdminDate(asset.created_at)}</p>
                     <div className="flex flex-wrap gap-1.5 lg:justify-end" aria-label={`媒体操作：${asset.title}`}>
-                      <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => openWorkbench(asset.media_id)}>进入转写工作台</Button>
+                      <IconButton label="进入转写工作台" tooltip="进入转写工作台" className="border border-border" onClick={() => openWorkbench(asset.media_id)}><Film className="size-4" /></IconButton>
                       {asset.catalog_item_id && asset.current_version_id && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => { setMoveTarget(asset); setMoveCategoryId(""); setMoveError(null); }}>调整目录</Button>}
                       {showCancel && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" title={canCancel ? "取消当前转录任务" : disabledActions.cancel_transcription || "当前状态不可取消"} disabled={!job || !canCancel || deletingMediaId === asset.media_id} onClick={() => job && void cancelJob(job)}>取消</Button>}
                       {showRetry && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" title={canRetry ? "按原转录方案重试" : disabledActions.retry_transcription || "当前状态不可重试"} disabled={!job || !canRetry || deletingMediaId === asset.media_id} onClick={() => job && void retryJob(job)}>重试</Button>}
@@ -1011,6 +1023,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
             </ul>
           </>}
         {visibleMediaAssets.length === 0 && transcriptionTaskAssets.length > 0 && <EmptyState title="没有符合条件的媒体" description="请切换其他快捷筛选条件。" />}
+        <div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><p className="text-ui-xs text-muted-foreground">当前显示 {visibleMediaAssets.length ? mediaPage * mediaPageSize + 1 : 0} - {Math.min((mediaPage + 1) * mediaPageSize, visibleMediaAssets.length)} / {visibleMediaAssets.length} 条记录{lastLoadedAt ? ` · 最近刷新 ${new Date(lastLoadedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : ""}。</p><div className="flex flex-wrap items-center gap-2"><label className="flex items-center gap-2 text-ui-xs text-muted-foreground">每页<Select aria-label="每页视频条数" className="h-control-sm w-20" value={String(mediaPageSize)} onChange={(event) => setMediaPageSize(Number(event.target.value))}><option value="10">10 条</option><option value="20">20 条</option><option value="50">50 条</option></Select></label><Button size="sm" variant="outline" disabled={mediaPage === 0} onClick={() => setMediaPage((value) => value - 1)}>上一页</Button><Select aria-label="跳转视频页码" className="h-control-sm w-24" value={String(mediaPage + 1)} onChange={(event) => setMediaPage(Number(event.target.value) - 1)}>{Array.from({ length: mediaPageCount }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 页</option>)}</Select><Button size="sm" variant="outline" disabled={mediaPage + 1 >= mediaPageCount} onClick={() => setMediaPage((value) => value + 1)}>下一页</Button></div></div>
         </Card>
       </section>
 
