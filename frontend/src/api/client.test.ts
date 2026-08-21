@@ -507,7 +507,7 @@ describe("Phase 4B transcription API contracts", () => {
     await api.listTranscriptionSchemes();
     await api.listTranscriptionJobs(true, 25);
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/media", expect.objectContaining({ credentials: "include" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/media?limit=500", expect.objectContaining({ credentials: "include" }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/transcription/profiles", expect.objectContaining({ credentials: "include" }));
     expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/admin/transcription/schemes", expect.objectContaining({ credentials: "include" }));
     expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/admin/transcription/jobs?latest_per_media=true&limit=25", expect.objectContaining({ credentials: "include" }));

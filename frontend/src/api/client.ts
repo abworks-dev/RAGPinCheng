@@ -1046,7 +1046,10 @@ export const api = {
     fd.append("replacement_source_media_id", sourceMediaId);
     return multipartFetch<MediaAsset>("/api/admin/media", fd, callbacks);
   },
-  listMediaAssets: () => jsonFetch<MediaAsset[]>("/api/admin/media"),
+  // The transcription workbench filters this response down to assets with a
+  // transcription job. Request the API's full page so older jobs are not
+  // hidden behind the newest-100 media assets.
+  listMediaAssets: () => jsonFetch<MediaAsset[]>("/api/admin/media?limit=500"),
   listExternalMediaRoots: () => jsonFetch<ExternalMediaRoot[]>("/api/admin/external-media/roots"),
   listExternalMediaSources: () => jsonFetch<ExternalMediaSource[]>("/api/admin/external-media/sources"),
   createExternalMediaSource: (body: { name: string; root_alias: string; relative_path: string; unc_path?: string | null; target_category_id: string; default_scheme_id: string; auto_enqueue: boolean; scan_interval_seconds: number }) =>
