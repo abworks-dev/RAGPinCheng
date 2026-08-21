@@ -199,7 +199,7 @@ if [ "${SCHEMA_MIGRATION_ACTION}" = "APPLY_PENDING" ]; then
     compose stop backend
 fi
 echo ">> Checking application schema migration gate (${SCHEMA_MIGRATION_ACTION})"
-compose run --rm --no-deps backend python scripts/migrate_app_schema.py \
+compose run --rm --no-deps backend python -m scripts.migrate_app_schema \
     --db-path /app/data/app.sqlite \
     --backup-dir /app/data/migration-backups \
     --action "${SCHEMA_MIGRATION_ACTION}"
