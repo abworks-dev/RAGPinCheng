@@ -137,6 +137,7 @@ const ACTIVE_RECLASSIFICATION_STATUSES = new Set([
 ]);
 type SortKey = "docType" | "title" | "updatedAt" | "status" | "source";
 type SortDirection = "asc" | "desc";
+type TrashSortKey = "title" | "category" | "status" | "source" | "retention" | "archivedAt";
 type ManagedContentView =
   "library" | "trash" | "uploads" | "index" | "transcription";
 type MoveOperation = "move" | "reclassify" | "archive";
@@ -1385,7 +1386,13 @@ function PublicationFailure({ item }: { item: ManagedContentItem }) {
   );
 }
 
-function ManagedItemIdentity({ item }: { item: ManagedContentItem }) {
+function ManagedItemIdentity({
+  item,
+  showCategoryPath = false,
+}: {
+  item: ManagedContentItem;
+  showCategoryPath?: boolean;
+}) {
   const isMediaTranscript = item.content_kind === "media_transcript";
   const mediaDetails = isMediaTranscript
     ? [
@@ -1402,6 +1409,11 @@ function ManagedItemIdentity({ item }: { item: ManagedContentItem }) {
         {item.original_filename} · v{item.version_number}
         {mediaDetails.length ? ` · ${mediaDetails.join(" · ")}` : ""}
       </p>
+      {showCategoryPath && (
+        <p className="mt-1 break-words text-ui-xs text-muted-foreground">
+          目录：{item.category_path || item.category_label}
+        </p>
+      )}
       {isMediaTranscript && item.has_pending_revision && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           <Badge variant="warning">有新转录稿待处理</Badge>
@@ -1711,22 +1723,26 @@ function BatchActionsMenu({
 
 function ManagedContentSearchFilters({
   queryInput,
+  searchScope,
+  currentDirectoryAvailable,
   statusFilter,
   sourceFilter,
   kindFilter,
-  disabled,
   onQueryInputChange,
+  onSearchScopeChange,
   onStatusFilterChange,
   onSourceFilterChange,
   onKindFilterChange,
   onClear,
 }: {
   queryInput: string;
+  searchScope: "current" | "global";
+  currentDirectoryAvailable: boolean;
   statusFilter: string;
   sourceFilter: string;
   kindFilter: string;
-  disabled: boolean;
   onQueryInputChange: (value: string) => void;
+  onSearchScopeChange: (value: "current" | "global") => void;
   onStatusFilterChange: (value: string) => void;
   onSourceFilterChange: (value: string) => void;
   onKindFilterChange: (value: string) => void;
@@ -1759,10 +1775,6 @@ function ManagedContentSearchFilters({
     };
   }, [open]);
 
-  useEffect(() => {
-    if (disabled) setOpen(false);
-  }, [disabled]);
-
   const filterButtonLabel = open ? "收起搜索筛选" : "展开搜索筛选";
 
   return (
@@ -1782,8 +1794,7 @@ function ManagedContentSearchFilters({
           onChange={(event) => onQueryInputChange(event.target.value)}
           onFocus={() => setOpen(true)}
           aria-label="搜索资料"
-          placeholder={disabled ? "选择目录后搜索资料" : "搜索名称或文件名…"}
-          disabled={disabled}
+          placeholder="搜索资料名称、文件名或目录路径…"
         />
         <button
           type="button"
@@ -1793,7 +1804,6 @@ function ManagedContentSearchFilters({
           aria-haspopup="dialog"
           aria-expanded={open}
           aria-controls={panelId}
-          disabled={disabled}
           onClick={() => setOpen((current) => !current)}
         >
           <SlidersHorizontal className="size-4" aria-hidden="true" />
@@ -1816,6 +1826,32 @@ function ManagedContentSearchFilters({
           aria-label="搜索筛选"
           className="absolute inset-x-0 top-full z-dropdown mt-2 rounded-ui-lg border border-border bg-popover p-3 text-popover-foreground shadow-overlay"
         >
+          <div className="mb-3 space-y-1">
+            <span className="text-ui-xs text-muted-foreground">搜索范围</span>
+            <div
+              className="grid grid-cols-2 rounded-ui-md border border-input bg-surface-muted p-0.5"
+              role="group"
+              aria-label="搜索范围"
+            >
+              <button
+                type="button"
+                className={`h-control-sm rounded-ui-sm px-3 text-ui-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${searchScope === "current" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                aria-pressed={searchScope === "current"}
+                disabled={!currentDirectoryAvailable}
+                onClick={() => onSearchScopeChange("current")}
+              >
+                当前目录
+              </button>
+              <button
+                type="button"
+                className={`h-control-sm rounded-ui-sm px-3 text-ui-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${searchScope === "global" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                aria-pressed={searchScope === "global"}
+                onClick={() => onSearchScopeChange("global")}
+              >
+                全局搜索
+              </button>
+            </div>
+          </div>
           <div className="grid gap-3 sm:grid-cols-3">
             <label className="space-y-1 text-ui-xs text-muted-foreground">
               <span>类型</span>
@@ -2179,6 +2215,14 @@ export function AdminManagedContentPage() {
   const [bulkItemBusy, setBulkItemBusy] = useState<string | null>(null);
   const [queryInput, setQueryInput] = useState("");
   const [query, setQuery] = useState("");
+  const contentLoadRequestRef = useRef(0);
+  const [searchScope, setSearchScope] = useState<"current" | "global">(
+    "global",
+  );
+  const navigateToFolder = useCallback((folderId: string) => {
+    setSearchScope(folderId ? "current" : "global");
+    setCurrentFolderId(folderId);
+  }, []);
   const [statusFilter, setStatusFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
   const [kindFilter, setKindFilter] = useState("");
@@ -2227,9 +2271,8 @@ export function AdminManagedContentPage() {
   const [trashArchivedBy, setTrashArchivedBy] = useState("");
   const [trashArchivedFrom, setTrashArchivedFrom] = useState("");
   const [trashArchivedTo, setTrashArchivedTo] = useState("");
-  const [trashSortDirection, setTrashSortDirection] = useState<"asc" | "desc">(
-    "desc",
-  );
+  const [trashSort, setTrashSort] = useState<{ key: TrashSortKey; direction: SortDirection }>({ key: "archivedAt", direction: "desc" });
+  const trashSortDirection = trashSort.key === "archivedAt" ? trashSort.direction : "desc";
   const [trashBulkTarget, setTrashBulkTarget] = useState("original");
   const [trashPreflight, setTrashPreflight] = useState<
     BulkRestorePreflightResult[]
@@ -2378,6 +2421,9 @@ export function AdminManagedContentPage() {
     return () => window.clearTimeout(timer);
   }, [queryInput]);
   useEffect(() => {
+    setSearchScope(currentFolderId ? "current" : "global");
+  }, [currentFolderId]);
+  useEffect(() => {
     setPage(0);
     setSelected([]);
     setSelectedFolders([]);
@@ -2387,11 +2433,20 @@ export function AdminManagedContentPage() {
     statusFilter,
     sourceFilter,
     kindFilter,
+    searchScope,
     pageSize,
   ]);
 
+  const hasLibrarySearchOrFilters = Boolean(
+    query || statusFilter || sourceFilter || kindFilter,
+  );
+  const showGlobalResults =
+    searchScope === "global" &&
+    (Boolean(currentFolderId) || hasLibrarySearchOrFilters);
+
   const load = useCallback(
     async (refresh = false) => {
+      const requestId = ++contentLoadRequestRef.current;
       if (refresh) setRefreshing(true);
       else if (!currentFolderId) setLoading(true);
       setError(null);
@@ -2401,7 +2456,8 @@ export function AdminManagedContentPage() {
           adminContentApi.categories(),
           adminContentApi.items({
             query: query || undefined,
-            category_id: currentFolderId || undefined,
+            category_id:
+              searchScope === "current" ? currentFolderId || undefined : undefined,
             lifecycle_status: statusFilter || undefined,
             source_origin: sourceFilter || undefined,
             doc_type: kindFilter
@@ -2421,7 +2477,8 @@ export function AdminManagedContentPage() {
             limit: pageSize,
             offset: page * pageSize,
           }),
-        ]);
+          ]);
+        if (requestId !== contentLoadRequestRef.current) return;
         setEnabled(capabilities.enabled);
         setUploadLimits({
           maxFileBytes: capabilities.max_upload_bytes,
@@ -2429,8 +2486,9 @@ export function AdminManagedContentPage() {
           maxBatchBytes: capabilities.max_batch_bytes,
         });
         setCategories(categoryRows);
-        setItems(currentFolderId ? listing.items : []);
-        setTotal(currentFolderId ? listing.total : 0);
+        const showListing = Boolean(currentFolderId) || hasLibrarySearchOrFilters;
+        setItems(showListing ? listing.items : []);
+        setTotal(showListing ? listing.total : 0);
         setCounts(listing.status_counts);
         setCurrentFolderId((current) =>
           current && categoryRows.some((row) => row.id === current)
@@ -2448,15 +2506,21 @@ export function AdminManagedContentPage() {
           ),
         );
         if (can("folder.review")) {
-          setFolderRequests(await adminContentApi.folderRequests("pending"));
+          const requests = await adminContentApi.folderRequests("pending");
+          if (requestId === contentLoadRequestRef.current) {
+            setFolderRequests(requests);
+          }
         }
       } catch (loadError) {
+        if (requestId !== contentLoadRequestRef.current) return;
         setError(
           loadError instanceof Error ? loadError.message : "资料加载失败",
         );
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (requestId === contentLoadRequestRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
     [
@@ -2467,6 +2531,8 @@ export function AdminManagedContentPage() {
       sourceFilter,
       statusFilter,
       kindFilter,
+      searchScope,
+      hasLibrarySearchOrFilters,
       sort,
     ],
   );
@@ -2484,7 +2550,7 @@ export function AdminManagedContentPage() {
   useManagedContentLiveRefresh({
     active: hasActiveReclassification || hasActivePublication,
     enabled: view === "library" && !uploading,
-    refresh: load,
+    refresh: () => load(true),
   });
 
   const loadTrash = useCallback(async () => {
@@ -3118,9 +3184,10 @@ export function AdminManagedContentPage() {
   }, [categories, currentFolder]);
   const currentRootFolderId = breadcrumbs[0]?.id || "";
   const sortedChildFolders = useMemo(() => {
+    const visibleFolders = showGlobalResults ? [] : childFolders;
     if (sort?.key !== "title")
-      return [...childFolders].sort(compareManagedCategories);
-    return [...childFolders].sort((left, right) => {
+      return [...visibleFolders].sort(compareManagedCategories);
+    return [...visibleFolders].sort((left, right) => {
       const comparison =
         `${left.display_code} ${left.display_name}`.localeCompare(
           `${right.display_code} ${right.display_name}`,
@@ -3129,7 +3196,7 @@ export function AdminManagedContentPage() {
         );
       return sort.direction === "asc" ? comparison : -comparison;
     });
-  }, [childFolders, sort]);
+  }, [childFolders, showGlobalResults, sort]);
   const folderRenameConflict = useMemo(() => {
     if (!folderRenameTarget) return null;
     const key = normalizeFolderName(folderRenameName);
@@ -3376,7 +3443,7 @@ export function AdminManagedContentPage() {
       currentFolderId &&
       !result.categories.some((category) => category.id === currentFolderId)
     ) {
-      setCurrentFolderId(result.parent_id || "");
+      navigateToFolder(result.parent_id || "");
     }
     if (result.force_delete) {
       if (result.cleanup_status === "partial") {
@@ -5090,7 +5157,7 @@ export function AdminManagedContentPage() {
           tooltip={unavailableReason || "打开文件夹"}
           className="border border-border max-sm:size-10"
           disabled={disabled}
-          onClick={() => setCurrentFolderId(folder.id)}
+          onClick={() => navigateToFolder(folder.id)}
         >
           <ChevronRight className="size-4" />
         </IconButton>
@@ -5436,7 +5503,28 @@ export function AdminManagedContentPage() {
         ? `已超期 ${Math.abs(item.retention_days_remaining || 0)} 天`
         : item.retention_status === "expiring"
           ? `即将到期，剩余 ${item.retention_days_remaining || 0} 天`
-          : `保留中，剩余 ${item.retention_days_remaining || 0} 天`;
+        : `保留中，剩余 ${item.retention_days_remaining || 0} 天`;
+    const sortedTrashItems = [...trashItems].sort((left, right) => {
+      const previousStatus = (item: ManagedContentItem) => item.pre_archive_lifecycle_status || item.lifecycle_status || "";
+      const value = (item: ManagedContentItem): string | number => {
+        switch (trashSort.key) {
+          case "title": return item.title || "";
+          case "category": return item.category_path || item.category_label || "";
+          case "status": return statusLabel[previousStatus(item)] || "未知状态";
+          case "source": return sourceLabel[item.source_origin] || "其他来源";
+          case "retention": return item.retention_days_remaining || 0;
+          case "archivedAt": return item.archived_at || 0;
+        }
+      };
+      const a = value(left); const b = value(right);
+      const comparison = typeof a === "number" && typeof b === "number" ? a - b : String(a).localeCompare(String(b), "zh-CN", { numeric: true, sensitivity: "base" });
+      return trashSort.direction === "asc" ? comparison : -comparison;
+    });
+    const toggleTrashSort = (key: TrashSortKey) => {
+      setTrashSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" });
+      setPage(0);
+    };
+    const trashSortIcon = (key: TrashSortKey) => trashSort.key !== key ? <ArrowUpDown className="size-3.5" /> : trashSort.direction === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />;
     return (
       <section className="space-y-5" aria-labelledby="managed-content-title">
         <header>
@@ -5586,16 +5674,6 @@ export function AdminManagedContentPage() {
                 size="sm"
                 variant="outline"
                 className="max-sm:h-control-md"
-                disabled={Boolean(busyAction)}
-                onClick={() => void exportTrash()}
-              >
-                <Download className="size-4" />
-                {busyAction === "trash-export" ? "导出中…" : "导出处置清单"}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="max-sm:h-control-md"
                 onClick={() => void loadTrash()}
                 disabled={trashLoading}
               >
@@ -5631,6 +5709,23 @@ export function AdminManagedContentPage() {
                           },
                         ]
                       : []),
+                    {
+                      key: "trash-export",
+                      label: busyAction === "trash-export" ? "导出中…" : "导出处置清单",
+                      icon: <Download className="size-4" />,
+                      onSelect: () => void exportTrash(),
+                    },
+                  ]}
+                />
+              )}
+              {(can("trash.restore") || can("trash.purge")) && (
+                <ActionsMenu
+                  disabled={Boolean(busyAction) || trashSelected.length === 0}
+                  triggerLabel="批量操作"
+                  menuLabel="回收站批量操作"
+                  options={[
+                    ...(can("trash.restore") ? [{ key: "trash-restore-selected", label: `恢复所选（${trashSelected.length}）`, icon: <ArchiveRestore className="size-4" />, onSelect: () => { setTrashBulkTarget("original"); setTrashPreflight([]); setTrashPreflightOpen(true); } }] : []),
+                    ...(can("trash.purge") ? [{ key: "trash-purge-selected", label: `永久删除所选（${trashSelected.length}）`, icon: <Trash2 className="size-4" />, destructive: true, onSelect: () => void openTrashPurge() }] : []),
                   ]}
                 />
               )}
@@ -5708,42 +5803,18 @@ export function AdminManagedContentPage() {
                           />
                         </th>
                       )}
-                      <th className="px-3 py-3 font-medium">资料</th>
-                      <th className="px-3 py-3 font-medium">原目录</th>
-                      <th className="px-3 py-3 font-medium">原状态</th>
-                      <th className="px-3 py-3 font-medium">来源</th>
-                      <th className="px-3 py-3 font-medium">保留期限</th>
-                      <th
-                        aria-sort={
-                          trashSortDirection === "asc"
-                            ? "ascending"
-                            : "descending"
-                        }
-                        className="px-3 py-3 font-medium"
-                      >
-                        <button
-                          type="button"
-                          className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          onClick={() => {
-                            setTrashSortDirection((current) =>
-                              current === "asc" ? "desc" : "asc",
-                            );
-                            setPage(0);
-                          }}
-                        >
-                          移入回收站
-                          {trashSortDirection === "asc" ? (
-                            <ArrowUp className="size-3.5" />
-                          ) : (
-                            <ArrowDown className="size-3.5" />
-                          )}
-                        </button>
-                      </th>
+                      {([ ["title", "资料"], ["category", "原目录"], ["status", "原状态"], ["source", "来源"], ["retention", "保留期限"], ["archivedAt", "移入回收站"] ] as [TrashSortKey, string][]).map(([key, label]) => (
+                        <th key={key} aria-sort={trashSort.key === key ? trashSort.direction === "asc" ? "ascending" : "descending" : "none"} className="px-3 py-3 font-medium">
+                          <button type="button" className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => toggleTrashSort(key)}>
+                            {label}{trashSortIcon(key)}
+                          </button>
+                        </th>
+                      ))}
                       <th className="px-3 py-3 text-right font-medium">操作</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {trashItems.map((item) => {
+                    {sortedTrashItems.map((item) => {
                       const previousStatus =
                         item.pre_archive_lifecycle_status ||
                         item.lifecycle_status;
@@ -5840,7 +5911,7 @@ export function AdminManagedContentPage() {
                 </table>
               </div>
               <ul className="divide-y divide-border lg:hidden">
-                {trashItems.map((item) => {
+                {sortedTrashItems.map((item) => {
                   const previousStatus =
                     item.pre_archive_lifecycle_status || item.lifecycle_status;
                   const sourcePath =
@@ -6602,11 +6673,13 @@ export function AdminManagedContentPage() {
           </div>
           <ManagedContentSearchFilters
             queryInput={queryInput}
+            searchScope={searchScope}
+            currentDirectoryAvailable={Boolean(currentFolderId)}
             statusFilter={statusFilter}
             sourceFilter={sourceFilter}
             kindFilter={kindFilter}
-            disabled={!currentFolderId}
             onQueryInputChange={setQueryInput}
+            onSearchScopeChange={setSearchScope}
             onStatusFilterChange={setStatusFilter}
             onSourceFilterChange={setSourceFilter}
             onKindFilterChange={setKindFilter}
@@ -6810,7 +6883,7 @@ export function AdminManagedContentPage() {
               <button
                 type="button"
                 className="shrink-0 rounded px-1 py-0.5 font-medium hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                onClick={() => setCurrentFolderId("")}
+                onClick={() => navigateToFolder("")}
               >
                 /
               </button>
@@ -6823,7 +6896,7 @@ export function AdminManagedContentPage() {
                   <button
                     type="button"
                     className="max-w-56 truncate rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    onClick={() => setCurrentFolderId(folder.id)}
+                    onClick={() => navigateToFolder(folder.id)}
                   >
                     {folder.display_code} {folder.display_name}
                   </button>
@@ -6835,7 +6908,7 @@ export function AdminManagedContentPage() {
               tooltip={currentFolder ? "返回上一目录" : "当前已在根目录"}
               className="size-control-md border border-border bg-background"
               disabled={!currentFolder}
-              onClick={() => setCurrentFolderId(currentFolder?.parent_id || "")}
+              onClick={() => navigateToFolder(currentFolder?.parent_id || "")}
             >
               <ArrowUp className="size-4" />
             </IconButton>
@@ -6885,7 +6958,7 @@ export function AdminManagedContentPage() {
               className="min-h-48 border-x-0 border-b-0"
               label="正在加载资料…"
             />
-          ) : !error && items.length === 0 && childFolders.length === 0 ? (
+          ) : !error && items.length === 0 && sortedChildFolders.length === 0 ? (
             <EmptyState
               className="min-h-56 rounded-none border-x-0 border-b-0 sm:min-h-64"
               title="没有符合条件的资料"
@@ -6954,7 +7027,7 @@ export function AdminManagedContentPage() {
                             key={folder.id}
                             data-testid={`managed-folder-row-${folder.id}`}
                             className={`cursor-pointer transition-colors duration-normal hover:bg-surface-muted/60 ${selectedFolders.includes(folder.id) || draggedItem ? "bg-primary/5" : ""} ${draggedItem ? "outline outline-1 -outline-offset-1 outline-primary/50" : ""}`}
-                            onClick={() => setCurrentFolderId(folder.id)}
+                            onClick={() => navigateToFolder(folder.id)}
                             onDragOver={(event) => {
                               if (draggedItem) {
                                 event.preventDefault();
@@ -6986,7 +7059,7 @@ export function AdminManagedContentPage() {
                               <button
                                 type="button"
                                 className="block max-w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                onClick={() => setCurrentFolderId(folder.id)}
+                                onClick={() => navigateToFolder(folder.id)}
                               >
                                 <span className="block break-words font-medium">
                                   {folderLabel}
@@ -7055,7 +7128,10 @@ export function AdminManagedContentPage() {
                               />
                             </td>
                             <td className="max-w-xs px-1.5 py-3">
-                              <ManagedItemIdentity item={item} />
+                              <ManagedItemIdentity
+                                item={item}
+                                showCategoryPath={showGlobalResults}
+                              />
                             </td>
                             <td className="whitespace-nowrap px-3 py-3 tabular-nums">
                               {formatManagedUpdatedAt(item.updated_at)}
@@ -7095,7 +7171,7 @@ export function AdminManagedContentPage() {
                           <button
                             type="button"
                             className="flex min-w-0 flex-1 items-center gap-3 rounded-ui-md text-left transition-colors hover:bg-surface-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            onClick={() => setCurrentFolderId(folder.id)}
+                            onClick={() => navigateToFolder(folder.id)}
                           >
                             <Folder
                               className="size-5 shrink-0 text-primary"
@@ -7145,7 +7221,10 @@ export function AdminManagedContentPage() {
                           />
                           <ManagedItemType docType={item.doc_type} />
                           <div className="min-w-0 flex-1">
-                            <ManagedItemIdentity item={item} />
+                            <ManagedItemIdentity
+                              item={item}
+                              showCategoryPath={showGlobalResults}
+                            />
                           </div>
                         </div>
                         <dl className="grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui-sm">
@@ -7286,7 +7365,7 @@ export function AdminManagedContentPage() {
                 <Button
                   variant="outline"
                   onClick={() => {
-                    setCurrentFolderId(folderDetailTarget.id);
+                    navigateToFolder(folderDetailTarget.id);
                     setFolderDetailTarget(null);
                   }}
                 >

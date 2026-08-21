@@ -62,7 +62,7 @@ export function ExternalMediaSourcesPanel({ categories, schemes, onOpenWorkbench
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState({ name: "", rootAlias: "", relativePath: "", categoryId: "cat-05", schemeId: "", autoEnqueue: false, interval: "900" });
+  const [form, setForm] = useState({ name: "", uncPath: "", categoryId: "cat-05", schemeId: "", autoEnqueue: false, interval: "900" });
 
   const selectedSource = sources.find((source) => source.id === selectedSourceId) ?? null;
   const videos = entries.filter((entry) => entry.kind === "video");
@@ -115,7 +115,7 @@ export function ExternalMediaSourcesPanel({ categories, schemes, onOpenWorkbench
     setBusy("save"); setNotice(null); setError(null);
     try {
       const created = await adminMediaApi.createExternalSource({
-        name: form.name.trim(), root_alias: form.rootAlias, relative_path: form.relativePath.trim(),
+        name: form.name.trim(), root_alias: "", relative_path: "", unc_path: form.uncPath.trim(),
         target_category_id: form.categoryId, default_scheme_id: form.schemeId,
         auto_enqueue: form.autoEnqueue, scan_interval_seconds: Number(form.interval),
       });
@@ -177,10 +177,7 @@ export function ExternalMediaSourcesPanel({ categories, schemes, onOpenWorkbench
   }
 
   const allSelected = selectable.length > 0 && selectable.every((entry) => selectedSet.has(entry.id));
-  const openCreate = () => {
-    setForm((current) => ({ ...current, rootAlias: current.rootAlias || roots[0]?.alias || "" }));
-    setDialogOpen(true);
-  };
+  const openCreate = () => setDialogOpen(true);
   const parentUp = parent.includes("/") ? parent.slice(0, parent.lastIndexOf("/")) : "";
 
   return <>
@@ -205,6 +202,6 @@ export function ExternalMediaSourcesPanel({ categories, schemes, onOpenWorkbench
       </div>}
     </Card>
 
-    <Dialog open={dialogOpen} onOpenChange={(open) => { if (!busy) setDialogOpen(open); }}><DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto"><DialogHeader><DialogTitle>登记共享目录</DialogTitle><DialogDescription>这里只选择服务端白名单根别名及其下相对路径，不保存网络凭据，也不会修改远程文件。</DialogDescription></DialogHeader><div className="space-y-4"><label className="block text-ui-sm font-medium">显示名称<Input className="mt-1" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} placeholder="例如：培训视频归档" /></label><div className="grid gap-4 sm:grid-cols-2"><label className="block text-ui-sm font-medium">共享根别名<Select className="mt-1" value={form.rootAlias} onChange={(event) => setForm((current) => ({ ...current, rootAlias: event.target.value }))}><option value="">请选择</option>{roots.map((root) => <option key={root.alias} value={root.alias}>{root.alias}</option>)}</Select></label><label className="block text-ui-sm font-medium">相对目录<Input className="mt-1" value={form.relativePath} onChange={(event) => setForm((current) => ({ ...current, relativePath: event.target.value }))} placeholder="可留空，示例：2026/培训" /></label></div><CategoryTreePicker categories={categories} value={form.categoryId} onChange={(categoryId) => setForm((current) => ({ ...current, categoryId }))} label="转录稿发布目录" /><label className="block text-ui-sm font-medium">默认转录方案<Select className="mt-1" value={form.schemeId} onChange={(event) => setForm((current) => ({ ...current, schemeId: event.target.value }))}><option value="">请选择</option>{schemes.map((scheme) => <option key={scheme.scheme_id} value={scheme.scheme_id} disabled={!scheme.enabled || scheme.archived || scheme.availability !== "available"}>{scheme.name}{scheme.availability !== "available" ? "（不可用）" : ""}</option>)}</Select></label><label className="flex items-start gap-2 text-ui-sm"><Checkbox checked={form.autoEnqueue} onChange={(event) => setForm((current) => ({ ...current, autoEnqueue: event.target.checked }))} /><span>后续扫描发现的新视频自动加入转录队列。首次扫描仍需人工确认批量入队。</span></label><label className="block text-ui-sm font-medium">扫描间隔（秒）<Input className="mt-1" type="number" min={60} max={86400} value={form.interval} onChange={(event) => setForm((current) => ({ ...current, interval: event.target.value }))} /></label></div><DialogFooter><Button variant="outline" disabled={busy != null} onClick={() => setDialogOpen(false)}>取消</Button><Button disabled={busy != null || !form.name.trim() || !form.rootAlias || !form.categoryId || !form.schemeId || Number(form.interval) < 60} onClick={() => void createSource()}>{busy === "save" ? "登记中…" : "登记共享目录"}</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={dialogOpen} onOpenChange={(open) => { if (!busy) setDialogOpen(open); }}><DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto"><DialogHeader><DialogTitle>登记共享目录</DialogTitle><DialogDescription>填写服务端已挂载白名单根下的完整 UNC 路径。系统不保存网络凭据，也不会修改远程文件。</DialogDescription></DialogHeader><div className="space-y-4"><label className="block text-ui-sm font-medium">显示名称<Input className="mt-1" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} placeholder="例如：培训视频归档" /></label><label className="block text-ui-sm font-medium">网络路径<Input className="mt-1" value={form.uncPath} onChange={(event) => setForm((current) => ({ ...current, uncPath: event.target.value }))} placeholder="例如 \\\\服务器\\共享名\\目录\\子目录" /></label><CategoryTreePicker categories={categories} value={form.categoryId} onChange={(categoryId) => setForm((current) => ({ ...current, categoryId }))} label="转录稿发布目录" /><label className="block text-ui-sm font-medium">默认转录方案<Select className="mt-1" value={form.schemeId} onChange={(event) => setForm((current) => ({ ...current, schemeId: event.target.value }))}><option value="">请选择</option>{schemes.map((scheme) => <option key={scheme.scheme_id} value={scheme.scheme_id} disabled={!scheme.enabled || scheme.archived || scheme.availability !== "available"}>{scheme.name}{scheme.availability !== "available" ? "（不可用）" : ""}</option>)}</Select></label><label className="flex items-start gap-2 text-ui-sm"><Checkbox checked={form.autoEnqueue} onChange={(event) => setForm((current) => ({ ...current, autoEnqueue: event.target.checked }))} /><span>后续扫描发现的新视频自动加入转录队列。首次扫描仍需人工确认批量入队。</span></label><label className="block text-ui-sm font-medium">扫描间隔（秒）<Input className="mt-1" type="number" min={60} max={86400} value={form.interval} onChange={(event) => setForm((current) => ({ ...current, interval: event.target.value }))} /></label></div><DialogFooter><Button variant="outline" disabled={busy != null} onClick={() => setDialogOpen(false)}>取消</Button><Button disabled={busy != null || !form.name.trim() || !form.uncPath.trim() || !form.categoryId || !form.schemeId || Number(form.interval) < 60} onClick={() => void createSource()}>{busy === "save" ? "登记中…" : "登记共享目录"}</Button></DialogFooter></DialogContent></Dialog>
   </>;
 }

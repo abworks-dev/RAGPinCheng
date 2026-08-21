@@ -150,6 +150,8 @@ services:
 
   libreoffice:
     image: pincheng-libreoffice:latest
+    environment:
+      LIBREOFFICE_MAX_FILE_MB: ${LIBREOFFICE_MAX_FILE_MB:-2000}
     build:
       context: ../services/libreoffice
       dockerfile: Dockerfile
