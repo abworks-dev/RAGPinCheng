@@ -6492,6 +6492,7 @@ export function AdminManagedContentPage() {
 
   return (
     <section className="space-y-5" aria-labelledby="managed-content-title">
+      {activeUpload && <div className="fixed right-4 top-4 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-ui-lg border border-primary/40 bg-background px-4 py-3 shadow-surface" role="status" aria-live="polite"><div className="flex items-start justify-between gap-3"><div><p className="font-medium">{activeUpload.phase === "processing" ? "服务端处理中…" : activeUpload.phase === "completed" ? "上传完成" : activeUpload.phase === "failed" ? "上传失败" : "上传中"}</p><p className="mt-1 text-ui-xs text-muted-foreground">{activeUpload.totalFiles} 个文件 · {activeUpload.targetPath}</p>{activeUpload.message && <p className="mt-1 text-ui-xs">{activeUpload.message}</p>}</div><button type="button" className="text-ui-xs text-muted-foreground" aria-label="关闭上传提示" onClick={() => setActiveUpload(null)}>关闭</button></div></div>}
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-ui-xs font-medium text-primary">内容管理</p>
