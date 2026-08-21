@@ -10,6 +10,7 @@ from pathlib import PurePosixPath
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.config import ASR_ENABLED, ASR_SERVICE_TOKEN, EXTERNAL_MEDIA_ROOTS, EXTERNAL_MEDIA_UNC_ROOTS, resolve_external_unc_path
+from src.transcription.profile import ProfileOperation
 from src.transcription.types import ContractValidationError
 
 from .auth import CurrentUser, require_admin, require_csrf_admin
@@ -31,7 +32,7 @@ from .schemas import (
     ExternalMediaSourceDTO,
     ExternalMediaSourceUpdate,
 )
-from .transcription_schemes import resolve_scheme_runtime
+from .transcription_schemes import available_schemes, resolve_scheme_runtime
 from .transcription_store import StoreConflictError
 from .transcription_worker import enqueue as enqueue_transcription
 
@@ -270,10 +271,24 @@ def enqueue_source_entries(
     source = conn.execute("SELECT default_scheme_id FROM external_media_sources WHERE id=?", (source_id,)).fetchone()
     if source is None:
         raise KeyError(source_id)
+    scheme_id = str(source["default_scheme_id"])
     try:
-        _scheme, profile_id = resolve_scheme_runtime(conn, str(source["default_scheme_id"]))
-    except ValueError as exc:
-        raise ExternalMediaError("scheme_unavailable") from exc
+        _scheme, profile_id = resolve_scheme_runtime(conn, scheme_id)
+        build_transcription_service().resolve_profile(profile_id, ProfileOperation.new_attempt)
+    except (ValueError, ContractValidationError):
+        profile_id = None
+        for candidate in available_schemes(conn):
+            try:
+                candidate_scheme, candidate_profile = resolve_scheme_runtime(conn, str(candidate["id"]))
+                build_transcription_service().resolve_profile(candidate_profile, ProfileOperation.new_attempt)
+            except (ValueError, ContractValidationError):
+                continue
+            scheme_id, profile_id = str(candidate_scheme["id"]), candidate_profile
+            conn.execute("UPDATE external_media_sources SET default_scheme_id=?,updated_at=? WHERE id=?", (scheme_id, int(time.time()), source_id))
+            conn.commit()
+            break
+        if profile_id is None:
+            raise ExternalMediaError("scheme_unavailable")
     params: list[object] = [source_id]
     identity_filter = ""
     if entry_ids is not None:
@@ -301,7 +316,7 @@ def enqueue_source_entries(
         )
         conn.commit()
 
-    task_args = ([dict(row) for row in rows], str(source_id), str(source["default_scheme_id"]), str(profile_id), created_by)
+    task_args = ([dict(row) for row in rows], str(source_id), scheme_id, str(profile_id), created_by)
     if background_tasks is None:
         process_external_enqueue_rows(*task_args)
     else:

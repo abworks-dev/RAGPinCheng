@@ -1003,7 +1003,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
                     </div>
                     <div className="min-w-0 space-y-2">
                       <div className="flex flex-wrap items-center gap-2"><StatusBadge value={job?.status || asset.status} meta={job ? jobStatusMeta : mediaStatusMeta} /></div>
-                      {asset.error && !job && <p className="text-ui-xs text-destructive">媒体处理失败，请在确认后删除或重新提交。原因：{asset.error}</p>}
+                      {asset.error && !job && <p className="text-ui-xs text-destructive">媒体处理失败，请修复转录方案后重试。原因：{asset.error}{asset.storage_kind === "external" ? "（共享目录原文件不可删除）" : ""}</p>}
                       {job ? <JobSummary job={job} /> : <p className="text-ui-xs text-muted-foreground">{asset.transcript_origin === "manual" ? "人工转写" : "尚未创建转录任务"}</p>}
                       <LifecycleRail asset={asset} />
                     </div>
