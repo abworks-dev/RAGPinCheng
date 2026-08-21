@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, CheckCircle2, ClipboardCheck, FileUp, Film, LoaderCircle, RefreshCw, Rocket, Settings2, Trash2, Upload, XCircle } from "lucide-react";
+import { Archive, ArrowLeft, Ban, CheckCircle2, ChevronDown, ClipboardCheck, FileUp, Film, FolderInput, LoaderCircle, RefreshCw, Repeat2, RotateCcw, Rocket, Settings2, Trash2, Upload, XCircle } from "lucide-react";
 import { adminMediaApi } from "../../api/admin/media";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
@@ -13,6 +13,7 @@ import { Progress } from "../../components/ui/progress";
 import { Select } from "../../components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 import { Checkbox } from "../../components/ui/checkbox";
+import { IconButton } from "../../components/ui/icon-button";
 import { TranscriptionWorkbenchSheet } from "../../components/TranscriptionWorkbenchSheet";
 import { ManagedSummaryCard } from "../../components/admin/ManagedSummaryCard";
 import { CategoryTreePicker } from "../../components/admin/CategoryTreePicker";
@@ -208,6 +209,8 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const [conflictReview, setConflictReview] = useState<MediaUploadPreflightEntry[] | null>(null);
   const [conflictChoices, setConflictChoices] = useState<Record<string, MediaConflictChoice>>({});
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
+  const [selectedMediaIds, setSelectedMediaIds] = useState<string[]>([]);
+  const [batchMenuOpen, setBatchMenuOpen] = useState(false);
   const [lastLoadedAt, setLastLoadedAt] = useState<number | null>(null);
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
@@ -344,6 +347,12 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const visibleMediaAssets = transcriptionTaskAssets.filter((asset) => {
     return matchesMediaFilter(asset, mediaFilter);
   });
+  const allVisibleSelected = visibleMediaAssets.length > 0 && visibleMediaAssets.every((asset) => selectedMediaIds.includes(asset.media_id));
+  const selectedJobs = selectedMediaIds.map((id) => jobsByMediaId.get(id)).filter((job): job is TranscriptionJob => Boolean(job));
+  const retryableSelectedJobs = selectedJobs.filter((job) => (job.status === "failed" || job.status === "cancelled") && job.failure?.retryable !== false);
+  const cancellableSelectedJobs = selectedJobs.filter((job) => job.status === "pending" || job.status === "running");
+  const runBatchRetry = async () => { for (const job of retryableSelectedJobs) await retryJob(job); setSelectedMediaIds([]); setBatchMenuOpen(false); };
+  const runBatchCancel = async () => { for (const job of cancellableSelectedJobs) await cancelJob(job); setSelectedMediaIds([]); setBatchMenuOpen(false); };
   const filterCounts = mediaFilterOptions.reduce<Record<MediaFilter, number>>((counts, [value]) => {
     counts[value] = transcriptionTaskAssets.filter((asset) => matchesMediaFilter(asset, value)).length;
     return counts;
@@ -671,13 +680,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <section className="space-y-6" aria-labelledby="admin-media-title">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 id="admin-media-title" className="sr-only">转录任务</h1>
-          <p className="max-w-3xl text-ui-sm text-muted-foreground">视频由资料列表上传，在这里跟踪转录、审核、发布、专属索引和恢复操作。</p>
-        </div>
-        <a className={buttonVariants({ variant: "outline" })} href="/admin/asr"><Settings2 className="size-4" />转录配置</a>
-      </header>
+      <h1 id="admin-media-title" className="sr-only">转录任务</h1>
 
       {schemeError && <Alert variant="destructive" role="alert"><AlertTitle>转录方案加载失败</AlertTitle><AlertDescription>{schemeError}</AlertDescription></Alert>}
 
@@ -953,6 +956,11 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
             <div className="min-w-0"><h2 id="media-assets-title" className="text-ui-base font-semibold">视频资源</h2><p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-ui-xs text-muted-foreground"><span>共 {transcriptionTaskAssets.length} 个任务</span><span>·</span><span>按每次提交分别记录媒体与处理进度；同名文件不会合并。</span></p></div>
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
               <Button size="sm" variant="outline" aria-label="刷新媒体资源" title="刷新媒体资源" disabled={loading} onClick={() => void refreshMediaState()}><RefreshCw className="size-4" aria-hidden="true" />刷新列表</Button>
+              <div className="relative">
+                <Button size="sm" variant="outline" disabled={!selectedMediaIds.length} aria-haspopup="menu" aria-expanded={batchMenuOpen} onClick={() => setBatchMenuOpen((open) => !open)}>批量操作<ChevronDown className="size-4" /></Button>
+                {batchMenuOpen && <div role="menu" aria-label="批量操作" className="absolute right-0 top-full z-dropdown mt-1 w-48 rounded-ui-md border border-border bg-popover p-1 shadow-overlay"><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" disabled={!retryableSelectedJobs.length} onClick={() => void runBatchRetry()}><RotateCcw className="size-4" />重试所选（{retryableSelectedJobs.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" disabled={!cancellableSelectedJobs.length} onClick={() => void runBatchCancel()}><Ban className="size-4" />取消所选（{cancellableSelectedJobs.length}）</button></div>}
+              </div>
+              <a className={buttonVariants({ variant: "outline", size: "sm" })} href="/admin/asr"><Settings2 className="size-4" />转录配置</a>
               {!embedded && <Button size="sm" onClick={() => setUploadDialogOpen(true)}><Upload className="size-4" />{hasUploadDraft ? `继续上传${pending.length ? `（${pending.length}）` : ""}` : "上传视频"}</Button>}
             </div>
           </div>
@@ -962,8 +970,8 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
           : loading ? <Card><LoadingState className="min-h-48" label="正在加载媒体资源…" /></Card>
           : transcriptionTaskAssets.length === 0 ? <EmptyState title="暂无转录任务" description="在资料列表为视频选择转录方案后，任务和各阶段状态会显示在这里。" />
           : <>
-            <div className="hidden grid-cols-[minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] gap-4 border-b border-border bg-surface-muted px-5 py-3 text-ui-xs font-medium text-muted-foreground lg:grid" data-testid="media-record-header">
-              <span>媒体信息</span><span>处理进度</span><span>最近提交</span><span>操作</span>
+            <div className="hidden grid-cols-[2rem_minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] gap-4 border-b border-border bg-surface-muted px-5 py-3 text-ui-xs font-medium text-muted-foreground lg:grid" data-testid="media-record-header">
+              <Checkbox aria-label="选择当前页视频" checked={allVisibleSelected} onChange={() => setSelectedMediaIds(allVisibleSelected ? [] : visibleMediaAssets.map((asset) => asset.media_id))} /><span>媒体信息</span><span>处理进度</span><span>最近提交</span><span>操作</span>
             </div>
             <ul className="divide-y divide-border" aria-label="视频处理记录">
               {visibleMediaAssets.map((asset) => {
@@ -982,7 +990,8 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
                 const showRetry = canRetry || job?.status === "failed" || job?.status === "cancelled";
                 const showPublishedActions = canReplace || canArchive || asset.publication_status === "published";
                 return <li key={asset.media_id} className="p-4 sm:p-5" data-testid="media-record-row">
-                  <div className="grid gap-4 lg:grid-cols-[minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] lg:items-start">
+                  <div className="grid gap-4 lg:grid-cols-[2rem_minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] lg:items-start">
+                    <Checkbox aria-label={`选择“${asset.title}”`} checked={selectedMediaIds.includes(asset.media_id)} onChange={() => setSelectedMediaIds((current) => current.includes(asset.media_id) ? current.filter((id) => id !== asset.media_id) : [...current, asset.media_id])} />
                     <div className="min-w-0">
                       <p className="truncate font-medium" title={asset.title}>{asset.title}</p>
                       <p className="mt-1 truncate font-mono text-ui-xs text-muted-foreground" title={asset.original_filename}>{asset.original_filename}</p>
@@ -997,13 +1006,13 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
                     </div>
                     <p className="text-ui-xs text-muted-foreground"><span className="sr-only">提交时间：</span>{formatAdminDate(asset.created_at)}</p>
                     <div className="flex flex-wrap gap-1.5 lg:justify-end" aria-label={`媒体操作：${asset.title}`}>
-                      <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => openWorkbench(asset.media_id)}>进入转写工作台</Button>
-                      {asset.catalog_item_id && asset.current_version_id && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" onClick={() => { setMoveTarget(asset); setMoveCategoryId(""); setMoveError(null); }}>调整目录</Button>}
-                      {showCancel && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" title={canCancel ? "取消当前转录任务" : disabledActions.cancel_transcription || "当前状态不可取消"} disabled={!job || !canCancel || deletingMediaId === asset.media_id} onClick={() => job && void cancelJob(job)}>取消</Button>}
-                      {showRetry && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" title={canRetry ? "按原转录方案重试" : disabledActions.retry_transcription || "当前状态不可重试"} disabled={!job || !canRetry || deletingMediaId === asset.media_id} onClick={() => job && void retryJob(job)}>重试</Button>}
-                      {showPublishedActions && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" title={canReplace ? "上传候选视频并创建转录任务" : disabledActions.replace_media || "当前状态不可替换"} disabled={!canReplace || deletingMediaId === asset.media_id} onClick={() => setReplaceSourceMediaId(asset.media_id)}>替换视频</Button>}
-                      {asset.status === "failed" && <Button className="min-h-10 sm:min-h-0" size="sm" variant="destructive" title={canDelete ? "删除失败视频及其原文件" : disabledActions.delete_failed || "当前失败记录不可删除"} disabled={!canDelete || deletingMediaId === asset.media_id} onClick={() => setDeleteTarget(asset)}>{deletingMediaId === asset.media_id ? "删除中" : "完整删除"}</Button>}
-                      {showPublishedActions && <Button className="min-h-10 sm:min-h-0" size="sm" variant="outline" title={canArchive ? "移入资料回收站" : disabledActions.archive_media || "当前状态不可归档"} disabled={!canArchive || deletingMediaId === asset.media_id} onClick={() => { setArchiveTarget(asset); setArchiveAcknowledged(false); }}>移入回收站</Button>}
+                      <IconButton label="进入转写工作台" tooltip="进入转写工作台" className="border border-border" onClick={() => openWorkbench(asset.media_id)}><Film className="size-4" /></IconButton>
+                      {asset.catalog_item_id && asset.current_version_id && <IconButton label="调整目录" tooltip="调整目录" className="border border-border" onClick={() => { setMoveTarget(asset); setMoveCategoryId(""); setMoveError(null); }}><FolderInput className="size-4" /></IconButton>}
+                      {showCancel && <IconButton label="取消" tooltip={canCancel ? "取消当前转录任务" : disabledActions.cancel_transcription || "当前状态不可取消"} className="border border-border" disabled={!job || !canCancel || deletingMediaId === asset.media_id} onClick={() => job && void cancelJob(job)}><Ban className="size-4" /></IconButton>}
+                      {showRetry && <IconButton label="重试" tooltip={canRetry ? "按原转录方案重试" : disabledActions.retry_transcription || "当前状态不可重试"} title={canRetry ? "按原转录方案重试" : disabledActions.retry_transcription || "当前状态不可重试"} className="border border-border" disabled={!job || !canRetry || deletingMediaId === asset.media_id} onClick={() => job && void retryJob(job)}><RotateCcw className="size-4" /></IconButton>}
+                      {showPublishedActions && <IconButton label="替换视频" tooltip={canReplace ? "上传候选视频并创建转录任务" : disabledActions.replace_media || "当前状态不可替换"} className="border border-border" disabled={!canReplace || deletingMediaId === asset.media_id} onClick={() => setReplaceSourceMediaId(asset.media_id)}><Repeat2 className="size-4" /></IconButton>}
+                      {asset.status === "failed" && <IconButton label="完整删除" tooltip={canDelete ? "删除失败视频及其原文件" : disabledActions.delete_failed || "当前失败记录不可删除"} className="border border-destructive/40 text-destructive" disabled={!canDelete || deletingMediaId === asset.media_id} onClick={() => setDeleteTarget(asset)}><Trash2 className="size-4" /></IconButton>}
+                      {showPublishedActions && <IconButton label="移入回收站" tooltip={canArchive ? "移入资料回收站" : disabledActions.archive_media || "当前状态不可归档"} className="border border-border" disabled={!canArchive || deletingMediaId === asset.media_id} onClick={() => { setArchiveTarget(asset); setArchiveAcknowledged(false); }}><Archive className="size-4" /></IconButton>}
                     </div>
                   </div>
                 </li>;
