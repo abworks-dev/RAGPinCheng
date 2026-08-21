@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import sqlite3
 import time
 import uuid
@@ -15,6 +16,7 @@ from api.db import connect, init_db
 from api.db import get_db
 from api.external_media import ExternalMediaError, discover_video_files, reconcile_source
 from api.media_storage import MediaStorageError, normalize_external_relative_path, resolve_media_path
+from src.config import parse_external_unc_roots, resolve_external_unc_path
 
 
 def _source_database(tmp_path: Path, share: Path) -> tuple[sqlite3.Connection, str]:
@@ -35,6 +37,17 @@ def _source_database(tmp_path: Path, share: Path) -> tuple[sqlite3.Connection, s
     )
     conn.commit()
     return conn, source_id
+
+
+def test_unc_root_mapping_accepts_unicode_path_and_rejects_escape_or_unknown_share(tmp_path: Path) -> None:
+    roots = parse_external_unc_roots(json.dumps({"training": {"unc": r"\\192.168.0.252\项目工程", "path": str(tmp_path)}}))
+    assert resolve_external_unc_path(r"\\192.168.0.252\项目工程\品成知识库\1.2内部教学视频（MP4）", roots) == (
+        "training", "品成知识库/1.2内部教学视频（MP4）"
+    )
+    with pytest.raises(ValueError, match="invalid_external_unc_path"):
+        resolve_external_unc_path(r"\\192.168.0.252\项目工程\..\秘密", roots)
+    with pytest.raises(ValueError, match="external_unc_root_unconfigured"):
+        resolve_external_unc_path(r"\\192.168.0.252\其他共享\视频", roots)
 
 
 def test_scan_reconciles_add_change_missing_recovery_and_outage(tmp_path: Path) -> None:

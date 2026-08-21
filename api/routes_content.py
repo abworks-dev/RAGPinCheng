@@ -34,6 +34,8 @@ from src.config import (
     ROOT,
     TRANSCRIPTION_ARTIFACT_DIR,
     EXTERNAL_MEDIA_ROOTS,
+    EXTERNAL_MEDIA_UNC_ROOTS,
+    resolve_external_unc_path,
 )
 from src.office_security import find_unsafe_office_content
 from src.transcription.persistence import ManagedMarkdownRef
@@ -842,10 +844,15 @@ def post_shared_folder(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedCategoryDTO:
     _require_feature()
-    if body.root_alias not in EXTERNAL_MEDIA_ROOTS:
-        raise HTTPException(status_code=409, detail="所选共享目录根别名未在服务端配置")
     try:
-        relative_path = normalize_external_relative_path(body.relative_path, allow_empty=True)
+        if body.unc_path:
+            root_alias, unc_relative = resolve_external_unc_path(body.unc_path, EXTERNAL_MEDIA_UNC_ROOTS)
+            relative_path = normalize_external_relative_path(unc_relative, allow_empty=True)
+        else:
+            root_alias = body.root_alias
+            if root_alias not in EXTERNAL_MEDIA_ROOTS:
+                raise ValueError("external_root_unconfigured")
+            relative_path = normalize_external_relative_path(body.relative_path, allow_empty=True)
         resolve_scheme_runtime(conn, body.default_scheme_id)
         conn.execute("BEGIN IMMEDIATE")
         source_id = str(uuid.uuid4())
@@ -862,7 +869,7 @@ def post_shared_folder(
                (id,name,root_alias,relative_path,target_category_id,default_scheme_id,
                 auto_enqueue,scan_interval_seconds,created_by,created_at,updated_at)
                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-            (source_id, body.display_name.strip(), body.root_alias, relative_path, row["id"],
+            (source_id, body.display_name.strip(), root_alias, relative_path, row["id"],
              body.default_scheme_id, int(body.auto_enqueue), body.scan_interval_seconds, user.id, now, now),
         )
         conn.execute("UPDATE category_nodes SET category_kind='shared_folder', external_source_id=?, version=version+1 WHERE id=?", (source_id, row["id"]))

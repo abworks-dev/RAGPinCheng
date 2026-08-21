@@ -469,6 +469,7 @@ export const api = {
     confirm_number_shift?: boolean;
     root_alias: string;
     relative_path?: string;
+    unc_path?: string | null;
     default_scheme_id: string;
     auto_enqueue?: boolean;
     scan_interval_seconds?: number;
@@ -1048,7 +1049,7 @@ export const api = {
   listMediaAssets: () => jsonFetch<MediaAsset[]>("/api/admin/media"),
   listExternalMediaRoots: () => jsonFetch<ExternalMediaRoot[]>("/api/admin/external-media/roots"),
   listExternalMediaSources: () => jsonFetch<ExternalMediaSource[]>("/api/admin/external-media/sources"),
-  createExternalMediaSource: (body: { name: string; root_alias: string; relative_path: string; target_category_id: string; default_scheme_id: string; auto_enqueue: boolean; scan_interval_seconds: number }) =>
+  createExternalMediaSource: (body: { name: string; root_alias: string; relative_path: string; unc_path?: string | null; target_category_id: string; default_scheme_id: string; auto_enqueue: boolean; scan_interval_seconds: number }) =>
     jsonFetch<ExternalMediaSource>("/api/admin/external-media/sources", { method: "POST", body: JSON.stringify(body) }),
   updateExternalMediaSource: (sourceId: string, body: { name: string; target_category_id: string; default_scheme_id: string; auto_enqueue: boolean; scan_interval_seconds: number; enabled: boolean; expected_version: number }) =>
     jsonFetch<ExternalMediaSource>(`/api/admin/external-media/sources/${encodeURIComponent(sourceId)}`, { method: "PATCH", body: JSON.stringify(body) }),
