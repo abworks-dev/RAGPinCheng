@@ -887,7 +887,7 @@ test.describe("索引任务", () => {
     const row = archivedTitle.locator("xpath=ancestor::tr");
     await expect(row.getByText("已下架", { exact: true })).toBeVisible();
     await expect(row.getByText("资料已移入回收站，不参与知识库检索", { exact: true })).toBeVisible();
-    await expect(row.getByRole("button", { name: "重新发布" })).toHaveCount(0);
+    await expect(row.getByRole("button", { name: "重新发布" })).toBeDisabled();
     await expectNoBodyOverflow(page);
     if (page.viewportSize()!.width === 390) await expectTouchTarget(includeArchived.locator("xpath=ancestor::label"));
   });
