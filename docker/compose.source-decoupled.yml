@@ -11,6 +11,7 @@ services:
       - ${DATA_PATH:?DATA_PATH is required}:/app/data
       - ${CONTENT_HOST_PATH:?CONTENT_HOST_PATH is required}:/app/content
       - ${MEDIA_HOST_PATH:?MEDIA_HOST_PATH is required}:/app/media
+      - ${EXTERNAL_SOURCES_HOST_PATH:-/data/business/ragpincheng/external-sources}:/app/external-sources:ro
     # Use the service-level form for compatibility with the production Compose
     # runtime. The volume override above removes every legacy /app/docs bind.
     tmpfs:
