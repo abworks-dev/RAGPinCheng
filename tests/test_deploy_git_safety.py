@@ -188,7 +188,7 @@ class TestDeployGitSafety(unittest.TestCase):
     def test_app_deploy_runs_schema_gate_before_backend_recreation(self):
         deploy = self.linux
         self.assertIn("SCHEMA_MIGRATION_ACTION", deploy)
-        self.assertIn("scripts/migrate_app_schema.py", deploy)
+        self.assertIn("scripts.migrate_app_schema", deploy)
         self.assertIn("compose run --rm --no-deps backend python -m scripts.migrate_app_schema", deploy)
         self.assertIn("--action \"${SCHEMA_MIGRATION_ACTION}\"", deploy)
         self.assertLess(
