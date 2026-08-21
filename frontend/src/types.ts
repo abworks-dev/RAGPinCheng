@@ -340,6 +340,8 @@ export type ManagedCategory = {
   parent_id: string | null;
   display_code: string;
   display_name: string;
+  category_kind?: "folder" | "shared_folder";
+  external_source_id?: string | null;
   sort_order: number;
   level: number;
   is_active: boolean;

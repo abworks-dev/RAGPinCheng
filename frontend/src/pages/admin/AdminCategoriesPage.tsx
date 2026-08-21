@@ -9,6 +9,7 @@ import {
   FolderTree,
   ListOrdered,
   Move,
+  Network,
   Plus,
   RefreshCw,
   Save,
@@ -679,11 +680,11 @@ function CategoryTreeNodeView({
     >
       <span className="flex w-11 shrink-0 items-center gap-1">
         {hasChildren ? <button type="button" aria-label={isExpanded ? `收起${category.display_name}` : `展开${category.display_name}`} title={isExpanded ? "收起" : "展开"} onClick={(event) => { event.stopPropagation(); onToggle(category.id); }} className="inline-flex size-6 items-center justify-center rounded-ui-sm text-muted-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{isExpanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}</button> : <span className="size-6" aria-hidden="true" />}
-        {hasChildren && isExpanded ? <FolderOpen className="size-4 text-primary/80" aria-hidden="true" /> : <Folder className="size-4 text-muted-foreground" aria-hidden="true" />}
+        <span className="relative inline-flex size-4 shrink-0">{hasChildren && isExpanded ? <FolderOpen className="size-4 text-primary/80" aria-hidden="true" /> : <Folder className="size-4 text-muted-foreground" aria-hidden="true" />}{category.category_kind === "shared_folder" && <Network className="absolute -right-2 -top-1 size-2.5 text-primary" aria-label="共享文件夹" />}</span>
       </span>
       <span className="flex min-w-0 flex-1 items-center gap-2">
         <span className={`inline-flex w-11 shrink-0 items-center gap-1 text-ui-xs font-medium ${category.is_active ? "text-success" : "text-muted-foreground"}`}><span className={`size-2 rounded-full ${category.is_active ? "bg-success" : "bg-muted-foreground/60"}`} aria-hidden="true" />{category.is_active ? "启用" : "停用"}</span>
-        <span className={`min-w-0 flex-1 break-words tabular-nums ${level === 1 ? "font-semibold" : "font-medium"}`}>{category.display_code} {category.display_name}</span>
+        <span className={`min-w-0 flex-1 break-words tabular-nums ${level === 1 ? "font-semibold" : "font-medium"}`}>{category.display_code} {category.display_name}{category.category_kind === "shared_folder" && <span className="ml-2 text-ui-xs font-normal text-primary">共享文件夹</span>}</span>
         <span className="hidden w-[3.75rem] shrink-0 text-right text-ui-xs tabular-nums text-muted-foreground sm:block">{category.item_count} 份{hasChildren ? ` · ${children.length} 项` : ""}</span>
         <span className="hidden w-[7.25rem] shrink-0 flex-wrap items-center justify-end gap-x-1 gap-y-0 sm:inline-flex" aria-label="问答与筛选状态">
           <Badge aria-label={category.chat_search_effective === false ? "企业知识问答关闭" : "企业知识问答开启"} variant={category.chat_search_effective === false ? "secondary" : "success"} className={category.chat_search_effective === false ? "line-through" : undefined}>问答</Badge>

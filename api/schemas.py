@@ -392,6 +392,8 @@ class ManagedCategoryDTO(BaseModel):
     parent_id: str | None
     display_code: str
     display_name: str
+    category_kind: Literal["folder", "shared_folder"] = "folder"
+    external_source_id: str | None = None
     sort_order: int
     level: int
     is_active: bool
@@ -419,6 +421,8 @@ class CreateManagedCategoryRequest(BaseModel):
     sort_order: int = Field(default=0, ge=0, le=999_999)
     target_position: int | None = Field(default=None, ge=1, le=99_999)
     confirm_number_shift: bool = False
+    category_kind: Literal["folder", "shared_folder"] = "folder"
+    external_source_id: str | None = None
 
 
 class UpdateManagedCategoryRequest(BaseModel):

@@ -457,6 +457,8 @@ export const api = {
     sort_order?: number;
     target_position?: number;
     confirm_number_shift?: boolean;
+    category_kind?: "folder" | "shared_folder";
+    external_source_id?: string | null;
   }) =>
     jsonFetch<ManagedCategory>("/api/admin/content/categories", {
       method: "POST",

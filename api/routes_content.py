@@ -571,6 +571,8 @@ def _category_dto(conn: sqlite3.Connection, row: sqlite3.Row) -> ManagedCategory
         parent_id=row["parent_id"],
         display_code=row["display_code"],
         display_name=row["display_name"],
+        category_kind=str(row["category_kind"] or "folder") if "category_kind" in row.keys() else "folder",
+        external_source_id=row["external_source_id"] if "external_source_id" in row.keys() else None,
         sort_order=row["sort_order"],
         level=row["level"],
         is_active=bool(row["is_active"]),
@@ -589,6 +591,16 @@ def _category_dto(conn: sqlite3.Connection, row: sqlite3.Row) -> ManagedCategory
         total_child_count=int(row["total_child_count"]) if "total_child_count" in row.keys() else 0,
         total_item_count=int(row["total_item_count"]) if "total_item_count" in row.keys() else int(row["item_count"]) if "item_count" in row.keys() else 0,
     )
+
+
+def _reject_external_media_mutation(conn: sqlite3.Connection, item_id: str) -> None:
+    row = conn.execute(
+        """SELECT m.storage_kind FROM content_items i
+           JOIN media_assets m ON m.media_id=i.media_id WHERE i.id=?""",
+        (item_id,),
+    ).fetchone()
+    if row is not None and row["storage_kind"] == "external":
+        raise ValueError("external_media_read_only")
 
 
 def _folder_request_dto(row: sqlite3.Row) -> FolderRequestDTO:
@@ -813,6 +825,8 @@ def post_category(
             actor_user_id=user.id,
             target_position=body.target_position,
             confirm_number_shift=body.confirm_number_shift,
+            category_kind=body.category_kind,
+            external_source_id=body.external_source_id,
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
@@ -2321,6 +2335,10 @@ def delete_content_item(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> DeleteManagedContentResponse:
     _require_feature()
+    try:
+        _reject_external_media_mutation(conn, item_id)
+    except ValueError as exc:
+        _raise_domain_error(exc)
     item_kind = conn.execute(
         "SELECT content_kind FROM content_items WHERE id=?", (item_id,)
     ).fetchone()
@@ -2355,6 +2373,10 @@ def move_managed_content_item(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedContentItemDTO:
     _require_feature()
+    try:
+        _reject_external_media_mutation(conn, item_id)
+    except ValueError as exc:
+        _raise_domain_error(exc)
     try:
         move_content_item(
             conn,
@@ -2455,6 +2477,10 @@ def rename_managed_content_item(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedContentItemDTO:
     _require_feature()
+    try:
+        _reject_external_media_mutation(conn, item_id)
+    except ValueError as exc:
+        _raise_domain_error(exc)
     item_kind = conn.execute(
         "SELECT content_kind FROM content_items WHERE id=? AND archived_at IS NULL",
         (item_id,),

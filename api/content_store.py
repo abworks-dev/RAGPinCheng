@@ -814,11 +814,19 @@ def create_category(
     actor_user_id: int,
     target_position: int | None = None,
     confirm_number_shift: bool = False,
+    category_kind: str = "folder",
+    external_source_id: str | None = None,
     commit: bool = True,
 ) -> sqlite3.Row:
     if commit and not conn.in_transaction:
         conn.execute("BEGIN IMMEDIATE")
     try:
+        if category_kind not in {"folder", "shared_folder"}:
+            raise ValueError("invalid_category_kind")
+        if category_kind == "shared_folder" and not external_source_id:
+            raise ValueError("shared_folder_source_required")
+        if category_kind == "folder" and external_source_id:
+            raise ValueError("ordinary_folder_source_forbidden")
         key = category_key.strip() if category_key else f"category_{uuid.uuid4().hex[:12]}"
         code = display_code.strip()
         name, _name_key = normalize_category_name(display_name)
@@ -873,8 +881,9 @@ def create_category(
         conn.execute(
             """INSERT INTO category_nodes
                (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,
-                chat_search_enabled,chat_filter_selectable,created_by,created_at,updated_at,version)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1)""",
+                chat_search_enabled,chat_filter_selectable,category_kind,external_source_id,
+                created_by,created_at,updated_at,version)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)""",
             (
                 category_id,
                 key,
@@ -886,6 +895,8 @@ def create_category(
                 1,
                 1,
                 1 if level == 1 else 0,
+                category_kind,
+                external_source_id,
                 actor_user_id,
                 now,
                 now,
