@@ -1255,6 +1255,8 @@ export type ExternalMediaEntry = {
 };
 export type ExternalMediaEntryList = { source_id: string; parent_relative_path: string; entries: ExternalMediaEntry[] };
 export type ExternalMediaScan = { run_id: string; source_id: string; discovered_count: number; added_count: number; changed_count: number; missing_count: number; enqueued_count: number; enqueue_failures: number };
+export type ExternalMediaEnqueuePreviewItem = { entry_id: string; relative_path: string; file_size: number; modified_ns: number; state: "new" | "updated" | "already_transcribed"; selected: boolean };
+export type ExternalMediaEnqueuePreview = { items: ExternalMediaEnqueuePreviewItem[]; selected_count: number };
 export type ExternalMediaEnqueueResult = { requested: number; enqueued: number; failed: number; failures: Record<string, string> };
 
 export type MediaUploadConflict = {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, Folder, FolderSync, Network, Play, RefreshCw, Settings2 } from "lucide-react";
 import { adminMediaApi } from "../../api/admin/media";
-import type { ExternalMediaEntry, ExternalMediaRoot, ExternalMediaSource, ManagedCategory, TranscriptionSchemeOption } from "../../types";
+import type { ExternalMediaEnqueuePreview, ExternalMediaEntry, ExternalMediaRoot, ExternalMediaSource, ManagedCategory, TranscriptionSchemeOption } from "../../types";
 import { formatAdminDate, formatBytes } from "../../lib/admin-formatters";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Badge } from "../ui/badge";
@@ -61,6 +61,7 @@ export function ExternalMediaSourcesPanel({ categories, schemes, onOpenWorkbench
   const [busy, setBusy] = useState<"scan" | "enqueue" | "save" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [preview, setPreview] = useState<ExternalMediaEnqueuePreview | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ name: "", uncPath: "", categoryId: "cat-05", schemeId: "", autoEnqueue: false, interval: "900" });
 
@@ -149,12 +150,27 @@ export function ExternalMediaSourcesPanel({ categories, schemes, onOpenWorkbench
     finally { setBusy(null); }
   }
 
+  async function openEnqueuePreview(entryIds?: string[]) {
+    if (!selectedSource) return;
+    setBusy("enqueue"); setNotice(null); setError(null);
+    try { setPreview(await adminMediaApi.previewEnqueueExternal(selectedSource.id, entryIds)); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "无法读取待转录文件"); }
+    finally { setBusy(null); }
+  }
+
   async function enqueueAll() {
-    if (!selectedSource || !window.confirm(`确认将“${selectedSource.name}”中尚未创建任务的可用视频批量加入转录队列吗？`)) return;
+    if (!selectedSource) return;
+    await openEnqueuePreview();
+  }
+
+  async function confirmPreview() {
+    if (!selectedSource || !preview) return;
+    const ids = preview.items.filter((item) => item.selected).map((item) => item.entry_id);
     setBusy("enqueue"); setNotice(null); setError(null);
     try {
-      const result = await adminMediaApi.enqueueExternal(selectedSource.id);
+      const result = await adminMediaApi.enqueueExternal(selectedSource.id, ids);
       setNotice(`本批已加入 ${result.enqueued} 个转录任务${result.failed ? `，${result.failed} 个失败` : ""}${result.requested >= 500 ? "。如仍有待处理视频，可再次执行" : ""}。`);
+      setPreview(null);
       await Promise.all([loadEntries(selectedSource.id, parent), onMediaChanged()]);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "批量加入转录队列失败"); }
     finally { setBusy(null); }
@@ -181,6 +197,7 @@ export function ExternalMediaSourcesPanel({ categories, schemes, onOpenWorkbench
   const parentUp = parent.includes("/") ? parent.slice(0, parent.lastIndexOf("/")) : "";
 
   return <>
+    <Dialog open={Boolean(preview)} onOpenChange={(open) => { if (!open && !busy) setPreview(null); }}><DialogContent className="max-w-3xl"><DialogHeader><DialogTitle>确认批量转录</DialogTitle><DialogDescription>新增和已更新文件默认勾选；已转录且未变化的文件默认跳过。</DialogDescription></DialogHeader>{preview && <div className="max-h-[55vh] space-y-2 overflow-y-auto">{preview.items.map((item) => <label key={item.entry_id} className="flex items-start gap-3 rounded-ui-sm border border-border p-2"><Checkbox checked={item.selected} onChange={(event) => setPreview((current) => current && ({ ...current, items: current.items.map((entry) => entry.entry_id === item.entry_id ? { ...entry, selected: event.target.checked } : entry), selected_count: current.items.filter((entry) => entry.entry_id === item.entry_id ? event.target.checked : entry.selected).length }))} /><span className="min-w-0 flex-1 break-all text-ui-sm">{item.relative_path}<span className="ml-2 text-ui-xs text-muted-foreground">{item.state === "updated" ? "已更新，将重新转录" : item.state === "already_transcribed" ? "已转录，未变化，跳过" : "新增"}</span></span></label>)}</div>}<DialogFooter><Button variant="outline" onClick={() => setPreview(null)}>取消</Button><Button disabled={!preview?.selected_count || busy != null} onClick={() => void confirmPreview()}>确认转录 {preview?.selected_count || 0} 个文件</Button></DialogFooter></DialogContent></Dialog>
     <Card className="overflow-hidden shadow-surface" aria-labelledby="external-media-title">
       <div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0"><div className="flex items-center gap-2"><Network className="size-5 text-primary" aria-hidden="true" /><h2 id="external-media-title" className="text-ui-base font-semibold">共享资料源</h2></div><p className="mt-1 text-ui-xs text-muted-foreground">远程原视频保持只读；本系统保存扫描身份、转录稿和独立的审核、发布、索引状态。</p></div>
@@ -192,7 +209,7 @@ export function ExternalMediaSourcesPanel({ categories, schemes, onOpenWorkbench
       {loading ? <LoadingState className="min-h-40" label="正在加载共享资料源…" /> : sources.length === 0 ? <EmptyState title="暂无共享资料源" description="由管理员选择服务端白名单中的根别名，并登记其下的相对目录。" /> : <div className="grid min-h-80 lg:grid-cols-[17rem_minmax(0,1fr)]">
         <nav className="border-b border-border p-3 lg:border-b-0 lg:border-r" aria-label="共享资料源列表"><ul className="space-y-1">{sources.map((source) => { const status = sourceStatus[source.status]; return <li key={source.id}><button type="button" className={`w-full rounded-ui-sm px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selectedSourceId === source.id ? "bg-primary/10" : "hover:bg-surface-muted"}`} onClick={() => setSelectedSourceId(source.id)}><span className="flex items-center justify-between gap-2"><span className="min-w-0 truncate text-ui-sm font-medium" title={source.name}>{source.name}</span><Badge variant={status[1]}>{status[0]}</Badge></span><span className="mt-1 block text-ui-xs text-muted-foreground">{source.available_files} 可用 · {source.missing_files} 缺失</span></button></li>; })}</ul></nav>
         <div className="min-w-0">
-          {selectedSource && <div className="border-b border-border px-4 py-3 sm:px-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><h3 className="font-semibold">{selectedSource.name}</h3><p className="mt-1 break-words text-ui-xs text-muted-foreground">根别名：{selectedSource.root_alias}{selectedSource.relative_path ? ` / ${selectedSource.relative_path}` : ""} · {selectedSource.last_successful_scan_at ? `最近成功 ${formatAdminDate(selectedSource.last_successful_scan_at)}` : "尚未成功扫描"}</p></div><div className="flex flex-wrap gap-2"><Button size="sm" variant="ghost" disabled={busy != null} onClick={() => void toggleSource()}>{selectedSource.enabled ? "暂停周期扫描" : "恢复周期扫描"}</Button><Button size="sm" variant="outline" disabled={busy != null} onClick={() => void scan()}><FolderSync className="size-4" />{busy === "scan" ? "扫描中…" : "立即扫描"}</Button><Button size="sm" variant="outline" disabled={busy != null || selectedSource.available_files === 0} onClick={() => void enqueueAll()}>全部待转录视频</Button><Button size="sm" disabled={busy != null || selected.length === 0} onClick={() => void enqueueSelected()}>{busy === "enqueue" ? "加入中…" : `加入转录（${selected.length}）`}</Button></div></div></div>}
+          {selectedSource && <div className="border-b border-border px-4 py-3 sm:px-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><h3 className="font-semibold">{selectedSource.name}</h3><p className="mt-1 break-words text-ui-xs text-muted-foreground">根别名：{selectedSource.root_alias}{selectedSource.relative_path ? ` / ${selectedSource.relative_path}` : ""} · {selectedSource.last_successful_scan_at ? `最近成功 ${formatAdminDate(selectedSource.last_successful_scan_at)}` : "尚未成功扫描"}</p></div><div className="flex flex-wrap gap-2"><Button size="sm" variant="ghost" disabled={busy != null} onClick={() => void toggleSource()}>{selectedSource.enabled ? "暂停周期扫描" : "恢复周期扫描"}</Button><Button size="sm" variant="outline" disabled={busy != null} onClick={() => void scan()}><FolderSync className="size-4" />{busy === "scan" ? "扫描中…" : "立即扫描"}</Button><Button size="sm" variant="outline" disabled={busy != null || selectedSource.available_files === 0} onClick={() => void enqueueAll()}>批量转录待处理文件</Button><Button size="sm" disabled={busy != null || selected.length === 0} onClick={() => void openEnqueuePreview(selected)}>{busy === "enqueue" ? "读取中…" : `加入转录（${selected.length}）`}</Button></div></div></div>}
           <div className="flex items-center gap-2 border-b border-border px-4 py-2 text-ui-xs sm:px-5"><Button size="sm" variant="ghost" disabled={!parent} onClick={() => setParent(parentUp)}><ChevronLeft className="size-4" />上一级</Button><span className="min-w-0 truncate text-muted-foreground" title={parent || "根目录"}>{parent || "根目录"}</span></div>
           {entriesLoading ? <LoadingState className="min-h-40" label="正在读取目录…" /> : entries.length === 0 ? <EmptyState title="当前目录没有视频" description="执行扫描后，此处会显示支持的视频和子文件夹。" /> : <><div className="flex items-center gap-2 border-b border-border px-4 py-2 sm:px-5"><Checkbox aria-label="全选当前目录可入队视频" checked={allSelected} onChange={(event) => setSelected(event.target.checked ? selectable.map((entry) => entry.id) : [])} /><span className="text-ui-xs text-muted-foreground">当前目录 {videos.length} 个视频，{selectable.length} 个可加入转录</span></div><ul className="divide-y divide-border" aria-label="共享目录内容">{entries.map((entry) => <li key={entry.id} className="flex flex-col gap-3 px-4 py-3 sm:px-5 md:flex-row md:items-center">
             <div className="flex min-w-0 flex-1 items-start gap-3">{entry.kind === "video" ? <Checkbox className="mt-0.5" aria-label={`选择 ${entry.name}`} checked={selectedSet.has(entry.id)} disabled={entry.availability !== "available" || Boolean(entry.transcription_job_id)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, entry.id] : current.filter((id) => id !== entry.id))} /> : <Folder className="mt-0.5 size-4 text-primary" aria-hidden="true" />}<button type="button" className="min-w-0 text-left" onClick={() => entry.kind === "folder" && setParent(entry.relative_path)} disabled={entry.kind !== "folder"}><span className="block truncate text-ui-sm font-medium" title={entry.name}>{entry.name}</span><span className="mt-1 block text-ui-xs text-muted-foreground">{entry.kind === "folder" ? "共享文件夹" : `${formatBytes(entry.file_size || 0)} · ${entry.availability === "missing" ? "远程文件缺失" : workflowLabel[entry.index_status || entry.publication_status || entry.review_status || entry.transcription_job_status || ""] || "尚未转录"}`}</span></button></div>

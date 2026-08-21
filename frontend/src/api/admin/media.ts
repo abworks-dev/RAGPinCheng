@@ -30,4 +30,5 @@ export const adminMediaApi = {
   scanExternalSource: (...args: Parameters<typeof api.scanExternalMediaSource>) => api.scanExternalMediaSource(...args),
   externalEntries: (...args: Parameters<typeof api.listExternalMediaEntries>) => api.listExternalMediaEntries(...args),
   enqueueExternal: (...args: Parameters<typeof api.enqueueExternalMedia>) => api.enqueueExternalMedia(...args),
+  previewEnqueueExternal: (...args: Parameters<typeof api.previewEnqueueExternalMedia>) => api.previewEnqueueExternalMedia(...args),
 };
