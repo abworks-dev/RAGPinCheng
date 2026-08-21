@@ -27,6 +27,7 @@ import type {
   ExternalMediaEntryList,
   ExternalMediaScan,
   ExternalMediaEnqueueResult,
+  ExternalMediaEnqueuePreview,
   MediaUploadPreflightResponse,
   ManagedCategory,
   CategoryDeletePreview,
