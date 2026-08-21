@@ -2273,7 +2273,7 @@ describe("AdminManagedContentPage", () => {
     const toolbar = screen.getByTestId("upload-task-toolbar");
     expect(within(toolbar).getByText("共 1 个任务")).toBeInTheDocument();
     expect(within(toolbar).getByRole("searchbox", { name: "搜索上传任务" })).toBeInTheDocument();
-    expect(within(toolbar).getByRole("button", { name: "刷新任务" })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("button", { name: "刷新列表" })).toBeInTheDocument();
     expect(screen.getByText("未完成 1 个")).toBeInTheDocument();
     const failedRow = screen.getByTestId("upload-task-row");
     const failedActions = within(failedRow).getAllByRole("button");
@@ -2283,7 +2283,7 @@ describe("AdminManagedContentPage", () => {
 
     const search = screen.getByRole("searchbox", { name: "搜索上传任务" });
     fireEvent.change(search, { target: { value: " guide.md " } });
-    fireEvent.click(screen.getByRole("button", { name: "搜索" }));
+    fireEvent.submit(screen.getByRole("search"));
     await waitFor(() => expect(mocks.uploadTasks).toHaveBeenLastCalledWith(expect.objectContaining({
       query: "guide.md",
       status: undefined,
