@@ -118,6 +118,7 @@ import { ManagedContentBulkOperationDialog } from "../../components/admin/Manage
 import { ManagedItemType } from "../../components/admin/ManagedItemType";
 import { compareManagedCategories } from "../../lib/category-tree";
 import { AdminTranscriptionTasksPage } from "./AdminTranscriptionTasksPage";
+import { useManagedContentLiveRefresh } from "../../hooks/useManagedContentLiveRefresh";
 import {
   collectDroppedUpload,
   folderSelectionFromFiles,
@@ -780,6 +781,11 @@ function UploadTasksPanel({
     }
   }, [page, pageSize, query, statusFilter]);
 
+  useManagedContentLiveRefresh({
+    active: tasks.some((task) => task.status === "processing"),
+    refresh: loadTasks,
+    enabled: true,
+  });
   useEffect(() => {
     void loadTasks();
   }, [loadTasks]);
@@ -2500,13 +2506,15 @@ export function AdminManagedContentPage() {
   const hasActiveReclassification = items.some((item) =>
     ACTIVE_RECLASSIFICATION_STATUSES.has(item.reclassification_status || ""),
   );
-  useEffect(() => {
-    if (!hasActiveReclassification || view !== "library") return undefined;
-    const timer = window.setInterval(() => {
-      void load();
-    }, 2000);
-    return () => window.clearInterval(timer);
-  }, [hasActiveReclassification, load, view]);
+  const hasActivePublication = items.some((item) =>
+    item.lifecycle_status === "publishing"
+    || ACTIVE_RECLASSIFICATION_STATUSES.has(item.latest_publication_status || ""),
+  );
+  useManagedContentLiveRefresh({
+    active: hasActiveReclassification || hasActivePublication,
+    enabled: view === "library",
+    refresh: load,
+  });
 
   const loadTrash = useCallback(async () => {
     if (!can("trash.view")) return;
@@ -2736,6 +2744,11 @@ export function AdminManagedContentPage() {
     allowFolderMerge = false,
     uploadOptions: ManagedUploadOptions = {},
   ) => {
+    setUploadDialogOpen(false);
+    setPendingUploadFiles([]);
+    setPendingUploadFolderId("");
+    setPendingFolderUpload(null);
+    setPendingFolderUploadFolderId("");
     setUploadChecking(true);
     setUploadConflictError(null);
     try {
@@ -5410,6 +5423,7 @@ export function AdminManagedContentPage() {
           }
           onRetry={(task) => void retryUploadTask(task)}
         />
+        {activeUpload && <div className="fixed right-4 top-4 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-ui-lg border border-primary/40 bg-background px-4 py-3 shadow-surface" role="status" aria-live="polite"><div className="flex items-start justify-between gap-3"><div><p className="font-medium">{activeUpload.phase === "processing" ? "服务端处理中…" : activeUpload.phase === "completed" ? "上传完成" : activeUpload.phase === "failed" ? "上传失败" : "上传中"}</p><p className="mt-1 text-ui-xs text-muted-foreground">{activeUpload.totalFiles} 个文件 · {activeUpload.targetPath}</p>{activeUpload.message && <p className="mt-1 text-ui-xs">{activeUpload.message}</p>}</div><button type="button" className="text-ui-xs text-muted-foreground" aria-label="关闭上传提示" onClick={() => setActiveUpload(null)}>关闭</button></div></div>}
       </section>
     );
   }
@@ -6486,6 +6500,7 @@ export function AdminManagedContentPage() {
 
   return (
     <section className="space-y-5" aria-labelledby="managed-content-title">
+      {activeUpload && <div className="fixed right-4 top-4 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-ui-lg border border-primary/40 bg-background px-4 py-3 shadow-surface" role="status" aria-live="polite"><div className="flex items-start justify-between gap-3"><div><p className="font-medium">{activeUpload.phase === "processing" ? "服务端处理中…" : activeUpload.phase === "completed" ? "上传完成" : activeUpload.phase === "failed" ? "上传失败" : "上传中"}</p><p className="mt-1 text-ui-xs text-muted-foreground">{activeUpload.totalFiles} 个文件 · {activeUpload.targetPath}</p>{activeUpload.message && <p className="mt-1 text-ui-xs">{activeUpload.message}</p>}</div><button type="button" className="text-ui-xs text-muted-foreground" aria-label="关闭上传提示" onClick={() => setActiveUpload(null)}>关闭</button></div></div>}
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-ui-xs font-medium text-primary">内容管理</p>
