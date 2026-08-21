@@ -1032,10 +1032,11 @@ describe("AdminManagedContentPage", () => {
     render(<AdminManagedContentPage />);
     fireEvent.click(screen.getByRole("tab", { name: "回收站" }));
     fireEvent.click((await screen.findAllByRole("checkbox", { name: "选择恢复“建模标准”" }))[0]);
-    expect(screen.getByRole("button", { name: "恢复所选（1）" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "批量操作" })).toBeVisible();
     fireEvent.click(screen.getAllByRole("checkbox", { name: "选择恢复“项目标准”" })[0]);
     expect(screen.getByRole("status")).toHaveTextContent("已选择 2 份");
-    fireEvent.click(screen.getByRole("button", { name: "恢复所选（2）" }));
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "恢复所选（2）" }));
     const dialog = screen.getByRole("dialog", { name: "批量恢复" });
     expect(within(dialog).getByRole("combobox", { name: "恢复到" })).toHaveValue("original");
     fireEvent.click(within(dialog).getByRole("button", { name: "检查恢复条件" }));

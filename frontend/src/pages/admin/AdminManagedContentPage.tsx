@@ -137,6 +137,7 @@ const ACTIVE_RECLASSIFICATION_STATUSES = new Set([
 ]);
 type SortKey = "docType" | "title" | "updatedAt" | "status" | "source";
 type SortDirection = "asc" | "desc";
+type TrashSortKey = "title" | "category" | "status" | "source" | "retention" | "archivedAt";
 type ManagedContentView =
   "library" | "trash" | "uploads" | "index" | "transcription";
 type MoveOperation = "move" | "reclassify" | "archive";
@@ -2227,9 +2228,8 @@ export function AdminManagedContentPage() {
   const [trashArchivedBy, setTrashArchivedBy] = useState("");
   const [trashArchivedFrom, setTrashArchivedFrom] = useState("");
   const [trashArchivedTo, setTrashArchivedTo] = useState("");
-  const [trashSortDirection, setTrashSortDirection] = useState<"asc" | "desc">(
-    "desc",
-  );
+  const [trashSort, setTrashSort] = useState<{ key: TrashSortKey; direction: SortDirection }>({ key: "archivedAt", direction: "desc" });
+  const trashSortDirection = trashSort.key === "archivedAt" ? trashSort.direction : "desc";
   const [trashBulkTarget, setTrashBulkTarget] = useState("original");
   const [trashPreflight, setTrashPreflight] = useState<
     BulkRestorePreflightResult[]
@@ -5436,7 +5436,28 @@ export function AdminManagedContentPage() {
         ? `已超期 ${Math.abs(item.retention_days_remaining || 0)} 天`
         : item.retention_status === "expiring"
           ? `即将到期，剩余 ${item.retention_days_remaining || 0} 天`
-          : `保留中，剩余 ${item.retention_days_remaining || 0} 天`;
+        : `保留中，剩余 ${item.retention_days_remaining || 0} 天`;
+    const sortedTrashItems = [...trashItems].sort((left, right) => {
+      const previousStatus = (item: ManagedContentItem) => item.pre_archive_lifecycle_status || item.lifecycle_status || "";
+      const value = (item: ManagedContentItem): string | number => {
+        switch (trashSort.key) {
+          case "title": return item.title || "";
+          case "category": return item.category_path || item.category_label || "";
+          case "status": return statusLabel[previousStatus(item)] || "未知状态";
+          case "source": return sourceLabel[item.source_origin] || "其他来源";
+          case "retention": return item.retention_days_remaining || 0;
+          case "archivedAt": return item.archived_at || 0;
+        }
+      };
+      const a = value(left); const b = value(right);
+      const comparison = typeof a === "number" && typeof b === "number" ? a - b : String(a).localeCompare(String(b), "zh-CN", { numeric: true, sensitivity: "base" });
+      return trashSort.direction === "asc" ? comparison : -comparison;
+    });
+    const toggleTrashSort = (key: TrashSortKey) => {
+      setTrashSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" });
+      setPage(0);
+    };
+    const trashSortIcon = (key: TrashSortKey) => trashSort.key !== key ? <ArrowUpDown className="size-3.5" /> : trashSort.direction === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />;
     return (
       <section className="space-y-5" aria-labelledby="managed-content-title">
         <header>
@@ -5586,16 +5607,6 @@ export function AdminManagedContentPage() {
                 size="sm"
                 variant="outline"
                 className="max-sm:h-control-md"
-                disabled={Boolean(busyAction)}
-                onClick={() => void exportTrash()}
-              >
-                <Download className="size-4" />
-                {busyAction === "trash-export" ? "导出中…" : "导出处置清单"}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="max-sm:h-control-md"
                 onClick={() => void loadTrash()}
                 disabled={trashLoading}
               >
@@ -5631,6 +5642,23 @@ export function AdminManagedContentPage() {
                           },
                         ]
                       : []),
+                    {
+                      key: "trash-export",
+                      label: busyAction === "trash-export" ? "导出中…" : "导出处置清单",
+                      icon: <Download className="size-4" />,
+                      onSelect: () => void exportTrash(),
+                    },
+                  ]}
+                />
+              )}
+              {(can("trash.restore") || can("trash.purge")) && (
+                <ActionsMenu
+                  disabled={Boolean(busyAction) || trashSelected.length === 0}
+                  triggerLabel="批量操作"
+                  menuLabel="回收站批量操作"
+                  options={[
+                    ...(can("trash.restore") ? [{ key: "trash-restore-selected", label: `恢复所选（${trashSelected.length}）`, icon: <ArchiveRestore className="size-4" />, onSelect: () => { setTrashBulkTarget("original"); setTrashPreflight([]); setTrashPreflightOpen(true); } }] : []),
+                    ...(can("trash.purge") ? [{ key: "trash-purge-selected", label: `永久删除所选（${trashSelected.length}）`, icon: <Trash2 className="size-4" />, destructive: true, onSelect: () => void openTrashPurge() }] : []),
                   ]}
                 />
               )}
@@ -5640,46 +5668,6 @@ export function AdminManagedContentPage() {
                 <p className="mr-auto text-ui-sm">
                   已选择 <strong>{trashSelected.length}</strong> 份资料
                 </p>
-                {can("trash.restore") && (
-                  <Button
-                    size="sm"
-                    className="max-sm:h-control-md"
-                    disabled={Boolean(busyAction)}
-                    onClick={() => {
-                      setTrashBulkTarget("original");
-                      setTrashPreflight([]);
-                      setTrashPreflightOpen(true);
-                    }}
-                  >
-                    <ArchiveRestore className="size-4" />
-                    恢复所选（{trashSelected.length}）
-                  </Button>
-                )}
-                {can("trash.purge") && (
-                  <ActionsMenu
-                    disabled={Boolean(busyAction)}
-                    triggerLabel="批量操作"
-                    menuLabel="回收站批量操作"
-                    options={[
-                      {
-                        key: "trash-purge-selected",
-                        label: `永久删除所选（${trashSelected.length}）`,
-                        icon: <Trash2 className="size-4" />,
-                        destructive: true,
-                        onSelect: () => void openTrashPurge(),
-                      },
-                    ]}
-                  />
-                )}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="max-sm:h-control-md"
-                  disabled={Boolean(busyAction)}
-                  onClick={() => setTrashSelected([])}
-                >
-                  取消选择
-                </Button>
               </div>
             )}
           </div>
@@ -5709,42 +5697,18 @@ export function AdminManagedContentPage() {
                           />
                         </th>
                       )}
-                      <th className="px-3 py-3 font-medium">资料</th>
-                      <th className="px-3 py-3 font-medium">原目录</th>
-                      <th className="px-3 py-3 font-medium">原状态</th>
-                      <th className="px-3 py-3 font-medium">来源</th>
-                      <th className="px-3 py-3 font-medium">保留期限</th>
-                      <th
-                        aria-sort={
-                          trashSortDirection === "asc"
-                            ? "ascending"
-                            : "descending"
-                        }
-                        className="px-3 py-3 font-medium"
-                      >
-                        <button
-                          type="button"
-                          className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          onClick={() => {
-                            setTrashSortDirection((current) =>
-                              current === "asc" ? "desc" : "asc",
-                            );
-                            setPage(0);
-                          }}
-                        >
-                          移入回收站
-                          {trashSortDirection === "asc" ? (
-                            <ArrowUp className="size-3.5" />
-                          ) : (
-                            <ArrowDown className="size-3.5" />
-                          )}
-                        </button>
-                      </th>
+                      {([ ["title", "资料"], ["category", "原目录"], ["status", "原状态"], ["source", "来源"], ["retention", "保留期限"], ["archivedAt", "移入回收站"] ] as [TrashSortKey, string][]).map(([key, label]) => (
+                        <th key={key} aria-sort={trashSort.key === key ? trashSort.direction === "asc" ? "ascending" : "descending" : "none"} className="px-3 py-3 font-medium">
+                          <button type="button" className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => toggleTrashSort(key)}>
+                            {label}{trashSortIcon(key)}
+                          </button>
+                        </th>
+                      ))}
                       <th className="px-3 py-3 text-right font-medium">操作</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {trashItems.map((item) => {
+                    {sortedTrashItems.map((item) => {
                       const previousStatus =
                         item.pre_archive_lifecycle_status ||
                         item.lifecycle_status;
@@ -5841,7 +5805,7 @@ export function AdminManagedContentPage() {
                 </table>
               </div>
               <ul className="divide-y divide-border lg:hidden">
-                {trashItems.map((item) => {
+                {sortedTrashItems.map((item) => {
                   const previousStatus =
                     item.pre_archive_lifecycle_status || item.lifecycle_status;
                   const sourcePath =
