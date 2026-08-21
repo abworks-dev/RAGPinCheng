@@ -224,7 +224,7 @@ def get_source_file(parent_id: str, _user_id: int = Depends(require_user)) -> Re
     download_name = managed[1] if managed else file_path.name
 
     # For XLSX, serve the preview file (with cached formula values) if available
-    if row["doc_type"] in {"xls", "xlsx"}:
+    if row["doc_type"] == "xls":
         preview_path = (
             _managed_preview(
                 row["content_item_id"],

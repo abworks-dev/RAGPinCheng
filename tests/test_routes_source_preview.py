@@ -110,7 +110,7 @@ def test_office_source_and_preview_matrix_for_authenticated_roles(source_preview
     client, sessions, _docs_dir = source_preview_api
     endpoints = (
         ("/api/source/docx-parent/raw", b"PK-docx-synthetic"),
-        ("/api/source/xlsx-parent/raw", b"PK-xlsx-preview"),
+        ("/api/source/xlsx-parent/raw", b"PK-xlsx-synthetic"),
         ("/api/source/pptx-parent/raw", b"PK-pptx-synthetic"),
         ("/api/pdf/pptx-parent", b"%PDF-pptx-preview"),
     )
