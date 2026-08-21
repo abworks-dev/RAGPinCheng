@@ -319,8 +319,9 @@ test.describe("资料管理", () => {
     await page.getByRole("checkbox", { name: "选择恢复“企业知识库使用规范”" }).check();
     await expect(page.getByRole("status")).toContainText(/已选择(?: 0 个文件夹、)? 1 份(?:资料)?/);
     await page.getByRole("checkbox", { name: "选择恢复“项目交付检查清单”" }).check();
-    await expect(page.getByRole("button", { name: "恢复所选（2）" })).toBeVisible();
-    await page.getByRole("button", { name: "恢复所选（2）" }).click();
+    await expect(page.getByRole("button", { name: "批量操作" })).toBeVisible();
+    await page.getByRole("button", { name: "批量操作" }).click();
+    await page.getByRole("menuitem", { name: "恢复所选（2）" }).click();
     const batchRestore = page.getByRole("dialog", { name: "批量恢复" });
     await expect(batchRestore.getByRole("combobox", { name: "恢复到" })).toHaveValue("original");
     await batchRestore.getByRole("button", { name: "取消" }).click();
