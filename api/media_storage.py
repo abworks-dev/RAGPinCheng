@@ -131,6 +131,9 @@ def resolve_media_path(
     info = validate_external_file(source_root, path)
     expected_size = int(row["external_file_size"])
     expected_modified_ns = int(row["modified_ns"])
-    if info.st_size != expected_size or info.st_mtime_ns != expected_modified_ns:
+    # CIFS/Windows shares can round or offset nanosecond timestamps between
+    # enumeration and a subsequent stat. Keep size strict, but allow bounded
+    # timestamp precision loss without rejecting an unchanged file.
+    if info.st_size != expected_size or abs(info.st_mtime_ns - expected_modified_ns) > 2_000_000_000:
         raise MediaStorageError("external_media_changed")
     return ResolvedMedia(path, "external", expected_size, expected_modified_ns)
