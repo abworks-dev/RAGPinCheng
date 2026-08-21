@@ -896,16 +896,52 @@ describe("AdminManagedContentPage", () => {
     expect(rows[1]).toHaveTextContent("09 Z 目录");
   });
 
-  it("keeps search and filters scoped to the current directory", async () => {
+  it("searches the whole library from the root and shows result paths", async () => {
+    mocks.categories.mockResolvedValue([category, childCategory, projectCategory]);
+    mocks.items.mockImplementation(async (params: { query?: string }) => params.query
+      ? {
+          items: [{ ...item, category_id: childCategory.id, category_path: childCategory.full_path }],
+          total: 1,
+          status_counts: { awaiting_review: 1 },
+        }
+      : {
+          items: [item],
+          total: 8,
+          status_counts: { awaiting_review: 8 },
+        });
+    render(<AdminManagedContentPage />);
+
+    const search = screen.getByRole("textbox", { name: "搜索资料" });
+    expect(search).toBeEnabled();
+    expect(search).toHaveAttribute("placeholder", "搜索资料名称、文件名或目录路径…");
+    fireEvent.focus(search);
+    const filters = screen.getByRole("dialog", { name: "搜索筛选" });
+    const scope = within(filters).getByRole("group", { name: "搜索范围" });
+    expect(within(scope).getByRole("button", { name: "全局搜索" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(scope).getByRole("button", { name: "当前目录" })).toBeDisabled();
+
+    fireEvent.change(search, { target: { value: "建模" } });
+    await waitFor(() => expect(mocks.items).toHaveBeenLastCalledWith(expect.objectContaining({
+      query: "建模",
+      category_id: undefined,
+    })));
+    expect((await screen.findAllByText(`目录：${childCategory.full_path}`)).length).toBeGreaterThan(0);
+    expect(screen.queryByTestId(`managed-folder-row-${category.id}`)).not.toBeInTheDocument();
+  });
+
+  it("defaults to the current directory after navigation and can switch to global search", async () => {
     render(<AdminManagedContentPage />);
     const search = screen.getByRole("textbox", { name: "搜索资料" });
-    expect(search).toBeDisabled();
-    expect(search).toHaveAttribute("placeholder", "选择目录后搜索资料");
     await openRootFolder();
 
     expect(search).toBeEnabled();
     fireEvent.focus(search);
     const filters = screen.getByRole("dialog", { name: "搜索筛选" });
+    const scope = within(filters).getByRole("group", { name: "搜索范围" });
+    const currentScope = within(scope).getByRole("button", { name: "当前目录" });
+    const globalScope = within(scope).getByRole("button", { name: "全局搜索" });
+    expect(currentScope).toHaveAttribute("aria-pressed", "true");
+    expect(globalScope).toHaveAttribute("aria-pressed", "false");
     expect(within(filters).queryByRole("combobox", { name: "分类" })).not.toBeInTheDocument();
 
     fireEvent.change(search, { target: { value: "标准" } });
@@ -916,6 +952,21 @@ describe("AdminManagedContentPage", () => {
       category_id: category.id,
       lifecycle_status: "published",
       source_origin: "web",
+    })));
+
+    fireEvent.click(globalScope);
+    await waitFor(() => expect(mocks.items).toHaveBeenLastCalledWith(expect.objectContaining({
+      query: "标准",
+      category_id: undefined,
+      lifecycle_status: "published",
+      source_origin: "web",
+    })));
+    expect(globalScope).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(currentScope);
+    await waitFor(() => expect(mocks.items).toHaveBeenLastCalledWith(expect.objectContaining({
+      query: "标准",
+      category_id: category.id,
     })));
 
     fireEvent.click(within(filters).getByRole("button", { name: "清除搜索与筛选" }));
@@ -934,6 +985,52 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getByRole("dialog", { name: "搜索筛选" })).toBeInTheDocument();
     fireEvent.mouseDown(document.body);
     expect(screen.queryByRole("dialog", { name: "搜索筛选" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the newest global search response when requests resolve out of order", async () => {
+    const oldResult = {
+      items: [{ ...item, title: "旧搜索结果" }],
+      total: 1,
+      status_counts: { awaiting_review: 1 },
+    };
+    const newResult = {
+      items: [{ ...item, title: "新搜索结果" }],
+      total: 1,
+      status_counts: { awaiting_review: 1 },
+    };
+    let resolveOld!: (value: typeof oldResult) => void;
+    let resolveNew!: (value: typeof newResult) => void;
+    mocks.items.mockImplementation((params: { query?: string }) => {
+      if (params.query === "旧") {
+        return new Promise<typeof oldResult>((resolve) => {
+          resolveOld = resolve;
+        });
+      }
+      if (params.query === "新") {
+        return new Promise<typeof newResult>((resolve) => {
+          resolveNew = resolve;
+        });
+      }
+      return Promise.resolve({
+        items: [item],
+        total: 1,
+        status_counts: { awaiting_review: 1 },
+      });
+    });
+    render(<AdminManagedContentPage />);
+    await screen.findByTestId(`managed-folder-row-${category.id}`);
+
+    const search = screen.getByRole("textbox", { name: "搜索资料" });
+    fireEvent.change(search, { target: { value: "旧" } });
+    await waitFor(() => expect(mocks.items).toHaveBeenLastCalledWith(expect.objectContaining({ query: "旧", category_id: undefined })));
+    fireEvent.change(search, { target: { value: "新" } });
+    await waitFor(() => expect(mocks.items).toHaveBeenLastCalledWith(expect.objectContaining({ query: "新", category_id: undefined })));
+
+    resolveNew(newResult);
+    expect((await screen.findAllByText("新搜索结果")).length).toBeGreaterThan(0);
+    resolveOld(oldResult);
+    await Promise.resolve();
+    expect(screen.queryByText("旧搜索结果")).not.toBeInTheDocument();
   });
 
   it("loads all statuses by default and keeps batch actions hidden without multi-selection", async () => {
