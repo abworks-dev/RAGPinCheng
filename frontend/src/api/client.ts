@@ -464,6 +464,20 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  createSharedFolder: (body: {
+    parent_id: string | null;
+    display_name: string;
+    target_position?: number;
+    confirm_number_shift?: boolean;
+    root_alias: string;
+    relative_path?: string;
+    default_scheme_id: string;
+    auto_enqueue?: boolean;
+    scan_interval_seconds?: number;
+  }) => jsonFetch<ManagedCategory>("/api/admin/content/shared-folders", {
+    method: "POST",
+    body: JSON.stringify(body),
+  }),
   updateManagedCategory: (
     categoryId: string,
     body: {

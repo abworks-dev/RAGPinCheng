@@ -425,6 +425,18 @@ class CreateManagedCategoryRequest(BaseModel):
     external_source_id: str | None = None
 
 
+class CreateSharedFolderRequest(BaseModel):
+    parent_id: str | None = None
+    display_name: str = Field(min_length=1, max_length=100)
+    target_position: int | None = Field(default=None, ge=1, le=99_999)
+    confirm_number_shift: bool = False
+    root_alias: str = Field(min_length=1, max_length=64)
+    relative_path: str = Field(default="", max_length=1000)
+    default_scheme_id: str = Field(min_length=1, max_length=100)
+    auto_enqueue: bool = False
+    scan_interval_seconds: int = Field(default=900, ge=60, le=86400)
+
+
 class UpdateManagedCategoryRequest(BaseModel):
     display_code: str = Field(min_length=1, max_length=12)
     display_name: str = Field(min_length=1, max_length=100)

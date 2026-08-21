@@ -33,6 +33,7 @@ from src.config import (
     MAX_VIDEO_UPLOAD_MB,
     ROOT,
     TRANSCRIPTION_ARTIFACT_DIR,
+    EXTERNAL_MEDIA_ROOTS,
 )
 from src.office_security import find_unsafe_office_content
 from src.transcription.persistence import ManagedMarkdownRef
@@ -124,6 +125,8 @@ from .content_store import (
 from .db import get_db
 from .routes_media import safe_join
 from .media_upload_conflicts import find_media_upload_conflicts, normalize_media_title
+from .media_storage import normalize_external_relative_path
+from .transcription_schemes import resolve_scheme_runtime
 from .schemas import (
     BulkArchiveManagedContentRequest,
     BulkOperationDTO,
@@ -143,6 +146,7 @@ from .schemas import (
     UpdateTrashSettingsRequest,
     BulkDownloadManagedContentRequest,
     CreateManagedCategoryRequest,
+    CreateSharedFolderRequest,
     CreateFolderRequest,
     CreateContentPermissionGroupRequest,
     DeleteManagedContentRequest,
@@ -831,6 +835,42 @@ def post_category(
     except (ValueError, sqlite3.IntegrityError) as exc:
         _raise_domain_error(exc)
     return _category_dto(conn, row)
+
+
+@router.post("/shared-folders", response_model=ManagedCategoryDTO, status_code=201)
+def post_shared_folder(
+    body: CreateSharedFolderRequest,
+    user: CurrentUser = Depends(require_content_permission("category.manage", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ManagedCategoryDTO:
+    _require_feature()
+    if body.root_alias not in EXTERNAL_MEDIA_ROOTS:
+        raise HTTPException(status_code=409, detail="所选共享目录根别名未在服务端配置")
+    try:
+        relative_path = normalize_external_relative_path(body.relative_path, allow_empty=True)
+        resolve_scheme_runtime(conn, body.default_scheme_id)
+        conn.execute("BEGIN IMMEDIATE")
+        source_id = str(uuid.uuid4())
+        now = int(time.time())
+        row = create_category(
+            conn, category_key=None, parent_id=body.parent_id, display_code="99",
+            display_name=body.display_name, sort_order=0, actor_user_id=user.id,
+            target_position=body.target_position, confirm_number_shift=body.confirm_number_shift, commit=False,
+        )
+        conn.execute(
+            """INSERT INTO external_media_sources
+               (id,name,root_alias,relative_path,target_category_id,default_scheme_id,
+                auto_enqueue,scan_interval_seconds,created_by,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (source_id, body.display_name.strip(), body.root_alias, relative_path, row["id"],
+             body.default_scheme_id, int(body.auto_enqueue), body.scan_interval_seconds, user.id, now, now),
+        )
+        conn.execute("UPDATE category_nodes SET category_kind='shared_folder', external_source_id=?, version=version+1 WHERE id=?", (source_id, row["id"]))
+        conn.commit()
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        conn.rollback()
+        _raise_domain_error(exc)
+    return _category_dto(conn, conn.execute("SELECT * FROM category_nodes WHERE id=?", (row["id"],)).fetchone())
 
 
 @router.patch("/categories/{category_id}", response_model=ManagedCategoryDTO)
