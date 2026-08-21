@@ -176,6 +176,26 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertNotIn("deploy-gpu.ps1", workflow)
         self.assertNotIn("promote-gpu-runtime.ps1", workflow)
 
+    def test_app_only_manual_workflow_requires_explicit_schema_migration_action(self):
+        workflow = self.app_only_workflow
+        self.assertIn("schema_migration:", workflow)
+        self.assertIn("default: APPLY_PENDING", workflow)
+        self.assertIn("SCHEMA_MIGRATION_ACTION: ${{ inputs.schema_migration }}", workflow)
+        self.assertIn("APPLY_PENDING|BLOCK_PENDING", workflow)
+        self.assertIn("APP_ONLY_SCHEMA status=observed", workflow)
+        self.assertIn("foreign_key_check", workflow)
+
+    def test_app_deploy_runs_schema_gate_before_backend_recreation(self):
+        deploy = self.linux
+        self.assertIn("SCHEMA_MIGRATION_ACTION", deploy)
+        self.assertIn("scripts/migrate_app_schema.py", deploy)
+        self.assertIn("compose run --rm --no-deps backend python", deploy)
+        self.assertIn("--action \"${SCHEMA_MIGRATION_ACTION}\"", deploy)
+        self.assertLess(
+            deploy.index("scripts/migrate_app_schema.py"),
+            deploy.index("compose up -d --no-deps --force-recreate backend"),
+        )
+
     def test_production_deploy_workflows_share_the_app_mutation_lock(self):
         for workflow in (self.emergency_workflow, self.app_only_workflow):
             self.assertIn("group: production-app-manual-v1", workflow)

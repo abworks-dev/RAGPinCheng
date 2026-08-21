@@ -22,6 +22,15 @@ COMPOSE_PROJECT="ragpincheng-prod"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_PATH="${BACKUP_DIR}/app-backup-${TIMESTAMP}"
 DEPLOY_COMMIT_SHA="${DEPLOY_COMMIT_SHA:?DEPLOY_COMMIT_SHA is required}"
+SCHEMA_MIGRATION_ACTION="${SCHEMA_MIGRATION_ACTION:-BLOCK_PENDING}"
+
+case "${SCHEMA_MIGRATION_ACTION}" in
+    BLOCK_PENDING|APPLY_PENDING) ;;
+    *)
+        echo "ERROR: SCHEMA_MIGRATION_ACTION must be BLOCK_PENDING or APPLY_PENDING"
+        exit 1
+        ;;
+esac
 
 if [[ ! "$DEPLOY_COMMIT_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
     echo "ERROR: DEPLOY_COMMIT_SHA must be a full 40-character commit SHA"
@@ -184,7 +193,18 @@ compose config --quiet || {
 echo ">> Building backend image"
 compose build backend 2>&1 | tail -5
 
-# ── 7. Deploy (rolling update) ────────────────────────────────────────────
+# ── 7. Apply and verify application schema migrations ─────────────────────
+if [ "${SCHEMA_MIGRATION_ACTION}" = "APPLY_PENDING" ]; then
+    echo ">> Stopping backend before application schema migration"
+    compose stop backend
+fi
+echo ">> Checking application schema migration gate (${SCHEMA_MIGRATION_ACTION})"
+compose run --rm --no-deps backend python scripts/migrate_app_schema.py \
+    --db-path /app/data/app.sqlite \
+    --backup-dir /app/data/migration-backups \
+    --action "${SCHEMA_MIGRATION_ACTION}"
+
+# ── 8. Deploy (rolling update) ────────────────────────────────────────────
 echo ">> Deploying services"
 compose up -d --no-deps --force-recreate backend 2>&1
 

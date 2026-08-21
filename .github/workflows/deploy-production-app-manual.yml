@@ -28,6 +28,14 @@ on:
         options:
           - PRESERVE_EXISTING
           - REQUIRE_EMPTY
+      schema_migration:
+        description: Explicitly apply pending forward-only application SQLite migrations
+        required: true
+        default: APPLY_PENDING
+        type: choice
+        options:
+          - APPLY_PENDING
+          - BLOCK_PENDING
 
 permissions:
   contents: read
@@ -63,6 +71,7 @@ jobs:
       CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
       TRANSCRIPTION_ADMISSION_ACTION: ${{ inputs.transcription_admission }}
       CONTENT_ROOT_POLICY: ${{ inputs.content_root_policy }}
+      SCHEMA_MIGRATION_ACTION: ${{ inputs.schema_migration }}
       CONFIGURED_TRANSCRIPTION_ADMITTED_PROFILE_IDS: ${{ vars.TRANSCRIPTION_ADMITTED_PROFILE_IDS }}
       DEPLOY_COMMIT_SHA: ${{ github.sha }}
     steps:
@@ -352,6 +361,10 @@ jobs:
               exit 1
               ;;
           esac
+          case "${SCHEMA_MIGRATION_ACTION}" in
+            APPLY_PENDING|BLOCK_PENDING) ;;
+            *) echo "ERROR: invalid schema migration action"; exit 1 ;;
+          esac
           docker run --rm \
             --volume "${CONTENT_HOST_PATH}:/app/content" \
             pincheng-rag-backend:latest \
@@ -571,9 +584,13 @@ jobs:
           for name in ("app.sqlite", "parents.sqlite"):
               path = Path(os.environ["SRC"]) / name
               with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as database:
-                  result = database.execute("PRAGMA integrity_check").fetchone()[0]
-              if result != "ok":
-                  raise SystemExit(f"{name} integrity check failed: {result}")
+                  integrity = database.execute("PRAGMA integrity_check").fetchone()[0]
+                  foreign_keys = database.execute("PRAGMA foreign_key_check").fetchall()
+              if integrity != "ok":
+                  raise SystemExit(f"{name} integrity check failed: {integrity}")
+              if foreign_keys:
+                  raise SystemExit(f"{name} foreign key check failed: {len(foreign_keys)}")
+              print(f"APP_ONLY_SQLITE status=verified database={name} integrity={integrity} foreign_keys=0")
           PY
           }
 
@@ -629,11 +646,13 @@ jobs:
                   "WHERE g.is_system=1 AND g.is_active=1 "
                   "ORDER BY g.group_key,i.permission"
               ).fetchall()
-          assert version == CURRENT_SCHEMA_VERSION, {
-              "check": "schema_version",
-              "expected": CURRENT_SCHEMA_VERSION,
-              "actual": version,
-          }
+          print(
+              f"APP_ONLY_SCHEMA status=observed actual={version} expected={CURRENT_SCHEMA_VERSION}"
+          )
+          if version != CURRENT_SCHEMA_VERSION:
+              raise RuntimeError(
+                  f"schema_version_mismatch: actual={version} expected={CURRENT_SCHEMA_VERSION}"
+              )
           actual_categories = [tuple(row) for row in categories]
           assert actual_categories == expected_categories, {
               "check": "root_categories",
@@ -829,9 +848,12 @@ jobs:
               with sqlite3.connect(f"file:{source_path}?mode=ro", uri=True) as source:
                   with sqlite3.connect(backup_path) as target:
                       source.backup(target)
-                      result = target.execute("PRAGMA integrity_check").fetchone()[0]
-                      if result != "ok":
-                          raise SystemExit(f"{name} backup integrity failed: {result}")
+                      integrity = target.execute("PRAGMA integrity_check").fetchone()[0]
+                      foreign_keys = target.execute("PRAGMA foreign_key_check").fetchall()
+                      if integrity != "ok":
+                          raise SystemExit(f"{name} backup integrity failed: {integrity}")
+                      if foreign_keys:
+                          raise SystemExit(f"{name} backup foreign key check failed: {len(foreign_keys)}")
               print(f"APP_ONLY_BACKUP status=ok database={name}")
           PY
           "${COMPOSE[@]}" exec -T backend curl -fsS -X POST \
@@ -890,14 +912,20 @@ jobs:
                   if not source.is_file():
                       raise RuntimeError(f"missing rollback database: {source}")
                   with sqlite3.connect(f"file:{source}?mode=ro", uri=True) as database:
-                      result = database.execute("PRAGMA integrity_check").fetchone()[0]
-                  if result != "ok":
-                      raise RuntimeError(f"{name} backup integrity failed: {result}")
+                      integrity = database.execute("PRAGMA integrity_check").fetchone()[0]
+                      foreign_keys = database.execute("PRAGMA foreign_key_check").fetchall()
+                  if integrity != "ok":
+                      raise RuntimeError(f"{name} backup integrity failed: {integrity}")
+                  if foreign_keys:
+                      raise RuntimeError(f"{name} backup foreign key check failed: {len(foreign_keys)}")
                   shutil.copy2(source, temporary)
                   with sqlite3.connect(f"file:{temporary}?mode=ro", uri=True) as database:
-                      result = database.execute("PRAGMA integrity_check").fetchone()[0]
-                  if result != "ok":
-                      raise RuntimeError(f"{name} staged integrity failed: {result}")
+                      integrity = database.execute("PRAGMA integrity_check").fetchone()[0]
+                      foreign_keys = database.execute("PRAGMA foreign_key_check").fetchall()
+                  if integrity != "ok":
+                      raise RuntimeError(f"{name} staged integrity failed: {integrity}")
+                  if foreign_keys:
+                      raise RuntimeError(f"{name} staged foreign key check failed: {len(foreign_keys)}")
                   staged.append((temporary, target))
               for temporary, target in staged:
                   os.replace(temporary, target)
