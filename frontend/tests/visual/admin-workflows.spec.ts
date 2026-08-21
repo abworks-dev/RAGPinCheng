@@ -160,7 +160,7 @@ test.describe("资料管理", () => {
     const search = page.getByRole("searchbox", { name: "搜索上传任务" });
     await search.fill("竣工交付");
     const searchRequest = page.waitForRequest((request) => new URL(request.url()).searchParams.get("query") === "竣工交付");
-    await page.getByRole("button", { name: "搜索", exact: true }).click();
+    await search.press("Enter");
     await searchRequest;
     await expect(batchButton).toHaveCount(0);
     await expect(page.getByText("04 项目资料 / 02 竣工交付")).toBeVisible();
