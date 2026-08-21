@@ -1644,7 +1644,10 @@ async def upload_managed_documents(
                 upload, batch_id=batch_id, max_bytes=settings.upload_max_file_mb * 1024 * 1024
             )
             if doc_type in {"docx", "xlsx", "pptx"}:
-                package_issue = find_unsafe_office_content(stored.absolute_path)
+                package_issue = find_unsafe_office_content(
+                    stored.absolute_path,
+                    extension=f".{doc_type}",
+                )
                 if package_issue:
                     if stored.created:
                         stored.absolute_path.unlink(missing_ok=True)
@@ -3933,7 +3936,7 @@ def list_content_index_jobs(
                   o.size_bytes AS file_size,
                   CASE WHEN h.current_version_id=v.id THEN 1 ELSE 0 END AS is_current_head,
                   CASE WHEN """ + latest_attempt + """ THEN 1 ELSE 0 END AS is_latest_attempt""" + base +
-        f" {where} ORDER BY j.created_at DESC,j.id LIMIT ? OFFSET ?",
+        f" {where} ORDER BY CASE WHEN j.status='failed' THEN 0 WHEN j.status IN ('pending','uploading','queued_mineru','parsing','chunking','summarizing','embedding') THEN 1 ELSE 2 END, j.updated_at DESC,j.id LIMIT ? OFFSET ?",
         [*params, limit, offset],
     ).fetchall()
     total = int(conn.execute(cte + " SELECT count(*)" + base + f" {where}", params).fetchone()[0])
