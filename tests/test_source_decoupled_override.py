@@ -68,17 +68,22 @@ def test_cli_replaces_relative_env_file_with_production_path():
 def test_production_mount_contract_is_explicit(monkeypatch):
     from scripts.sanitize_source_decoupled_override import apply_production_volumes
 
-    config = {"services": {"backend": {"volumes": [{"target": "/app/docs"}]}}}
+    config = {"services": {"backend": {"volumes": [
+        {"target": "/app/docs"},
+        {"type": "bind", "source": "/data/external-sources", "target": "/app/external-sources"},
+    ]}}}
     monkeypatch.setenv("DATA_PATH", "/data/app")
     monkeypatch.setenv("CONTENT_HOST_PATH", "/data/content")
     monkeypatch.setenv("MEDIA_HOST_PATH", "/data/media")
     apply_production_volumes(config)
     volumes = config["services"]["backend"]["volumes"]
     assert [item["target"] for item in volumes] == [
-        "/app/data", "/app/content", "/app/docs", "/app/media"
+        "/app/data", "/app/content", "/app/docs", "/app/media", "/app/external-sources"
     ]
     assert volumes[2]["type"] == "tmpfs"
     assert volumes[2]["read_only"] is True
+    assert volumes[4]["source"] == "/data/external-sources"
+    assert volumes[4]["read_only"] is True
     assert config["name"] == "ragpincheng-prod"
     assert config["networks"]["default"]["name"] == "ragpincheng-prod_default"
 
