@@ -169,7 +169,7 @@ describe("AdminDocumentsPage", () => {
     const row = (await screen.findByText(failedJob.title)).closest("tr") as HTMLElement;
     expect(within(row).getByText("已下架")).toBeInTheDocument();
     expect(within(row).getByText("资料已移入回收站，不参与知识库检索")).toBeInTheDocument();
-    expect(within(row).queryByRole("button", { name: "重新发布" })).not.toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "重新发布" })).toBeDisabled();
     expect(screen.getByText(/已包含回收站资料/)).toBeInTheDocument();
     expect(mocks.managedContentIndexJobs).toHaveBeenLastCalledWith(expect.objectContaining({ include_archived: true }));
   });
@@ -238,7 +238,7 @@ describe("AdminDocumentsPage", () => {
     const row = (await screen.findByText(failedJob.title)).closest("tr") as HTMLElement;
     expect(within(row).getByText("当前正式版本可检索")).toBeInTheDocument();
     expect(within(row).getByText(/内容块：17 个/)).toBeInTheDocument();
-    expect(within(row).queryByRole("button", { name: "重新发布" })).not.toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "重新发布" })).toBeDisabled();
   });
 
   it("requeues only the latest failed attempt and exposes a busy success state", async () => {
@@ -270,7 +270,7 @@ describe("AdminDocumentsPage", () => {
     });
     rerender(<AdminDocumentsPage />);
     fireEvent.click(screen.getByRole("button", { name: "刷新列表" }));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "重新发布" })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "重新发布" })).toBeDisabled());
   });
 
   it("keeps republishing unavailable without publish permission", async () => {
@@ -280,7 +280,7 @@ describe("AdminDocumentsPage", () => {
     render(<AdminDocumentsPage />);
     await screen.findByText(failedJob.title);
 
-    expect(screen.queryByRole("button", { name: "重新发布" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重新发布" })).toBeDisabled();
     expect(screen.getByRole("link", { name: "查看文件" })).toBeInTheDocument();
   });
 
