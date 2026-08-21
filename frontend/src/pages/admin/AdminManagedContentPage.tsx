@@ -1024,50 +1024,38 @@ function UploadTasksPanel({
             >
               上传任务
             </h2>
-            <p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-ui-xs text-muted-foreground"><span>共 {total} 个任务</span><span role="status" aria-live="polite">· {selected.length > 0 ? <>已选择 <strong>{selected.length}</strong> 个，单次最多 20 个</> : <>未选择任务，单次最多 20 个</>}</span></p>
+            <p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-ui-xs text-muted-foreground"><span>共 {total} 个任务</span><span role="status" aria-live="polite">· {selected.length > 0 ? <>已选择 <strong>{selected.length}</strong> 个</> : <>未选择任务</>}</span></p>
           </div>
           <form
-            className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end"
+            className="min-w-0"
             role="search"
             onSubmit={(event) => {
               event.preventDefault();
               applySearch();
             }}
           >
-            <label className="min-w-0 space-y-1 text-ui-xs text-muted-foreground">
-              <span>搜索任务</span>
+            <label className="block min-w-0 text-ui-xs text-muted-foreground">
+              <span className="sr-only">搜索任务</span>
               <span className="relative block">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2" />
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   type="search"
                   aria-label="搜索上传任务"
-                  className="pl-9"
+                  className="h-control-md pl-9 pr-10"
                   value={queryInput}
                   onChange={(event) => setQueryInput(event.target.value)}
-                  placeholder="搜索目标目录或文件名…"
+                  placeholder="搜索目标目录或文件名..."
                 />
+                <SlidersHorizontal className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
               </span>
             </label>
-            <Button
-              type="submit"
-              className="h-control-md"
-              disabled={loading || queryInput.trim() === query}
-            >
-              <Search className="size-4" />
-              搜索
-            </Button>
           </form>
           <div className="flex shrink-0 flex-wrap items-center gap-2 xl:justify-end">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void loadTasks()}
-              disabled={loading}
-            >
+            <Button size="sm" variant="outline" onClick={() => void loadTasks()} disabled={loading}>
               <RefreshCw
                 className={loading ? "size-4 animate-spin" : "size-4"}
               />
-              刷新任务
+              刷新列表
             </Button>
             <Button
               size="sm"
