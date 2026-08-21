@@ -85,6 +85,28 @@ jobs:
             echo "ERROR: workflow commit is not a full Git SHA"
             exit 1
           }
+          APP_DATABASE="${DATA_PATH}/app.sqlite"
+          [ -f "${APP_DATABASE}" ] || {
+            echo "ERROR: emergency deployment requires an existing application database"
+            exit 1
+          }
+          APP_DATABASE="${APP_DATABASE}" python3 - <<'PY'
+          import os
+          import sqlite3
+
+          path = os.environ["APP_DATABASE"]
+          with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
+              row = connection.execute(
+                  "SELECT max(version) FROM app_schema_migrations"
+              ).fetchone()
+          version = int(row[0] or 0)
+          if version < 35:
+              raise SystemExit(
+                  f"ERROR: emergency deployment requires schema >=35; actual={version}. "
+                  "Run deploy-production-app-manual with schema_migration=APPLY_PENDING."
+              )
+          print(f"EMERGENCY_SCHEMA status=ready version={version}")
+          PY
 
           cd "${REPO_PATH}"
           BASIC_AUTH="$(printf 'x-access-token:%s' "${GIT_TOKEN}" | base64 | tr -d '\n')"
@@ -395,6 +417,9 @@ jobs:
           GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEPLOY_COMMIT_SHA: ${{ inputs.deploy_commit_sha }}
           DEPLOY_HTTP_PROXY: ${{ vars.DEPLOY_HTTP_PROXY }}
+          # Emergency workflow is not the approved schema-migration path;
+          # the manual app workflow owns backup, migration, and rollback.
+          SCHEMA_MIGRATION_ACTION: BLOCK_PENDING
         run: |
           set -euo pipefail
           if [ "${CONTENT_HEAD_ENFORCEMENT}" = "strict" ] || \
