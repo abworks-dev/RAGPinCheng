@@ -69,7 +69,11 @@ from .indexing import create_job, enqueue
 from .routes_transcription import build_transcription_service
 from .transcription_schemes import get_scheme, resolve_scheme_runtime
 from .routes_media import safe_join, stream_media_file
-from .media_transcript_catalog import DEFAULT_MEDIA_TRANSCRIPT_CATEGORY_ID
+from .media_storage import MediaStorageError, resolve_media_path
+from .media_transcript_catalog import (
+    DEFAULT_MEDIA_TRANSCRIPT_CATEGORY_ID,
+    ensure_media_transcript_catalog_item,
+)
 from .media_upload_conflicts import (
     find_media_upload_conflicts,
     normalize_media_title,
@@ -123,6 +127,74 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 _ADMIN_PREVIEWABLE_MEDIA_STATUSES = frozenset(
     {"uploaded", "transcribing", "transcript_ready", "indexing", "ready", "failed"}
 )
+
+
+def _media_action_state(
+    *,
+    status: str,
+    job_status: str | None,
+    job_failure_classification: str | None = None,
+    review_status: str | None,
+    publication_status: str | None,
+    publication_index_status: str | None,
+    replacement_status: str | None = None,
+) -> tuple[list[str], dict[str, str]]:
+    available: list[str] = []
+    disabled: dict[str, str] = {}
+    if job_status in {"pending", "running"}:
+        available.append("cancel_transcription")
+    else:
+        disabled["cancel_transcription"] = "当前没有运行中的转录任务"
+    if job_status == "cancelled" or (job_status == "failed" and job_failure_classification != "permanent"):
+        available.append("retry_transcription")
+    else:
+        disabled["retry_transcription"] = "仅可重试失败或已取消且允许恢复的转录任务"
+    if review_status in {"awaiting_review", "review_rejected"}:
+        available.append("review_transcript")
+    else:
+        disabled["review_transcript"] = "当前没有待审核转录稿"
+    if review_status == "review_approved" and publication_status in {"not_published", "publication_failed"}:
+        available.append("publish_transcript")
+    else:
+        disabled["publish_transcript"] = "转录稿需审核通过且未处于发布中"
+    if publication_status == "published" and status not in {"archived"} and replacement_status != "pending":
+        available.append("replace_media")
+        available.append("archive_media")
+    else:
+        reason = "视频替换任务正在处理" if replacement_status == "pending" else "仅已发布且未归档的视频可操作"
+        disabled["replace_media"] = reason
+        disabled["archive_media"] = reason
+    if status == "failed" and job_status is None:
+        available.append("delete_failed")
+    else:
+        disabled["delete_failed"] = "仅从未创建转录任务的失败视频可删除"
+    if publication_index_status in {"pending", "parsing", "chunking", "embedding"}:
+        available[:] = [action for action in available if action != "publish_transcript"]
+        disabled["publish_transcript"] = "转录稿专属索引正在处理"
+    return available, disabled
+
+
+def _media_current_phase(
+    *,
+    status: str,
+    job_status: str | None,
+    review_status: str | None,
+    publication_status: str | None,
+    publication_index_status: str | None,
+) -> str:
+    if status == "failed" or job_status == "failed" or publication_status == "publication_failed" or publication_index_status == "failed":
+        return "failed"
+    if publication_index_status in {"pending", "parsing", "chunking", "embedding"}:
+        return "index"
+    if publication_status == "publishing":
+        return "publication"
+    if publication_status == "published" or status == "ready":
+        return "ready"
+    if review_status in {"awaiting_review", "review_approved", "review_rejected"}:
+        return "review"
+    if job_status in {"pending", "running", "succeeded", "cancelled"}:
+        return "transcription"
+    return "upload"
 
 
 def _user_permissions(conn: sqlite3.Connection, user_id: int, role: str) -> list[str]:
@@ -498,6 +570,9 @@ def patch_maintenance_settings(
     settings = save_settings(
         enabled=body.conversation_cleanup_enabled,
         retention_days=body.conversation_retention_days,
+        upload_max_file_mb=body.upload_max_file_mb,
+        upload_max_batch_files=body.upload_max_batch_files,
+        upload_max_batch_mb=body.upload_max_batch_mb,
         updated_by=admin.id,
     )
     return _settings_dto(settings)
@@ -635,13 +710,8 @@ def _check_office_external_links_or_embeds(path: Path) -> str | None:
 
 def _verify_office_signature(path: Path, ext: str) -> bool:
     """Verify the file starts with PK\x03\x04 (ZIP header) for Office formats."""
-    if ext not in (".docx", ".xlsx", ".pptx"):
-        return True
-    try:
-        header = path.read_bytes()[:4]
-        return header.startswith(b"PK\x03\x04")
-    except OSError:
-        return False
+    from src.office_security import has_valid_office_signature
+    return has_valid_office_signature(path, ext)
 
 
 def _check_zip_bomb(path: Path) -> bool:
@@ -719,8 +789,8 @@ def _classify_doc_type(filename: str, category: str) -> str | None:
     header-anchored branch — semantically a markdown doc IS a parsed PDF.
 
     Office documents are accepted with their native doc_type:
-    `.docx` → "docx", `.xlsx` → "xlsx", `.pptx` → "pptx"
-    Legacy `.doc`/`.xls`/`.ppt` are NOT supported in the first version.
+    Legacy Office formats retain their native type and are converted in the
+    isolated LibreOffice service before parsing.
     """
     lower = filename.lower()
     if lower.endswith(".pdf"):
@@ -729,10 +799,16 @@ def _classify_doc_type(filename: str, category: str) -> str | None:
         return "transcript" if category == TRANSCRIPT_CATEGORY else "pdf"
     if lower.endswith(".docx"):
         return "docx"
+    if lower.endswith(".doc"):
+        return "doc"
     if lower.endswith(".xlsx"):
         return "xlsx"
+    if lower.endswith(".xls"):
+        return "xls"
     if lower.endswith(".pptx"):
         return "pptx"
+    if lower.endswith(".ppt"):
+        return "ppt"
     return None
 
 
@@ -830,7 +906,7 @@ async def upload_documents(
             continue
         doc_type = _classify_doc_type(name, cat)
         if doc_type is None:
-            skipped.append({"filename": name, "reason": "仅支持 .pdf、.md、.docx、.xlsx、.pptx"})
+            skipped.append({"filename": name, "reason": "仅支持 .pdf、.md、.doc、.docx、.xls、.xlsx、.ppt、.pptx"})
             continue
         if doc_type in OFFICE_DOC_TYPES and not OFFICE_PROCESSING_ENABLED:
             skipped.append({
@@ -874,7 +950,7 @@ async def upload_documents(
 
         # Office file security checks (after file is on disk)
         ext = Path(name).suffix.lower()
-        if ext in (".docx", ".xlsx", ".pptx"):
+        if ext in (".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"):
             # 1. Magic bytes signature check
             if not _verify_office_signature(target, ext):
                 target.unlink()
@@ -1232,6 +1308,19 @@ def _suggest_media_identity(
     raise HTTPException(status_code=409, detail="无法生成可用的重命名建议")
 
 
+def _cleanup_media_upload(
+    media_dir: Path,
+    *,
+    video_path: Path | None = None,
+    transcript_path: Path | None = None,
+) -> None:
+    """Remove files created by an upload attempt without touching other media."""
+    for path in (video_path, transcript_path):
+        if path is not None:
+            path.unlink(missing_ok=True)
+    shutil.rmtree(media_dir, ignore_errors=True)
+
+
 @router.post("/media/preflight", response_model=MediaUploadPreflightResponse)
 def preflight_media_upload(
     body: MediaUploadPreflightRequest,
@@ -1303,6 +1392,7 @@ async def upload_media(
     scheme_id: Annotated[str | None, Form()] = None,
     category_id: Annotated[str | None, Form()] = None,
     original_filename: Annotated[str | None, Form()] = None,
+    defer_transcription: Annotated[bool, Form()] = False,
 ) -> MediaAssetDTO:
     """Upload one MP4 with either a manual transcript or a trusted Profile."""
     import uuid
@@ -1315,8 +1405,11 @@ async def upload_media(
     except ValueError:
         raise HTTPException(status_code=400, detail="视频标题或源文件名不合法")
     automatic = transcript is None
+    deferred = automatic and defer_transcription
 
-    if automatic:
+    transcript_filename = None
+    transcript_path = None
+    if automatic and not deferred:
         # Legacy clients sent a seeded Scheme ID in profile_id. Resolve it as a
         # Scheme while keeping custom Scheme UUIDs immediately usable.
         if scheme_id is None and profile_id is not None and get_scheme(conn, profile_id):
@@ -1347,7 +1440,7 @@ async def upload_media(
     if not video_name or Path(video_name).suffix.lower() not in _ALLOWED_VIDEO_EXTS:
         raise HTTPException(status_code=400, detail="只支持 .mp4 视频文件")
 
-    if automatic:
+    if automatic and not deferred:
         if not profile_id or request_idempotency_key is None:
             raise HTTPException(status_code=400, detail="自动转录必须提供 scheme_id/profile_id 和幂等键")
         try:
@@ -1355,7 +1448,7 @@ async def upload_media(
         except ContractValidationError:
             raise HTTPException(status_code=400, detail="自动转录幂等键不合法")
         transcript_bytes = None
-    else:
+    elif not automatic:
         if profile_id is not None or scheme_id is not None or request_idempotency_key is not None:
             raise HTTPException(status_code=400, detail="人工转录不得同时指定自动转录参数")
         if not transcript_name.lower().endswith(".md"):
@@ -1396,14 +1489,14 @@ async def upload_media(
                 detail={"code": "media_upload_conflict_changed", "message": "待替换资料已变化，请重新检查。"},
             )
 
-    if not automatic:
+    if deferred or not automatic:
         validate_current_conflicts()
 
     # A repeated automatic request must resolve before creating another media row
     # or writing another permanent media directory.  The uploaded bytes are read
     # only to verify the request identity bound to the existing key.
     MAX_VIDEO_BYTES = MAX_VIDEO_UPLOAD_MB * 1024 * 1024
-    if automatic:
+    if automatic and not deferred:
         existing = conn.execute(
             """
             SELECT j.id AS job_id,j.profile_id,j.scheme_id,j.created_by,
@@ -1515,7 +1608,17 @@ async def upload_media(
 
     # Write video to disk in chunks (streaming, not loading all into memory)
     media_dir = MEDIA_DIR / media_id
-    media_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        media_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "media_storage_unavailable",
+                "message": "服务器暂时无法保存视频，请稍后重试。",
+                "retryable": True,
+            },
+        ) from exc
     video_path = media_dir / "original.mp4"
     total_video = 0
     video_digest = hashlib.sha256()
@@ -1528,8 +1631,7 @@ async def upload_media(
                 total_video += len(chunk)
                 if total_video > MAX_VIDEO_BYTES:
                     fh.close()
-                    video_path.unlink()
-                    media_dir.rmdir()
+                    _cleanup_media_upload(media_dir, video_path=video_path)
                     raise HTTPException(
                         status_code=400,
                         detail=f"视频文件超过 {MAX_VIDEO_UPLOAD_MB}MB 上限",
@@ -1537,42 +1639,75 @@ async def upload_media(
                 fh.write(chunk)
                 video_digest.update(chunk)
     except HTTPException:
+        _cleanup_media_upload(media_dir, video_path=video_path)
         raise
     except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"写入视频失败：{exc}")
+        _cleanup_media_upload(media_dir, video_path=video_path)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "media_storage_unavailable",
+                "message": "服务器暂时无法保存视频，请稍后重试。",
+                "retryable": True,
+            },
+        ) from exc
 
     if total_video == 0:
-        video_path.unlink()
-        media_dir.rmdir()
+        _cleanup_media_upload(media_dir, video_path=video_path)
         raise HTTPException(status_code=400, detail="视频文件不能为空")
 
-    if automatic:
+    if automatic and not deferred:
         try:
-            await asyncio.to_thread(build_transcription_service().preparer.prepare, media_id)
-        except (ContractValidationError, OSError):
-            video_path.unlink(missing_ok=True)
-            try:
-                media_dir.rmdir()
-            except OSError:
-                pass
-            raise HTTPException(status_code=503, detail="无法准备视频音频轨道")
+            await asyncio.to_thread(
+                build_transcription_service().preparer.prepare,
+                media_id,
+                source_path=video_path,
+            )
+        except ContractValidationError as exc:
+            _cleanup_media_upload(media_dir, video_path=video_path)
+            media_error = {
+                "media_input_unavailable": ("media_audio_source_missing", "视频文件无法读取，请重新上传。", False),
+                "media_audio_preparation_timeout": ("media_audio_preparation_timeout", "音频准备超时，请压缩视频或重新导出后重试。", True),
+                "media_audio_preparation_failed": ("media_audio_preparation_failed", "视频音频无法解码，请确认视频包含音轨，并尝试重新导出为 H.264 + AAC MP4。", False),
+                "invalid_prepared_audio": ("media_audio_invalid_output", "音频转换结果无效，请重新导出视频后重试。", True),
+                "empty_prepared_audio": ("media_audio_empty", "视频没有可用音频内容，请选择包含声音的文件。", False),
+            }.get(exc.code, ("media_audio_preparation_failed", "无法准备视频音频轨道，请确认视频格式和音轨后重试。", True))
+            raise HTTPException(
+                status_code=400 if not media_error[2] else 503,
+                detail={"code": media_error[0], "message": media_error[1], "retryable": media_error[2]},
+            ) from exc
+        except OSError as exc:
+            _cleanup_media_upload(media_dir, video_path=video_path)
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "media_storage_unavailable", "message": "服务器暂时无法准备视频音频，请稍后重试。", "retryable": True},
+            ) from exc
+        except sqlite3.Error as exc:
+            _cleanup_media_upload(media_dir, video_path=video_path)
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "media_storage_unavailable", "message": "服务器暂时无法准备视频音频，请稍后重试。", "retryable": True},
+            ) from exc
         transcript_filename = None
         transcript_path = None
-    else:
+    elif not automatic:
         safe_title = re.sub(r"[\\/:*?\"<>|]", "_", clean_title)[:60]
         transcript_filename = f"{safe_title}__{media_id[:8]}.md"
         transcript_dir = DOCS_DIR / TRANSCRIPT_CATEGORY
-        transcript_dir.mkdir(parents=True, exist_ok=True)
         transcript_path = transcript_dir / transcript_filename
         try:
+            transcript_dir.mkdir(parents=True, exist_ok=True)
             transcript_path.write_bytes(transcript_bytes)
         except OSError as exc:
-            video_path.unlink(missing_ok=True)
-            try:
-                media_dir.rmdir()
-            except OSError:
-                pass
-            raise HTTPException(status_code=500, detail=f"写入转录稿失败：{exc}")
+            _cleanup_media_upload(media_dir, video_path=video_path, transcript_path=transcript_path)
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "media_storage_unavailable",
+                    "message": "服务器暂时无法保存转录稿，请稍后重试。",
+                    "retryable": True,
+                },
+            ) from exc
 
     try:
         conn.execute(
@@ -1603,16 +1738,27 @@ async def upload_media(
                 None if replacement_source_media_id is not None else normalize_content_filename(video_name)[1],
             ),
         )
+        if deferred:
+            ensure_media_transcript_catalog_item(conn, media_id=media_id, now=now)
+        conn.commit()
     except sqlite3.IntegrityError:
         conn.rollback()
-        if transcript_path is not None:
-            transcript_path.unlink(missing_ok=True)
-        shutil.rmtree(media_dir, ignore_errors=True)
+        _cleanup_media_upload(media_dir, video_path=video_path, transcript_path=transcript_path)
         raise HTTPException(
             status_code=409,
             detail={"code": "media_upload_conflict_changed", "message": "目标目录中的同名资料已变化，请重新检查。"},
         )
-    conn.commit()
+    except sqlite3.Error as exc:
+        conn.rollback()
+        _cleanup_media_upload(media_dir, video_path=video_path, transcript_path=transcript_path)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "media_database_unavailable",
+                "message": "服务器暂时无法登记视频，请稍后重试。",
+                "retryable": True,
+            },
+        ) from exc
 
     if replacement_source_media_id is not None:
         try:
@@ -1625,7 +1771,7 @@ async def upload_media(
                 requested_by=admin.id,
                 now=now,
             )
-        except (ContractValidationError, StoreConflictError):
+        except (ContractValidationError, StoreConflictError, sqlite3.Error):
             conn.execute(
                 "UPDATE media_assets SET status='failed',error=?,updated_at=? WHERE media_id=?",
                 ("replacement request could not be registered", int(time.time()), media_id),
@@ -1634,7 +1780,7 @@ async def upload_media(
             raise HTTPException(status_code=409, detail="无法创建替换任务，请刷新后重试")
 
     transcription_job_id = None
-    if automatic:
+    if automatic and not deferred:
         try:
             transcription_job = build_transcription_service().create_pending_job(
                 media_id=media_id,
@@ -1664,7 +1810,7 @@ async def upload_media(
                     "retryable": False,
                 },
             )
-        except (ContractValidationError, OSError):
+        except (ContractValidationError, OSError, sqlite3.Error, RuntimeError):
             conn.execute(
                 "UPDATE media_assets SET status='failed',error=?,updated_at=? WHERE media_id=?",
                 ("automatic transcription job could not be created", int(time.time()), media_id),
@@ -1675,18 +1821,40 @@ async def upload_media(
                 (int(time.time()), media_id),
             )
             conn.commit()
-            raise HTTPException(status_code=500, detail="无法创建自动转录任务")
-    else:
-        job_id = create_job(
-            user_id=admin.id,
-            filename=transcript_filename,
-            category=TRANSCRIPT_CATEGORY,
-            doc_type="transcript",
-            source_path=transcript_path,
-            file_size=len(transcript_bytes),
-            media_id=media_id,
-        )
-        enqueue(job_id)
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "transcription_job_unavailable",
+                    "message": "服务器暂时无法创建转录任务，请稍后重试。",
+                    "retryable": True,
+                },
+            )
+    elif not automatic:
+        try:
+            job_id = create_job(
+                user_id=admin.id,
+                filename=transcript_filename,
+                category=TRANSCRIPT_CATEGORY,
+                doc_type="transcript",
+                source_path=transcript_path,
+                file_size=len(transcript_bytes),
+                media_id=media_id,
+            )
+            enqueue(job_id)
+        except (OSError, sqlite3.Error, RuntimeError) as exc:
+            conn.execute(
+                "UPDATE media_assets SET status='failed',error=?,updated_at=? WHERE media_id=?",
+                ("transcript index job could not be created", int(time.time()), media_id),
+            )
+            conn.commit()
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "index_job_unavailable",
+                    "message": "服务器暂时无法创建转录稿索引任务，请稍后重试。",
+                    "retryable": True,
+                },
+            ) from exc
 
     # Return the media asset
     row = conn.execute(
@@ -1726,8 +1894,22 @@ def list_media_assets(
         """
         SELECT m.media_id, m.title, m.original_filename, m.mime_type, m.file_size,
                m.transcript_origin, m.status, m.created_at, m.updated_at, m.error,
+               m.storage_kind, e.source_id AS external_source_id,
+               e.relative_path AS external_relative_path, e.availability AS external_availability,
                COALESCE(i.category_id,m.target_category_id) AS category_id,
                i.id AS catalog_item_id,h.current_version_id,
+               (SELECT j.id FROM transcription_jobs j
+                WHERE j.media_id=m.media_id
+                ORDER BY j.attempt_number DESC,j.created_at DESC LIMIT 1) AS transcription_job_id,
+               (SELECT j.status FROM transcription_jobs j
+                WHERE j.media_id=m.media_id
+                ORDER BY j.attempt_number DESC,j.created_at DESC LIMIT 1) AS transcription_job_status,
+               (SELECT j.stage FROM transcription_jobs j
+                WHERE j.media_id=m.media_id
+                ORDER BY j.attempt_number DESC,j.created_at DESC LIMIT 1) AS transcription_stage,
+               (SELECT j.failure_classification FROM transcription_jobs j
+                WHERE j.media_id=m.media_id
+                ORDER BY j.attempt_number DESC,j.created_at DESC LIMIT 1) AS transcription_failure_classification,
                v.review_status, v.publication_status,
                CASE WHEN h.current_version_id=v.id THEN 1 ELSE 0 END AS is_current_version,
                (
@@ -1747,6 +1929,7 @@ def list_media_assets(
                 WHERE r.candidate_media_id=m.media_id OR r.source_media_id=m.media_id
                 ORDER BY r.created_at DESC,r.id DESC LIMIT 1) AS replacement_status
         FROM media_assets m
+        LEFT JOIN external_media_entries e ON e.media_id=m.media_id
         LEFT JOIN content_items i ON i.media_id=m.media_id AND i.archived_at IS NULL
         LEFT JOIN transcript_versions v ON v.id=(
             SELECT v2.id FROM transcript_versions v2
@@ -1761,8 +1944,18 @@ def list_media_assets(
         """,
         (limit,),
     ).fetchall()
-    return [
-        MediaAssetDTO(
+    result: list[MediaAssetDTO] = []
+    for r in rows:
+        available_actions, disabled_actions = _media_action_state(
+            status=str(r["status"]),
+            job_status=r["transcription_job_status"],
+            job_failure_classification=r["transcription_failure_classification"],
+            review_status=r["review_status"],
+            publication_status=r["publication_status"],
+            publication_index_status=r["publication_index_status"],
+            replacement_status=r["replacement_status"],
+        )
+        result.append(MediaAssetDTO(
             media_id=r["media_id"],
             title=r["title"],
             original_filename=r["original_filename"],
@@ -1773,6 +1966,16 @@ def list_media_assets(
             created_at=r["created_at"],
             updated_at=r["updated_at"],
             error=r["error"],
+            transcription_job_id=r["transcription_job_id"],
+            transcription_job_status=r["transcription_job_status"],
+            transcription_stage=r["transcription_stage"],
+            current_phase=_media_current_phase(
+                status=str(r["status"]),
+                job_status=r["transcription_job_status"],
+                review_status=r["review_status"],
+                publication_status=r["publication_status"],
+                publication_index_status=r["publication_index_status"],
+            ),
             review_status=r["review_status"],
             publication_status=r["publication_status"],
             publication_index_status=r["publication_index_status"],
@@ -1783,9 +1986,14 @@ def list_media_assets(
             category_id=r["category_id"],
             catalog_item_id=r["catalog_item_id"],
             current_version_id=r["current_version_id"],
-        )
-        for r in rows
-    ]
+            storage_kind=r["storage_kind"],
+            external_source_id=r["external_source_id"],
+            external_relative_path=r["external_relative_path"],
+            external_availability=r["external_availability"],
+            available_actions=available_actions,
+            disabled_actions=disabled_actions,
+        ))
+    return result
 
 
 @router.get("/media/{media_id}/preview")
@@ -1819,14 +2027,12 @@ def preview_media_asset(
         raise HTTPException(status_code=404, detail="媒体不可预览")
 
     try:
-        file_path = safe_join(MEDIA_DIR, row["storage_rel_path"])
-    except ValueError:
-        raise HTTPException(status_code=404, detail="媒体不存在")
-    if not file_path.exists() or not file_path.is_file():
+        resolved = resolve_media_path(conn, media_id, media_root=MEDIA_DIR)
+    except MediaStorageError:
         raise HTTPException(status_code=404, detail="媒体文件缺失")
 
     return stream_media_file(
-        file_path,
+        resolved.path,
         row["mime_type"],
         request.headers.get("range"),
         cache_control="private, no-store",
@@ -1837,10 +2043,12 @@ def preview_media_asset(
 def archive_media_asset(media_id: str, admin: CurrentUser = Depends(require_csrf_admin), conn: sqlite3.Connection = Depends(get_db)) -> DeleteManagedContentResponse:
     try: validate_uuid(media_id, "media_id")
     except ContractValidationError: raise HTTPException(status_code=404, detail="媒体不存在")
-    row = conn.execute("""SELECT i.id AS item_id,h.current_version_id AS version_id
+    row = conn.execute("""SELECT i.id AS item_id,h.current_version_id AS version_id,m.storage_kind
                          FROM content_items i JOIN media_transcript_heads h ON h.media_id=i.media_id
+                         JOIN media_assets m ON m.media_id=i.media_id
                          WHERE i.media_id=? AND i.content_kind='media_transcript' AND i.archived_at IS NULL""", (media_id,)).fetchone()
     if row is None: raise HTTPException(status_code=409, detail="该视频没有可归档的已发布转写资料")
+    if row["storage_kind"] == "external": raise HTTPException(status_code=409, detail="共享目录视频为只读来源，不能移入回收站")
     try:
         result = archive_content_item(conn, str(row["item_id"]), expected_version_id=str(row["version_id"]), actor_user_id=admin.id, can_archive_draft=True, can_archive_published=True)
     except ValueError as exc:
@@ -1861,12 +2069,14 @@ def delete_failed_media_asset(
     except ContractValidationError:
         raise HTTPException(status_code=404, detail="媒体不存在")
     row = conn.execute(
-        "SELECT status FROM media_assets WHERE media_id=?", (media_id,)
+        "SELECT status,storage_kind FROM media_assets WHERE media_id=?", (media_id,)
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="媒体不存在")
     if row["status"] != "failed":
         raise HTTPException(status_code=409, detail="仅可完整删除失败且未进入转录流程的媒体")
+    if row["storage_kind"] == "external":
+        raise HTTPException(status_code=409, detail="共享目录视频由外部媒体源管理，不能在此删除")
     if conn.execute(
         "SELECT 1 FROM transcription_jobs WHERE media_id=?", (media_id,)
     ).fetchone() is not None:

@@ -29,7 +29,7 @@ describe("AdminOverviewPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.adminMaintenance.mockResolvedValue({
-      settings: { conversation_cleanup_enabled: true, conversation_retention_days: null, updated_at: null, updated_by: null },
+      settings: { conversation_cleanup_enabled: true, conversation_retention_days: null, upload_max_file_mb: 2000, upload_max_batch_files: 5000, upload_max_batch_mb: 10240, updated_at: null, updated_by: null },
       sweeper_interval_seconds: 3600,
       last_run: { id: 1, trigger_source: "automatic", status: "succeeded", retention_days: null, deleted_conversations: 0, deleted_messages: 0, deleted_auth_sessions: 2, started_at: 10, finished_at: 11, error_summary: null },
     });

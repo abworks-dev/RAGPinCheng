@@ -15,6 +15,7 @@ import { usePdfPreview } from "../hooks/usePdfPreview";
 import { DocxPreview } from "./DocxPreview";
 import { ResourcePreviewShell } from "./ResourcePreviewShell";
 import { SpreadsheetPreview } from "./SpreadsheetPreview";
+import { XMindPreview } from "./XMindPreview";
 import { IconButton } from "./ui/icon-button";
 
 // PDF.js worker — use the CDN build so we don't need to bundle it.
@@ -126,12 +127,13 @@ export function PdfPreview() {
   const [viewportSize, setViewportSize] = useState<Size>({ width: 0, height: 0 });
   const [pageSize, setPageSize] = useState<Size>({ width: 0, height: 0 });
 
-  const open = state.parentId !== null;
-  const isDocx = state.docType === "docx";
-  const isXlsx = state.docType === "xlsx";
-  const isPptx = state.docType === "pptx";
+  const open = state.parentId !== null || state.versionId !== null;
+  const isDocx = state.docType === "docx" || state.docType === "doc";
+  const isXlsx = state.docType === "xlsx" || state.docType === "xls";
+  const isPptx = state.docType === "pptx" || state.docType === "ppt";
+  const isXMind = state.docType === "xmind";
   // PPTX files are converted to PDF by the preview endpoint and use the same page controls.
-  const isPdf = !isDocx && !isXlsx;
+  const isPdf = !isDocx && !isXlsx && !isXMind;
   const panEnabled = isPdf && (interactionMode === "pan" || temporaryPan);
 
   useEffect(() => {
@@ -340,6 +342,8 @@ export function PdfPreview() {
       ? "Excel 表格"
       : isPptx
         ? "演示文稿"
+        : isXMind
+          ? "XMind 思维导图"
         : numPages
           ? `${state.pageNumber} / ${numPages} 页`
           : "PDF 文档";
@@ -456,7 +460,9 @@ export function PdfPreview() {
             panEnabled ? (dragging ? "cursor-grabbing select-none" : "cursor-grab") : "cursor-text"
           }`}
         >
-          {isDocx ? (
+          {isXMind && state.versionId ? (
+            <XMindPreview versionId={state.versionId} />
+          ) : isDocx ? (
             <DocxPreview
               parentId={state.parentId!}
               paragraphAnchor={state.location.paragraphAnchor}

@@ -10,7 +10,6 @@ import {
   SlidersHorizontal,
   Tags,
   Users,
-  Video,
   Wrench,
   X,
 } from "lucide-react";
@@ -24,7 +23,7 @@ import { useAuth } from "../../context/AuthContext";
 import { contentWorkspaceTabs, workspaceLabel } from "../../lib/workspace-access";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 
-type Tab = "users" | "conversations" | "managed" | "categories" | "media" | "stats" | "feedback" | "maintenance" | "answer-policy" | "asr";
+type Tab = "users" | "conversations" | "managed" | "categories" | "stats" | "feedback" | "maintenance" | "answer-policy" | "asr";
 
 type TabDefinition = { key: Tab; label: string; path: string };
 
@@ -40,7 +39,6 @@ const navigationIcons: Record<Tab, LucideIcon> = {
   asr: AudioLines,
   managed: FileText,
   categories: Tags,
-  media: Video,
   users: Users,
   conversations: MessagesSquare,
   feedback: MessageSquareQuote,
@@ -58,7 +56,6 @@ const adminNavigation: NavigationGroup[] = [
     tabs: [
       { key: "managed", label: "资料管理", path: "content" },
       { key: "categories", label: "分类管理", path: "categories" },
-      { key: "media", label: "视频管理", path: "media" },
     ],
   },
   {
@@ -117,17 +114,22 @@ export function AdminLayout() {
   if (user && currentPath === "index" && (isAdmin || permissions.includes("index.view"))) {
     return <Navigate to="/admin/content?view=index" replace />;
   }
+  if (user && currentPath === "media" && isAdmin) {
+    const params = new URLSearchParams(location.search);
+    params.set("view", "transcription");
+    return <Navigate to={`/admin/content?${params.toString()}`} replace />;
+  }
   if (user && currentPath && !currentTab) return <Navigate to={`/admin/${tabs[0].path}`} replace />;
 
   return (
     <div className="flex min-h-full flex-col bg-admin-background text-foreground lg:h-screen lg:flex-row lg:overflow-hidden">
       <aside
         className={cn(
-          "flex shrink-0 flex-col overflow-hidden bg-sidebar text-sidebar-foreground lg:h-full lg:transition-[width] lg:duration-normal",
+          "flex shrink-0 flex-col bg-sidebar text-sidebar-foreground lg:h-full lg:transition-[width] lg:duration-normal",
           sidebarCollapsed ? "lg:w-16" : "lg:w-[17rem]",
         )}
       >
-        <div className="border-b border-sidebar-border px-3 py-3 lg:border-b-0">
+        <div className="overflow-hidden border-b border-sidebar-border px-3 py-3 lg:border-b-0">
           <div className="flex h-9 items-center justify-between">
             <button
               type="button"
@@ -156,7 +158,7 @@ export function AdminLayout() {
           </div>
         </div>
 
-        <div className={cn("px-3 py-3 lg:min-h-0 lg:flex-1", !mobileNavigationOpen && "hidden lg:block")}>
+        <div className={cn("overflow-hidden px-3 py-3 lg:min-h-0 lg:flex-1", !mobileNavigationOpen && "hidden lg:block")}>
           <nav aria-label="管理功能" className="space-y-3">
             {navigation.map((group) => (
               <section key={group.label} aria-labelledby={`admin-nav-${group.label}`}>

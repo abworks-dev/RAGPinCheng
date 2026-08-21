@@ -9,6 +9,7 @@ import {
   FolderTree,
   ListOrdered,
   Move,
+  Network,
   Plus,
   RefreshCw,
   Save,
@@ -17,7 +18,11 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { adminContentApi } from "../../api/admin/content";
+import { adminMediaApi } from "../../api/admin/media";
 import { CategoryDeleteDialog } from "../../components/admin/CategoryDeleteDialog";
+import { CategoryTreePicker } from "../../components/admin/CategoryTreePicker";
+import { ExternalMediaSourcesPanel } from "../../components/admin/ExternalMediaSourcesPanel";
+import { useAuth } from "../../context/AuthContext";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -30,7 +35,7 @@ import { LoadingState } from "../../components/ui/loading-state";
 import { Select } from "../../components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../../components/ui/sheet";
 import { toast } from "../../components/ui/toast";
-import type { ManagedCategory } from "../../types";
+import type { ExternalMediaRoot, ManagedCategory, TranscriptionSchemeOption } from "../../types";
 import {
   buildCategoryTree,
   compareManagedCategories,
@@ -50,6 +55,7 @@ type CategoryDraft = {
   chat_filter_selectable: boolean;
 };
 type CategoryCreateDraft = { parent_id: string; display_name: string; target_position: string };
+type SharedFolderDraft = { parent_id: string; display_name: string; root_alias: string; relative_path: string; unc_path: string; default_scheme_id: string };
 type PendingAction =
   | { kind: "select"; id: string }
   | { kind: "refresh" }
@@ -88,6 +94,7 @@ function isNarrowViewport() {
 }
 
 export function AdminCategoriesPage() {
+  const { state } = useAuth();
   const [categories, setCategories] = useState<ManagedCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -102,6 +109,12 @@ export function AdminCategoriesPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [sharedOpen, setSharedOpen] = useState(false);
+  const [sharedSaving, setSharedSaving] = useState(false);
+  const [sharedError, setSharedError] = useState<string | null>(null);
+  const [sharedRoots, setSharedRoots] = useState<ExternalMediaRoot[]>([]);
+  const [sharedSchemes, setSharedSchemes] = useState<TranscriptionSchemeOption[]>([]);
+  const [sharedDraft, setSharedDraft] = useState<SharedFolderDraft>({ parent_id: "", display_name: "", root_alias: "", relative_path: "", unc_path: "", default_scheme_id: "" });
   const [createDraft, setCreateDraft] = useState<CategoryCreateDraft>({ parent_id: "", display_name: "", target_position: "1" });
   const [createSaving, setCreateSaving] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -120,6 +133,9 @@ export function AdminCategoriesPage() {
   const [numberError, setNumberError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ManagedCategory | null>(null);
   const nodeRefs = useRef(new Map<string, HTMLDivElement>());
+  const isAdmin = state.status === "authed" && state.user.role === "admin";
+  const canManageExternalSources = isAdmin && typeof adminMediaApi.externalRoots === "function";
+  const canForceDelete = isAdmin || (state.status === "authed" && state.user.content_permissions?.includes("category.force_delete"));
 
   const selectedCategory = categories.find((category) => category.id === selectedId) || null;
   const isDirty = Boolean(selectedCategory && draft && draftCategoryId === selectedCategory.id
@@ -182,11 +198,9 @@ export function AdminCategoriesPage() {
       visit(child.id);
     });
     visit(movingCategory.id);
-    const subtreeDepth = Math.max(0, ...categories.filter((category) => descendants.has(category.id)).map((category) => category.level - movingCategory.level));
     return categories.filter((category) => category.id !== movingCategory.id
       && !descendants.has(category.id)
-      && category.is_active
-      && category.level + 1 + subtreeDepth <= 4);
+      && category.is_active);
   }, [categories, movingCategory]);
   const createParentId = createDraft.parent_id || null;
   const createSiblings = useMemo(
@@ -259,6 +273,26 @@ export function AdminCategoriesPage() {
     setCreateError(null);
     setCreateConfirming(false);
     setCreateOpen(true);
+  };
+
+  const openSharedFolder = async () => {
+    setSharedError(null);
+    try {
+      const [roots, schemes] = await Promise.all([adminMediaApi.externalRoots(), adminContentApi.transcriptionSchemes()]);
+      const available = schemes.filter((item) => item.enabled && !item.archived && item.availability === "available");
+      setSharedRoots(roots); setSharedSchemes(available);
+      setSharedDraft({ parent_id: "", display_name: "", root_alias: roots[0]?.alias || "", relative_path: "", unc_path: "", default_scheme_id: available[0]?.scheme_id || "" });
+    } catch (cause) { setSharedError(cause instanceof Error ? cause.message : "共享目录配置加载失败"); }
+    setSharedOpen(true);
+  };
+
+  const createSharedFolder = async () => {
+    setSharedSaving(true); setSharedError(null);
+    try {
+      const created = await adminContentApi.createSharedFolder({ ...sharedDraft, parent_id: sharedDraft.parent_id || null });
+      await load(true); setSelectedId(created.id); setSharedOpen(false); toast.success("共享文件夹已创建");
+    } catch (cause) { setSharedError(cause instanceof Error ? cause.message : "共享文件夹创建失败"); }
+    finally { setSharedSaving(false); }
   };
 
   const confirmDiscard = () => {
@@ -472,6 +506,7 @@ export function AdminCategoriesPage() {
           <IconButton label={refreshing ? "刷新中" : "刷新"} onClick={requestRefresh} disabled={loading || refreshing}>
             <RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />
           </IconButton>
+          {isAdmin && <Button variant="outline" onClick={() => void openSharedFolder()} className="flex-1 sm:flex-none"><Network className="size-4" />新建共享文件夹</Button>}
           <Button onClick={() => requestCreate()} className="flex-1 sm:flex-none"><Plus className="size-4" />新增分类</Button>
         </div>
       </header>
@@ -516,16 +551,34 @@ export function AdminCategoriesPage() {
                 </div>
               </div>
               <div className="hidden min-h-0 min-w-0 overflow-hidden lg:block">
-                <CategoryDetail category={selectedCategory} draft={draft} categories={categories} saving={saving} moving={moving || numberSaving} error={saveError} hasActiveChild={selectedCategory ? activeChildIds.has(selectedCategory.id) : false} onChange={setDraft} onSave={() => void saveSelected()} onCancel={cancelEdit} onAddChild={() => selectedCategory && requestCreate(selectedCategory.id)} onMove={openMoveDialog} onAdjustNumber={openNumberDialog} onDelete={() => selectedCategory && setDeleteTarget(selectedCategory)} />
+                <CategoryDetail category={selectedCategory} draft={draft} categories={categories} saving={saving} moving={moving || numberSaving} error={saveError} hasActiveChild={selectedCategory ? activeChildIds.has(selectedCategory.id) : false} canDelete={Boolean(selectedCategory?.parent_id) || isAdmin} onChange={setDraft} onSave={() => void saveSelected()} onCancel={cancelEdit} onAddChild={() => selectedCategory && requestCreate(selectedCategory.id)} onMove={openMoveDialog} onAdjustNumber={openNumberDialog} onDelete={() => selectedCategory && setDeleteTarget(selectedCategory)} />
               </div>
             </div>
           )}
         </section>
       )}
 
+      {canManageExternalSources && !error && <ExternalMediaSourcesPanel categories={categories} schemes={sharedSchemes} onOpenWorkbench={() => undefined} onMediaChanged={async () => { await load(true); }} />}
+
+      <Sheet open={sharedOpen} onOpenChange={(open) => { if (!sharedSaving) setSharedOpen(open); }}>
+        <SheetContent className="max-w-xl overflow-y-auto">
+          <SheetHeader><SheetTitle>新建共享文件夹</SheetTitle><SheetDescription>只读扫描服务端白名单目录中的 MP4 视频，不修改远程文件。</SheetDescription></SheetHeader>
+          <div className="space-y-4 p-6">
+            {sharedError && <Alert variant="destructive" role="alert"><AlertTitle>共享文件夹创建失败</AlertTitle><AlertDescription>{sharedError}</AlertDescription></Alert>}
+            {sharedRoots.length === 0 && <Alert role="status"><AlertTitle>未配置共享目录根</AlertTitle><AlertDescription>请先在服务端配置可选根别名。</AlertDescription></Alert>}
+            <Field label="父分类"><Select value={sharedDraft.parent_id} onChange={(event) => setSharedDraft({ ...sharedDraft, parent_id: event.target.value })}><option value="">一级分类</option>{categories.filter((item) => item.is_active && item.category_kind !== "shared_folder").map((item) => <option key={item.id} value={item.id}>{item.full_path}</option>)}</Select></Field>
+            <Field label="显示名称"><Input value={sharedDraft.display_name} maxLength={100} onChange={(event) => setSharedDraft({ ...sharedDraft, display_name: event.target.value })} placeholder="例如 培训视频共享目录" /></Field>
+          <Field label="Windows 共享路径（可选）"><Input value={sharedDraft.unc_path} onChange={(event) => setSharedDraft({ ...sharedDraft, unc_path: event.target.value, root_alias: event.target.value ? "" : sharedDraft.root_alias })} placeholder="例如 \\\\192.168.0.252\\项目工程\\品成知识库\\1.2内部教学视频（MP4）" /></Field>
+          {!sharedDraft.unc_path && <><Field label="共享根别名"><Select value={sharedDraft.root_alias} onChange={(event) => setSharedDraft({ ...sharedDraft, root_alias: event.target.value })}><option value="">请选择</option>{sharedRoots.map((root) => <option key={root.alias} value={root.alias}>{root.alias}</option>)}</Select></Field><Field label="相对目录"><Input value={sharedDraft.relative_path} onChange={(event) => setSharedDraft({ ...sharedDraft, relative_path: event.target.value })} placeholder="可留空，例如 2026/培训" /></Field></>}
+            <Field label="默认转录方案"><Select value={sharedDraft.default_scheme_id} onChange={(event) => setSharedDraft({ ...sharedDraft, default_scheme_id: event.target.value })}><option value="">请选择</option>{sharedSchemes.map((scheme) => <option key={scheme.scheme_id} value={scheme.scheme_id}>{scheme.name}</option>)}</Select></Field>
+            <Button className="w-full" onClick={() => void createSharedFolder()} disabled={sharedSaving || !sharedDraft.display_name.trim() || (!sharedDraft.root_alias && !sharedDraft.unc_path.trim()) || !sharedDraft.default_scheme_id}>{sharedSaving ? "创建中…" : "创建共享文件夹"}</Button>
+          </div>
+        </SheetContent>
+      </Sheet>
+
       <Sheet open={createOpen} onOpenChange={(open) => { if (!open && !createSaving) { setCreateOpen(false); setCreateConfirming(false); } }}>
         <SheetContent className="max-w-xl overflow-y-auto">
-          <SheetHeader><SheetTitle>新增分类</SheetTitle><SheetDescription>分类最多四级，稳定标识由系统自动生成。</SheetDescription></SheetHeader>
+          <SheetHeader><SheetTitle>新增分类</SheetTitle><SheetDescription>稳定标识由系统自动生成。</SheetDescription></SheetHeader>
           <div className="space-y-5 p-6">
             {createError && <Alert variant="destructive" role="alert"><AlertTitle>分类创建失败</AlertTitle><AlertDescription>{createError}</AlertDescription></Alert>}
             {!createConfirming ? <CategoryCreateForm draft={createDraft} categories={categories} saving={createSaving} siblingCount={createSiblings.length} positionValid={createPositionValid} onChange={(nextDraft) => { setCreateDraft(nextDraft); setCreateConfirming(false); setCreateError(null); }} onCreate={() => void create()} /> : <div className="space-y-4">
@@ -540,7 +593,7 @@ export function AdminCategoriesPage() {
       <Sheet open={editorOpen} onOpenChange={handleEditorOpenChange}>
         <SheetContent className="max-w-xl overflow-y-auto lg:hidden">
           <SheetHeader><SheetTitle>{selectedCategory?.display_name || "编辑分类"}</SheetTitle><SheetDescription>{selectedCategory?.full_path || "维护分类信息"}</SheetDescription></SheetHeader>
-          <div className="p-6"><CategoryDetail category={selectedCategory} draft={draft} categories={categories} saving={saving} moving={moving || numberSaving} error={saveError} hasActiveChild={selectedCategory ? activeChildIds.has(selectedCategory.id) : false} onChange={setDraft} onSave={() => void saveSelected()} onCancel={cancelEdit} onAddChild={() => selectedCategory && requestCreate(selectedCategory.id)} onMove={openMoveDialog} onAdjustNumber={openNumberDialog} onDelete={() => selectedCategory && setDeleteTarget(selectedCategory)} /></div>
+          <div className="p-6"><CategoryDetail category={selectedCategory} draft={draft} categories={categories} saving={saving} moving={moving || numberSaving} error={saveError} hasActiveChild={selectedCategory ? activeChildIds.has(selectedCategory.id) : false} canDelete={Boolean(selectedCategory?.parent_id) || isAdmin} onChange={setDraft} onSave={() => void saveSelected()} onCancel={cancelEdit} onAddChild={() => selectedCategory && requestCreate(selectedCategory.id)} onMove={openMoveDialog} onAdjustNumber={openNumberDialog} onDelete={() => selectedCategory && setDeleteTarget(selectedCategory)} /></div>
         </SheetContent>
       </Sheet>
 
@@ -550,7 +603,20 @@ export function AdminCategoriesPage() {
           <div className="space-y-4">
             {moveError && <Alert variant="destructive" role="alert"><AlertTitle>移动失败</AlertTitle><AlertDescription>{moveError}</AlertDescription></Alert>}
             <div className="rounded-ui-md border border-border bg-surface-muted/40 px-3 py-2 text-ui-sm"><p className="text-ui-xs text-muted-foreground">当前路径</p><p className="mt-1 break-words font-medium">{movingCategory?.full_path}</p></div>
-            <Field label="目标父分类"><Select value={moveTargetParentId} onChange={(event) => setMoveTargetParentId(event.target.value)} aria-label="目标父分类"><option value="">一级分类</option>{moveParentOptions.map((category) => <option key={category.id} value={category.id}>{category.full_path}</option>)}</Select></Field>
+            <CategoryTreePicker
+              categories={moveParentOptions}
+              value={moveTargetParentId}
+              onChange={(categoryId) => { setMoveTargetParentId(categoryId); setMoveError(null); }}
+              currentCategoryId={movingCategory?.parent_id}
+              label="目标父分类"
+              rootOption={{
+                value: "",
+                label: "一级分类",
+                description: "移动到一级分类末尾",
+                disabledReason: movingCategory?.parent_id === null ? "该分类已经是一级分类" : undefined,
+              }}
+              disabled={moving}
+            />
             <p className="text-ui-xs text-muted-foreground">目标位置：{moveTargetParentId ? `${categories.find((category) => category.id === moveTargetParentId)?.full_path} / ` : "一级分类 / "}末尾（系统自动编号）</p>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setMoveOpen(false)} disabled={moving}>取消</Button><Button onClick={confirmMove} disabled={moving || movingCategory?.parent_id === (moveTargetParentId || null)}><Move className="size-4" />{moving ? "移动中…" : "确认移动"}</Button></DialogFooter>
@@ -586,7 +652,7 @@ export function AdminCategoriesPage() {
           <DialogFooter><Button variant="outline" onClick={() => { setDiscardOpen(false); setPendingAction(null); }}>继续编辑</Button><Button variant="destructive" onClick={confirmDiscard}>放弃修改</Button></DialogFooter>
         </DialogContent>
       </Dialog>
-      <CategoryDeleteDialog category={deleteTarget} canForceDelete onClose={() => setDeleteTarget(null)} onDeleted={categoryDeleted} />
+      <CategoryDeleteDialog category={deleteTarget} canForceDelete={canForceDelete} onClose={() => setDeleteTarget(null)} onDeleted={categoryDeleted} />
     </section>
   );
 }
@@ -663,12 +729,17 @@ function CategoryTreeNodeView({
     >
       <span className="flex w-11 shrink-0 items-center gap-1">
         {hasChildren ? <button type="button" aria-label={isExpanded ? `收起${category.display_name}` : `展开${category.display_name}`} title={isExpanded ? "收起" : "展开"} onClick={(event) => { event.stopPropagation(); onToggle(category.id); }} className="inline-flex size-6 items-center justify-center rounded-ui-sm text-muted-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{isExpanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}</button> : <span className="size-6" aria-hidden="true" />}
-        {hasChildren && isExpanded ? <FolderOpen className="size-4 text-primary/80" aria-hidden="true" /> : <Folder className="size-4 text-muted-foreground" aria-hidden="true" />}
+        <span className="relative inline-flex size-4 shrink-0">{hasChildren && isExpanded ? <FolderOpen className="size-4 text-primary/80" aria-hidden="true" /> : <Folder className="size-4 text-muted-foreground" aria-hidden="true" />}{category.category_kind === "shared_folder" && <Network className="absolute -right-2 -top-1 size-2.5 text-primary" aria-label="共享文件夹" />}</span>
       </span>
       <span className="flex min-w-0 flex-1 items-center gap-2">
         <span className={`inline-flex w-11 shrink-0 items-center gap-1 text-ui-xs font-medium ${category.is_active ? "text-success" : "text-muted-foreground"}`}><span className={`size-2 rounded-full ${category.is_active ? "bg-success" : "bg-muted-foreground/60"}`} aria-hidden="true" />{category.is_active ? "启用" : "停用"}</span>
-        <span className={`min-w-0 flex-1 break-words tabular-nums ${level === 1 ? "font-semibold" : "font-medium"}`}>{category.display_code} {category.display_name}</span>
-        <span className="hidden shrink-0 text-right text-ui-xs tabular-nums text-muted-foreground sm:block">{category.item_count} 份{hasChildren ? ` · ${children.length} 项` : ""}</span>
+        <span className={`min-w-0 flex-1 break-words tabular-nums ${level === 1 ? "font-semibold" : "font-medium"}`}>{category.display_code} {category.display_name}{category.category_kind === "shared_folder" && <span className="ml-2 text-ui-xs font-normal text-primary">共享文件夹</span>}</span>
+        <span className="hidden w-[3.75rem] shrink-0 text-right text-ui-xs tabular-nums text-muted-foreground sm:block">{category.item_count} 份{hasChildren ? ` · ${children.length} 项` : ""}</span>
+        <span className="hidden w-[7.25rem] shrink-0 flex-wrap items-center justify-end gap-x-1 gap-y-0 sm:inline-flex" aria-label="问答与筛选状态">
+          <Badge aria-label={category.chat_search_effective === false ? "企业知识问答关闭" : "企业知识问答开启"} variant={category.chat_search_effective === false ? "secondary" : "success"} className={category.chat_search_effective === false ? "line-through" : undefined}>问答</Badge>
+          <Badge aria-label={category.chat_filter_effective === false ? "对话筛选关闭" : "对话筛选开启"} variant={category.chat_filter_effective === false ? "secondary" : "success"} className={category.chat_filter_effective === false ? "line-through" : undefined}>筛选</Badge>
+          {(category.chat_search_inherited || category.chat_filter_inherited) && <span className="w-full text-right text-ui-xs leading-tight text-muted-foreground">继承关闭</span>}
+        </span>
       </span>
     </div>
     {hasChildren && isExpanded && <div role="group" className="ml-5 border-l border-border bg-surface-muted/10 sm:ml-6">{children.map((child, childIndex) => <CategoryTreeNodeView key={child.category.id} node={child} level={level + 1} index={childIndex} siblingCount={children.length} selectedId={selectedId} expanded={expanded} visibleNodes={visibleNodes} nodeRefs={nodeRefs} onSelect={onSelect} onToggle={onToggle} />)}</div>}
@@ -683,6 +754,7 @@ function CategoryDetail({
   moving,
   error,
   hasActiveChild,
+  canDelete,
   onChange,
   onSave,
   onCancel,
@@ -698,6 +770,7 @@ function CategoryDetail({
   moving: boolean;
   error: string | null;
   hasActiveChild: boolean;
+  canDelete: boolean;
   onChange: (draft: CategoryDraft | null) => void;
   onSave: () => void;
   onCancel: () => void;
@@ -717,6 +790,10 @@ function CategoryDetail({
     <div className="border-b border-border px-5 py-4 sm:px-6"><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold">{category.display_code} {category.display_name}</h3><Badge variant={category.is_active ? "success" : "secondary"}>{category.is_active ? "启用" : "停用"}</Badge>{isDirty && draft.is_active !== category.is_active && <Badge variant="warning">待保存：{draft.is_active ? "启用" : "停用"}</Badge>}</div><p className="mt-1 break-words text-ui-xs text-muted-foreground">{category.full_path}</p></div>
     <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
       {error && <Alert variant="destructive" role="alert"><AlertTitle>保存失败</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
+      <section aria-labelledby={`category-level-${category.id}`} className="space-y-3">
+        <div><h4 id={`category-level-${category.id}`} className="text-ui-sm font-semibold">目录结构</h4><p className="mt-1 break-words text-ui-xs text-muted-foreground">父分类：{parent ? `${parent.display_code} ${parent.display_name}` : "一级分类"} · 第 {category.level} 级 · {category.item_count} 份直接资料</p></div>
+        <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={onAddChild} disabled={moving || !category.is_active}><Plus className="size-4" />新增子分类</Button><Button variant="outline" onClick={onMove} disabled={moving || isDirty}><Move className="size-4" />移动至</Button>{canDelete && <Button variant="outline" className="text-destructive hover:text-destructive" onClick={onDelete} disabled={moving || isDirty}><Trash2 className="size-4" />删除文件夹</Button>}</div>
+      </section>
       <section aria-labelledby={`category-fields-${category.id}`} className="space-y-4">
         <h4 id={`category-fields-${category.id}`} className="text-ui-sm font-semibold">基本信息</h4>
         <div className="grid gap-4 sm:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)]"><Field label="编号"><div className="flex gap-2"><Input value={category.display_code} readOnly aria-label="当前编号" className="tabular-nums" /><Button type="button" variant="outline" className="shrink-0" onClick={onAdjustNumber} disabled={moving || isDirty}><ListOrdered className="size-4" />调整编号</Button></div><span className="mt-1 block text-ui-xs font-normal text-muted-foreground">编号决定同级顺序；调整时其他同级编号会自动连续排列。</span></Field><Field label="显示名称"><Input value={draft.display_name} maxLength={100} onChange={(event) => onChange({ ...draft, display_name: event.target.value })} aria-label="显示名称" /></Field></div>
@@ -748,8 +825,8 @@ function CategoryDetail({
           <span><span className="block font-medium">显示为对话筛选项</span><span className="block text-ui-xs text-muted-foreground">用户可以选择此目录，并同时覆盖可用子目录。</span></span>
         </label>
         {!draft.is_active && <p className="text-ui-xs text-muted-foreground">停用目录不会进入企业知识问答，也不会显示为筛选项。</p>}
+        {(category.chat_search_inherited || category.chat_filter_inherited) && <p className="text-ui-xs text-warning" role="status">当前生效状态受上级目录影响：{category.chat_search_inherited && "问答"}{category.chat_search_inherited && category.chat_filter_inherited && "、"}{category.chat_filter_inherited && "筛选"}继承关闭；本目录自身设置未被修改。</p>}
       </section>
-      <section aria-labelledby={`category-level-${category.id}`} className="space-y-3 border-t border-border pt-4"><div><h4 id={`category-level-${category.id}`} className="text-ui-sm font-semibold">目录结构</h4><p className="mt-1 break-words text-ui-xs text-muted-foreground">父分类：{parent ? `${parent.display_code} ${parent.display_name}` : "一级分类"} · 第 {category.level} 级 · {category.item_count} 份直接资料</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={onAddChild} disabled={moving || category.level >= 4 || !category.is_active}><Plus className="size-4" />新增子分类</Button><Button variant="outline" onClick={onMove} disabled={moving || isDirty}><Move className="size-4" />移动至</Button><Button variant="outline" className="text-destructive hover:text-destructive" onClick={onDelete} disabled={moving || isDirty}><Trash2 className="size-4" />删除文件夹</Button></div></section>
     </div>
     <div className="flex flex-col-reverse gap-2 border-t border-border px-5 py-4 sm:flex-row sm:justify-end"><Button variant="outline" onClick={onCancel} disabled={saving || moving || !isDirty}>取消</Button><Button onClick={onSave} disabled={saving || moving || !isDirty || !draft.display_name.trim()}><Save className="size-4" />{saving ? "保存中…" : "保存修改"}</Button></div>
   </div>;
@@ -773,7 +850,7 @@ function CategoryCreateForm({
   onCreate: () => void;
 }) {
   const canCreate = draft.display_name.trim() && positionValid;
-  return <div className="space-y-4"><Field label="父分类"><Select value={draft.parent_id} onChange={(event) => { const parentId = event.target.value; const nextSiblingCount = categories.filter((category) => category.parent_id === (parentId || null)).length; onChange({ ...draft, parent_id: parentId, target_position: String(nextSiblingCount + 1) }); }} aria-label="父分类"><option value="">一级分类</option>{categories.filter((category) => category.is_active && category.level < 4).map((category) => <option key={category.id} value={category.id}>{category.full_path}</option>)}</Select></Field><Field label="分类名称"><Input value={draft.display_name} maxLength={100} onChange={(event) => onChange({ ...draft, display_name: event.target.value })} placeholder="例如 公司内部标准" aria-label="分类名称" /></Field><Field label="编号"><Input type="number" min={1} max={siblingCount + 1} step={1} value={draft.target_position} onChange={(event) => onChange({ ...draft, target_position: event.target.value })} aria-label="编号" /><span className="mt-1 block text-ui-xs font-normal text-muted-foreground">可填写 1 到 {siblingCount + 1}；使用已有编号时，确认后同级分类会自动顺延。</span></Field>{!positionValid && <p className="text-ui-sm text-destructive" role="alert">请输入 1 到 {siblingCount + 1} 之间的整数。</p>}<Button className="w-full" onClick={onCreate} disabled={saving || !canCreate}><Plus className="size-4" />{saving ? "新增中…" : "新增分类"}</Button></div>;
+  return <div className="space-y-4"><Field label="父分类"><Select value={draft.parent_id} onChange={(event) => { const parentId = event.target.value; const nextSiblingCount = categories.filter((category) => category.parent_id === (parentId || null)).length; onChange({ ...draft, parent_id: parentId, target_position: String(nextSiblingCount + 1) }); }} aria-label="父分类"><option value="">一级分类</option>{categories.filter((category) => category.is_active).map((category) => <option key={category.id} value={category.id}>{category.full_path}</option>)}</Select></Field><Field label="分类名称"><Input value={draft.display_name} maxLength={100} onChange={(event) => onChange({ ...draft, display_name: event.target.value })} placeholder="例如 公司内部标准" aria-label="分类名称" /></Field><Field label="编号"><Input type="number" min={1} max={siblingCount + 1} step={1} value={draft.target_position} onChange={(event) => onChange({ ...draft, target_position: event.target.value })} aria-label="编号" /><span className="mt-1 block text-ui-xs font-normal text-muted-foreground">可填写 1 到 {siblingCount + 1}；使用已有编号时，确认后同级分类会自动顺延。</span></Field>{!positionValid && <p className="text-ui-sm text-destructive" role="alert">请输入 1 到 {siblingCount + 1} 之间的整数。</p>}<Button className="w-full" onClick={onCreate} disabled={saving || !canCreate}><Plus className="size-4" />{saving ? "新增中…" : "新增分类"}</Button></div>;
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {

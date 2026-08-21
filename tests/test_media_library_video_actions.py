@@ -8,7 +8,12 @@ import pytest
 from fastapi import HTTPException
 
 from api.auth import CurrentUser
-from api.routes_admin import preflight_media_upload, upload_media
+from api.routes_admin import (
+    _media_action_state,
+    _media_current_phase,
+    preflight_media_upload,
+    upload_media,
+)
 from api.schemas import MediaUploadPreflightItem, MediaUploadPreflightRequest
 from api.transcription_store import StoreConflictError
 from src.transcription.formatter import format_transcript
@@ -37,6 +42,87 @@ REPLACEMENT_JOB_ID = "123e4567-e89b-42d3-a456-426614174163"
 REPLACEMENT_JOB_REQUEST_ID = "123e4567-e89b-42d3-a456-426614174164"
 REPLACEMENT_VERSION_ID = "123e4567-e89b-42d3-a456-426614174165"
 REPLACEMENT_INDEX_ID = "123e4567-e89b-42d3-a456-426614174166"
+
+
+def test_media_action_projection_matches_mutation_preconditions():
+    active, active_disabled = _media_action_state(
+        status="transcribing",
+        job_status="running",
+        review_status=None,
+        publication_status=None,
+        publication_index_status=None,
+    )
+    assert "cancel_transcription" in active
+    assert "retry_transcription" not in active
+    assert "retry_transcription" in active_disabled
+
+    transient, _ = _media_action_state(
+        status="failed",
+        job_status="failed",
+        job_failure_classification="transient",
+        review_status=None,
+        publication_status=None,
+        publication_index_status=None,
+    )
+    permanent, permanent_disabled = _media_action_state(
+        status="failed",
+        job_status="failed",
+        job_failure_classification="permanent",
+        review_status=None,
+        publication_status=None,
+        publication_index_status=None,
+    )
+    assert "retry_transcription" in transient
+    assert "delete_failed" not in transient
+    assert "retry_transcription" not in permanent
+    assert "retry_transcription" in permanent_disabled
+
+    failed_upload, _ = _media_action_state(
+        status="failed",
+        job_status=None,
+        review_status=None,
+        publication_status=None,
+        publication_index_status=None,
+    )
+    assert "delete_failed" in failed_upload
+
+    indexing, indexing_disabled = _media_action_state(
+        status="transcript_ready",
+        job_status="succeeded",
+        review_status="review_approved",
+        publication_status="not_published",
+        publication_index_status="embedding",
+    )
+    assert "publish_transcript" not in indexing
+    assert indexing_disabled["publish_transcript"] == "转录稿专属索引正在处理"
+
+    replacing, replacing_disabled = _media_action_state(
+        status="ready",
+        job_status="succeeded",
+        review_status="review_approved",
+        publication_status="published",
+        publication_index_status="done",
+        replacement_status="pending",
+    )
+    assert "replace_media" not in replacing and "archive_media" not in replacing
+    assert replacing_disabled["replace_media"] == "视频替换任务正在处理"
+
+
+@pytest.mark.parametrize(
+    ("expected", "values"),
+    [
+        ("failed", dict(status="failed", job_status=None, review_status=None, publication_status=None, publication_index_status=None)),
+        ("failed", dict(status="transcript_ready", job_status="succeeded", review_status="review_approved", publication_status="publication_failed", publication_index_status="failed")),
+        ("index", dict(status="indexing", job_status="succeeded", review_status="review_approved", publication_status="publishing", publication_index_status="embedding")),
+        ("publication", dict(status="transcript_ready", job_status="succeeded", review_status="review_approved", publication_status="publishing", publication_index_status=None)),
+        ("ready", dict(status="ready", job_status="succeeded", review_status="review_approved", publication_status="published", publication_index_status=None)),
+        ("review", dict(status="transcript_ready", job_status="succeeded", review_status="awaiting_review", publication_status="not_published", publication_index_status=None)),
+        ("transcription", dict(status="uploaded", job_status="cancelled", review_status=None, publication_status=None, publication_index_status=None)),
+        ("upload", dict(status="uploaded", job_status=None, review_status=None, publication_status=None, publication_index_status=None)),
+    ],
+)
+def test_media_phase_projection(expected, values):
+    assert _media_current_phase(**values) == expected
 
 
 def _published_base(tmp_path):

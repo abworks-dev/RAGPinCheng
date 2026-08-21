@@ -36,11 +36,17 @@ from src.transcription.provider_registry import ProviderRegistry
 from src.transcription.types import ContractValidationError, TranscriptionJobStatus
 
 from .auth import CurrentUser, require_admin, require_csrf_admin
+from .content_store import _category_path
 from .db import connect
 from .schemas import (
     CreateMediaMetadataRevisionRequest,
     CreateTranscriptRevisionRequest,
     RetryTranscriptionRequest,
+    StartTranscriptionRequest,
+    BulkStartTranscriptionRequest,
+    BulkTranscriptionItemDTO,
+    BulkTranscriptionPreflightResponse,
+    BulkTranscriptionResponse,
     PublishTranscriptVersionRequest,
     PublishTranscriptVersionResponse,
     ReviewTranscriptVersionRequest,
@@ -54,7 +60,8 @@ from .schemas import (
     TranscriptionProfileDTO,
     TranscriptionSchemeOptionDTO,
 )
-from .transcription_schemes import available_schemes
+from .transcription_schemes import available_schemes, resolve_scheme_runtime
+from .media_storage import MediaStorageError, resolve_media_path
 from .transcription_artifacts import LocalTranscriptionArtifactStore
 from .transcription_publication import TranscriptionPublicationApplicationService
 from .indexing import enqueue_publication
@@ -113,11 +120,21 @@ def build_transcription_service() -> TranscriptionApplicationService:
             WHISPERX_PROVIDER_KEY,
         )
     )
+    def resolve_source(media_id: str):
+        conn = connect()
+        try:
+            return resolve_media_path(conn, media_id).path
+        except MediaStorageError as exc:
+            raise ContractValidationError("media_input_unavailable", "media_id") from exc
+        finally:
+            conn.close()
+
     return TranscriptionApplicationService(
         profiles=profiles,
         providers=ProviderRegistry(factories),
         preparer=FfmpegMediaAudioPreparer(
-            MEDIA_DIR.resolve(), ASR_FFMPEG_PATH, ASR_MEDIA_PREP_TIMEOUT_SECONDS
+            MEDIA_DIR.resolve(), ASR_FFMPEG_PATH, ASR_MEDIA_PREP_TIMEOUT_SECONDS,
+            source_resolver=resolve_source,
         ),
         artifacts=LocalTranscriptionArtifactStore(TRANSCRIPTION_ARTIFACT_DIR),
         job_timeout_ms=ASR_JOB_TIMEOUT_SECONDS * 1000,
@@ -237,6 +254,222 @@ def list_jobs(
         return [_job_dto(job) for job in jobs]
     finally:
         conn.close()
+
+
+def _bulk_media_rows(conn, body: BulkStartTranscriptionRequest):
+    selectors = sum(bool(value) for value in (body.media_ids, body.upload_batch_id, body.category_id))
+    if selectors != 1:
+        raise HTTPException(status_code=400, detail="批量转录必须指定视频、上传批次或目录范围")
+    if body.media_ids:
+        ids: list[str] = []
+        for media_id in body.media_ids:
+            try:
+                uuid.UUID(media_id)
+            except (ValueError, AttributeError):
+                raise HTTPException(status_code=400, detail="视频标识不合法")
+            if media_id not in ids:
+                ids.append(media_id)
+        placeholders = ",".join("?" for _ in ids)
+        return conn.execute(
+            f"""SELECT m.media_id,m.title,m.original_filename,m.status,
+                       (SELECT j.status FROM transcription_jobs j WHERE j.media_id=m.media_id
+                        ORDER BY j.attempt_number DESC,j.created_at DESC LIMIT 1) AS job_status,
+                       (SELECT j.failure_classification FROM transcription_jobs j WHERE j.media_id=m.media_id
+                        ORDER BY j.attempt_number DESC,j.created_at DESC LIMIT 1) AS job_failure_classification,
+                       COALESCE(i.category_id,m.target_category_id) AS category_id
+                FROM media_assets m LEFT JOIN content_items i
+                  ON i.media_id=m.media_id AND i.content_kind='media_transcript' AND i.archived_at IS NULL
+                WHERE m.media_id IN ({placeholders}) AND m.status<>'archived'
+                ORDER BY m.created_at DESC""", ids,
+        ).fetchall()
+    if body.upload_batch_id:
+        return conn.execute(
+            """SELECT DISTINCT m.media_id,m.title,m.original_filename,m.status,
+                      (SELECT j.status FROM transcription_jobs j WHERE j.media_id=m.media_id
+                       ORDER BY j.attempt_number DESC,j.created_at DESC LIMIT 1) AS job_status,
+                      (SELECT j.failure_classification FROM transcription_jobs j WHERE j.media_id=m.media_id
+                       ORDER BY j.attempt_number DESC,j.created_at DESC LIMIT 1) AS job_failure_classification,
+                      COALESCE(i.category_id,m.target_category_id) AS category_id
+               FROM upload_batch_entries e JOIN media_assets m ON m.media_id=e.media_id
+               LEFT JOIN content_items i
+                 ON i.media_id=m.media_id AND i.content_kind='media_transcript' AND i.archived_at IS NULL
+               WHERE e.batch_id=? AND e.entry_kind='video' AND m.status<>'archived'
+               ORDER BY e.sequence""", (body.upload_batch_id,),
+        ).fetchall()
+    if body.recursive:
+        category_clause = """i.category_id IN (
+            WITH RECURSIVE descendants(id) AS (
+                SELECT ? UNION ALL SELECT c.id FROM category_nodes c JOIN descendants d ON c.parent_id=d.id
+            ) SELECT id FROM descendants
+        )"""
+    else:
+        category_clause = "i.category_id=?"
+    return conn.execute(
+        f"""SELECT m.media_id,m.title,m.original_filename,m.status,
+                   (SELECT j.status FROM transcription_jobs j WHERE j.media_id=m.media_id
+                    ORDER BY j.attempt_number DESC,j.created_at DESC LIMIT 1) AS job_status,
+                   (SELECT j.failure_classification FROM transcription_jobs j WHERE j.media_id=m.media_id
+                    ORDER BY j.attempt_number DESC,j.created_at DESC LIMIT 1) AS job_failure_classification,
+                   i.category_id AS category_id
+            FROM content_items i JOIN media_assets m ON m.media_id=i.media_id
+            WHERE i.content_kind='media_transcript' AND i.archived_at IS NULL
+              AND m.status<>'archived' AND {category_clause}
+            ORDER BY i.category_id,m.created_at DESC""", (body.category_id,),
+    ).fetchall()
+
+
+def _check_start_scheme(conn, scheme_id: str) -> str:
+    if not ASR_ENABLED or not ASR_SERVICE_TOKEN:
+        raise HTTPException(status_code=503, detail="自动转录当前不可用")
+    try:
+        _scheme, profile_id = resolve_scheme_runtime(conn, scheme_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="所选转录方案当前不可用") from exc
+    return profile_id
+
+
+def _preflight_bulk_items(conn, body: BulkStartTranscriptionRequest) -> list[BulkTranscriptionItemDTO]:
+    try:
+        uuid.UUID(body.request_idempotency_key)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="批量转录幂等键不合法")
+    _check_start_scheme(conn, body.scheme_id)
+    result: list[BulkTranscriptionItemDTO] = []
+    for row in _bulk_media_rows(conn, body):
+        job_status = str(row["job_status"] or "")
+        if job_status in {"pending", "running"}:
+            item_status, reason = "already_started", "已有正在运行的转录任务"
+        elif job_status == "succeeded":
+            item_status, reason = "unavailable", "该视频已完成转录"
+        elif row["status"] == "failed" and not job_status:
+            item_status, reason = "unavailable", "视频上传失败，请重新上传或删除失败记录"
+        elif job_status == "failed" and row["job_failure_classification"] == "permanent":
+            item_status, reason = "unavailable", "该转录任务属于永久失败，不能自动重试"
+        elif row["status"] == "failed" and job_status not in {"failed", "cancelled"}:
+            item_status, reason = "unavailable", "视频当前不可启动转录"
+        else:
+            item_status, reason = "ready", None
+        result.append(BulkTranscriptionItemDTO(
+            media_id=row["media_id"], title=row["title"], original_filename=row["original_filename"],
+            category_path=_category_path(conn, str(row["category_id"])) if row["category_id"] else None,
+            status=item_status, reason=reason,
+        ))
+    return result
+
+
+@router.post("/media/{media_id}/start", response_model=TranscriptionJobDTO, status_code=202)
+def start_media_transcription(
+    media_id: str,
+    body: StartTranscriptionRequest,
+    admin: CurrentUser = Depends(require_csrf_admin),
+) -> TranscriptionJobDTO:
+    conn = connect()
+    try:
+        try:
+            uuid.UUID(media_id); uuid.UUID(body.request_idempotency_key)
+        except (ValueError, AttributeError):
+            raise HTTPException(status_code=400, detail="视频或幂等键不合法")
+        profile_id = _check_start_scheme(conn, body.scheme_id)
+        row = conn.execute("SELECT status FROM media_assets WHERE media_id=?", (media_id,)).fetchone()
+        if row is None or row["status"] == "archived":
+            raise HTTPException(status_code=404, detail="视频不存在")
+        latest = conn.execute(
+            """SELECT status,failure_classification FROM transcription_jobs
+               WHERE media_id=? ORDER BY attempt_number DESC,created_at DESC LIMIT 1""",
+            (media_id,),
+        ).fetchone()
+        if row["status"] == "failed" and latest is None:
+            raise HTTPException(status_code=409, detail="该视频上传失败，请重新上传或删除失败记录")
+        if latest is not None and latest["status"] == "failed" and latest["failure_classification"] == "permanent":
+            raise HTTPException(status_code=409, detail="该转录任务属于永久失败，不能自动重试")
+        existing = conn.execute(
+            "SELECT id,media_id,scheme_id FROM transcription_jobs WHERE request_idempotency_key=?",
+            (body.request_idempotency_key,),
+        ).fetchone()
+        if existing is not None:
+            if existing["media_id"] != media_id or existing["scheme_id"] != body.scheme_id:
+                raise HTTPException(status_code=409, detail="本次提交与原请求不一致")
+            return _job_dto(SQLiteTranscriptionStore(conn).load_job(existing["id"]))
+        active = conn.execute(
+            "SELECT id FROM transcription_jobs WHERE media_id=? AND status IN ('pending','running')",
+            (media_id,),
+        ).fetchone()
+        if active is not None:
+            raise HTTPException(status_code=409, detail="该视频已有正在运行的转录任务")
+    finally:
+        conn.close()
+    try:
+        job = build_transcription_service().create_pending_job(
+            media_id=media_id, profile_id=profile_id,
+            request_idempotency_key=body.request_idempotency_key,
+            created_by=admin.id, scheme_id=body.scheme_id,
+        )
+    except (ContractValidationError, StoreConflictError, OSError) as exc:
+        raise HTTPException(status_code=409, detail="视频音频准备失败，请检查视频后重试") from exc
+    conn = connect()
+    try:
+        conn.execute("UPDATE media_assets SET status='transcribing',error=NULL,updated_at=? WHERE media_id=?", (int(time.time()), media_id))
+        conn.commit()
+    finally:
+        conn.close()
+    enqueue(job.id)
+    return _job_dto(job)
+
+
+@router.post("/bulk-start/preflight", response_model=BulkTranscriptionPreflightResponse)
+def preflight_bulk_start_transcription(
+    body: BulkStartTranscriptionRequest,
+    _admin: CurrentUser = Depends(require_admin),
+) -> BulkTranscriptionPreflightResponse:
+    conn = connect()
+    try:
+        items = _preflight_bulk_items(conn, body)
+        return BulkTranscriptionPreflightResponse(
+            scheme_id=body.scheme_id, items=items,
+            ready_count=sum(item.status == "ready" for item in items),
+            blocked_count=sum(item.status != "ready" for item in items),
+        )
+    finally:
+        conn.close()
+
+
+@router.post("/bulk-start", response_model=BulkTranscriptionResponse, status_code=202)
+def bulk_start_transcription(
+    body: BulkStartTranscriptionRequest,
+    admin: CurrentUser = Depends(require_csrf_admin),
+) -> BulkTranscriptionResponse:
+    conn = connect()
+    try:
+        items = _preflight_bulk_items(conn, body)
+        profile_id = _check_start_scheme(conn, body.scheme_id)
+    finally:
+        conn.close()
+    output: list[BulkTranscriptionItemDTO] = []
+    started = 0
+    for item in items:
+        if item.status != "ready":
+            output.append(item)
+            continue
+        key = str(uuid.uuid5(uuid.UUID(body.request_idempotency_key), item.media_id))
+        try:
+            job = build_transcription_service().create_pending_job(
+                media_id=item.media_id, profile_id=profile_id,
+                request_idempotency_key=key, created_by=admin.id, scheme_id=body.scheme_id,
+            )
+            conn = connect()
+            try:
+                conn.execute("UPDATE media_assets SET status='transcribing',error=NULL,updated_at=? WHERE media_id=?", (int(time.time()), item.media_id))
+                conn.commit()
+            finally:
+                conn.close()
+            enqueue(job.id)
+            output.append(item.model_copy(update={"status": "started", "transcription_job_id": job.id}))
+            started += 1
+        except (ContractValidationError, StoreConflictError, OSError):
+            output.append(item.model_copy(update={"status": "failed", "reason": "音频准备失败，请检查视频后重试"}))
+    return BulkTranscriptionResponse(
+        scheme_id=body.scheme_id, items=output, requested=len(items), started=started, failed=len(items)-started,
+    )
 
 
 @router.get("/jobs/{job_id}", response_model=TranscriptionJobDTO)

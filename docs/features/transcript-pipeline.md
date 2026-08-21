@@ -1,11 +1,11 @@
 # 视频转录链路
 
 - 状态：人工上传/播放链路与多引擎 Phase 5A/5B 应用闭环已实现；faster-whisper 与 WhisperX R3 已通过，生产 ASR 已准入 SenseVoice、faster-whisper 与 WhisperX；WhisperX 服务注册固定使用已资格的 `full-decode`
-- 最后核对：2026-08-17
+- 最后核对：2026-08-20
 
 ## 用户可观察能力
 
-教学视频转录稿可以被索引和检索，回答能够显示带时间戳的视频引用；点击引用定位到来源卡片，引用悬浮卡和来源详情中的独立播放按钮可打开视频播放器并跳到引用时间点。管理员可通过三步向导批量暂存 MP4，再逐视频绑定、查看和编辑人工 Markdown，或批量应用并逐项覆盖服务端白名单 Profile 启动自动转录任务。
+教学视频转录稿可以被索引和检索，回答能够显示带时间戳的视频引用；点击引用定位到来源卡片，引用悬浮卡和来源详情中的独立播放按钮可打开视频播放器并跳到引用时间点。系统管理员从资料管理的统一上传入口选择 MP4；视频立即以“待转录”状态进入资料列表，不在上传阶段创建任务。管理员可对单个视频、选中视频、最近上传批次或当前目录及全部子目录批量选择转录方案并启动任务，视频随后进入同页的“转录任务”子页签；该页继续提供转写工作台、取消/恢复、审核、发布、替换、归档和失败记录处理。
 
 系统管理员可在 `/admin/asr` 的“转录配置”页比较三个服务器固定的 WhisperX v2 分段 Profile，查看固定工程词、Prompt 资产和应用/服务配置哈希，并提交只写审计记录的发布申请。页面不接受自由 Prompt、模型路径或任意解码参数；发布申请不持有部署凭据，也不直接触发生产 workflow。
 
@@ -30,14 +30,16 @@ Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审�
 - 播放器下方提供交互式转录稿，按播放进度高亮当前分段并自动跟随；点击分段可跳转，用户主动滚动时暂停跟随并可一键回到当前进度；
 - 资料管理页的视频转写行在存在唯一 `media_id` 时复用同一播放器抽屉，从视频起点打开上方视频与下方转写稿；
 - 正式 head 切换成功时在同一 SQLite 事务中创建或更新视频目录壳；历史正式视频由 Schema 16 幂等回填到 `05 培训资料`，之后可由具备发布权限的人员只调整资料库目录；
-- 资料库只列出未归档媒体的当前正式 head。较新的待审核或待发布稿不会替换旧条目，只显示待处理提醒；媒体归档或正式 head 移除后条目从资料库和分类计数中消失；
+- 资料库列出未归档媒体目录壳；没有转录版本时显示“待转录”，有运行任务时显示“转录中”，失败时显示“转录失败”。有正式 head 后仍只展示当前正式版本；较新的待审核或待发布稿不会替换旧条目，只显示待处理提醒；媒体归档后条目从资料库和分类计数中消失；
 - 普通登录用户可通过只读接口读取当前已发布转录版本；无版本头的既有人工上传媒体兼容读取其已登记、受控且完成索引的人工稿；
 - 具备 `media_id` 的引用在悬浮卡中显示独立播放按钮，并跳转对应时间点；
 - 来源卡片显示”从 HH:MM:SS 播放”按钮；
 - 旧会话和未关联转录正常降级（无播放按钮，不报错）；
-- 管理端“视频媒体”标签页提供批量拖放/选择、转写方式分流和逐项配置向导；批量提交最多并发两个单视频请求，单项失败可保留重试；
-- 人工模式仍走原 MP4+Markdown 路径；自动模式只提交服务端白名单 `profile_id`，experimental Profile 强制审核策略不由前端放宽；
-- 媒体列表分别展示媒体、转录、审核、发布和索引状态，并保留快捷筛选与转写版本工作台。
+- 资料管理的文件选择、拖放和文件夹上传对系统管理员接受 MP4；混合批次复用目录、同名冲突、上传进度与任务明细流程，上传时不要求转录方案；普通账号不会获得 MP4 入口，后端也返回 403；
+- 新视频上传成功后创建 `media_assets` 和 `content_items(content_kind=media_transcript)` 目录壳，状态为 `awaiting_transcription`，不会创建 `transcription_jobs`、普通 `content_versions` 或 `content_index_jobs`；管理员选择方案后才创建 `transcription_jobs`，视频与后续转录稿始终通过 `media_id` 绑定；
+- “转录任务”位于 `/admin/content?view=transcription`，复用原媒体工作台但隐藏旧上传向导；旧 `/admin/media` 保留为带查询参数的兼容重定向；
+- 旧式人工 MP4+Markdown API 保持兼容；统一上传入口先创建待转录媒体目录壳，只有管理员在资料列表选择方案后才创建自动转录任务，experimental Profile 强制审核策略不由前端放宽；
+- 媒体列表分别展示媒体、转录、审核、发布和索引状态，并保留快捷筛选与转写版本工作台；资料库视频状态投影为“待转录、转录中、转录失败、转录稿待审核、审核通过、发布中、发布失败、已发布”，播放和下载在正式 head 产生前禁用。
 - 转写工作台支持桌面双栏 Markdown 编辑/渲染预览，移动端使用“编辑/预览”切换；关闭、收起或切换版本前会保护未保存内容；不启用 raw HTML、自动保存或 WYSIWYG。
 - 管理员在转写工作台展开“校对内容”后可同时查看视频和指定转录版本的同步时间轴；点击时间戳跳转视频，播放时自动高亮当前段落，时间轴支持自动跟随和手动暂停跟随。
 - 管理员显式“保存为新草稿”时，服务端统一 LF、校验 UTF-8 编码后的 2 MiB 上限、说话人时间戳和非空正文，并以基础版本 SHA-256 与请求幂等键防止并发误写。
@@ -45,6 +47,7 @@ Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审�
 - WhisperX v2 提供自然、均衡和细分三个只读 Profile：自然分段不强制时长，均衡/细分最长分别为 30/15 秒，字符上限分别为 500/240/120，短段合并间隔分别为 1000/750/500 ms；超限段按换行、句末标点、逗号、空格和字符边界确定性切分，段内时间按字符比例计算。
 - v2 固定工程词包括 `Revit`、`Navisworks`、`AutoCAD`、`BIM`、`BIM-2026-0805`、`12.5`、`208`、`95%`；`Auto CAD`、`B I M`、大小写、标准编号空格/连字符、小数和百分号仅按明确模式做确定性校正，不做模糊替换。
 - schema 17 添加 `asr_profile_release_requests` 与 `asr_profile_audit_events`。读取要求管理员，创建要求管理员 CSRF、UUID 幂等键、实时 capability 和受认证 `/v1/profile-identities` 服务配置哈希匹配；申请与审计在同一 SQLite 事务写入。
+- 管理端分别读取 capability、运行 diagnostics 与 Profile identity：capability 决定转录服务是否可用，diagnostics 缺失只降级运行状态，identity 缺失只禁用发布申请并提示兼容升级，不得把辅助发布校验失败误报为整个转录服务不可用。发布写接口继续要求实时 identity 与配置哈希匹配并失败关闭。
 
 ### 未实现（第二阶段）
 
@@ -57,6 +60,7 @@ Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审�
 - 管理端单 MP4 + `profile_id` 上传、任务状态/取消/恢复已接入应用 API 和后台 worker；人工 MP4+Markdown 路径保持独立；
 - 管理端按媒体 lazy 加载版本历史，可校对并渲染预览不可变版本的 Markdown、将修改保存为新的受管人工修订、提交审核备注、批准/拒绝并显式发布；legacy 人工版本不提供可用的受管发布动作；
 - 管理端媒体列表使用真实审核枚举计算唯一当前阶段，独立展示索引状态，并提供处理中、待审核、发布处理中和失败快捷筛选；筛选暂时只作用于最近加载的 100 条；
+- 媒体列表 API 同时返回 `current_phase`、`available_actions` 和逐动作 `disabled_actions` 原因。运行中的任务可取消；失败或取消且非永久失败的任务可重试；已发布且没有待处理替换的媒体可替换或归档；只有从未创建过转录任务的失败上传可完整删除。发布索引处理中不会重复开放发布动作，前端以服务端能力为准。
 - Remote Provider 的服务请求身份绑定应用任务、媒体与执行指纹；同一应用任务网络重试保持稳定，同一媒体新建应用重试任务生成新身份；
 - 转录任务 API 返回安全的结构化失败 `code/message/retryable`；服务请求身份冲突与契约不匹配分别处理，前端不再直接展示 Provider 技术摘要；
 - publication adapter 只走 `chunk_document → store_parents → index_children`，不调用 purge、reset 或普通 `index_single`；
@@ -74,6 +78,7 @@ Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审�
 - 静态目录同时保留三个 `qualification_approved` WhisperX v2 Profile，默认均为 disabled；只有实时服务暴露 `whisperx-large-v3-zh-align-v2` 且运行身份哈希与仓库固定配置一致时，管理页才允许创建发布申请。`/v1/diagnostics` 继续只返回有界运行状态，不承载 Prompt 或配置身份。标准应用部署动作只准入作为固定运行身份的均衡 Profile。
 - ASR service 注册四个固定 service Profile；faster-whisper、Qwen3-ASR 或 WhisperX
   缓存/依赖缺失时仅相应 Profile 不可用，不阻止现有 SenseVoice 服务启动；
+- Windows ASR candidate promotion 的 Ubuntu 跨节点门禁严格验证 `/health`、`/v1/capabilities`、`/v1/diagnostics` 与 `/v1/profile-identities`；管理页依赖的身份契约不得只由基础 health 或 capability 代替。
 - faster-whisper adapter 固定
   `dropbox-dash/faster-whisper-large-v3-turbo@0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf`
   与 CUDA FP16 参数；生产资格只接受
@@ -188,10 +193,13 @@ candidate manifest 和 promotion workflow evidence 为准，不能把代码就�
 ## 入口与调用链
 
 ```text
-管理端上传 MP4 + .md 或文件系统
-→ POST /api/admin/media (校验、落盘、登记)
-→ media_assets (app.sqlite) + docs/教学视频/ + media/<media_id>/
-→ index_jobs (media_id 关联)
+资料库统一上传 MP4
+→ POST /api/admin/content/uploads (管理员权限、目录预检、落盘、登记)
+→ media_assets (app.sqlite) + media/<media_id>/ + media_transcript 目录壳
+→ 资料列表显示 awaiting_transcription
+→ 管理员选择 scheme_id（单项或批量）
+→ POST /api/admin/transcription/media/{media_id}/start 或 /bulk-start
+→ transcription_jobs / audio preparation / ASR worker
 → _build_transcript_doc(media_id)
 → chunk_transcript
 → Parent/Child(doc_type, start_time, media_id)
@@ -208,7 +216,7 @@ candidate manifest 和 promotion workflow evidence 为准，不能把代码就�
 自动转录与版本发布结果流：
 
 ```text
-单 MP4 + profile_id
+资料统一上传后的待转录 MP4 + scheme_id + 幂等键
 → 应用转录任务/worker
 → audio preparation port
 → independent asr_service create/upload/start/poll/result
@@ -232,7 +240,8 @@ candidate manifest 和 promotion workflow evidence 为准，不能把代码就�
 - `src/generate.py`
 - `api/schemas.py`
 - `api/routes_media.py`（新增）
-- `api/routes_admin.py`（媒体上传）
+- `api/routes_content.py`（统一上传、预检和上传任务分流）
+- `api/routes_admin.py`（媒体落盘、转录任务和动作能力）
 - `api/indexing.py`（media_id 传递）
 - `api/db.py`、`api/db_migrations.py`、`api/db_backup.py`（Phase 2 添加式 Schema 与备份）
 - `api/transcription_store.py`、`api/transcription_artifacts.py`、`api/transcription_publication.py`（版本、artifact 与发布应用服务）
@@ -284,6 +293,7 @@ candidate manifest 和 promotion workflow evidence 为准，不能把代码就�
 
 - 依赖文档索引、检索、回答生成、引用与来源面板；
 - 依赖认证（`require_user`）和可配置媒体存储；代码默认仍使用 `media/` 兼容目录，T12-B 受控切换目标为 `CONTENT_ROOT/media`；旧媒体记录归档后从管理列表隐藏，历史 transcript version 和任务继续保留审计；
+- 可选的只读外部媒体源通过服务端根别名和相对路径解析原视频；ASR 仍只接收应用在本地媒体目录准备的音频，Provider、Canonical、Profile admission、审核、发布和索引契约不变；
 - 依赖 `media_assets` 表（`app.sqlite`）和 `media_id` 列迁移。
 
 ## 不变量与安全边界
@@ -296,6 +306,7 @@ candidate manifest 和 promotion workflow evidence 为准，不能把代码就�
 - `media_id` 不进入 Embedding 文本，不影响检索排序；
 - 旧会话缺少 `media_id` 时正常降级（无播放按钮，不报错）；
 - 新媒体和版本字段是向前兼容的 nullable 列，不需要索引 Reset；legacy stable ID 保持。
+- Schema 31 只为上传任务明细添加类型和视频/转录任务关联字段；不回填视频业务对象，不改变 RAG 索引 Schema，也不需要索引 Reset。
 - Phase 2 新表为添加式迁移；不删除旧表、不回填人工稿、不触发索引 Reset。
 - Markdown 修订字段通过 schema 11 添加式迁移加入 `transcript_versions`；自动版本和 legacy 人工版本的已有字段与制品保持不可变，不需要索引 Reset。
 - `app.sqlite` transcript head 是版本化转录唯一正式可见性事实；versioned transcript 在 head DB 损坏/缺失时 fail closed。`strict` 下版本化转录独立于普通资料 head 放行，双重无版本身份的 legacy 转录不可见；生产尚未切换到 `strict`。
@@ -358,6 +369,7 @@ candidate manifest 和 promotion workflow evidence 为准，不能把代码就�
 
 - [0001 — 视频转录播放器与媒体资产流水线](../decisions/0001-video-transcript-player.md) 第一阶段已实施完成。
 - [0002 — 多引擎视频自动转录与管理员选择](../decisions/0002-multi-engine-transcription.md)；实施基线见 [Phase 2](../plans/multi-engine-transcription-phase2.md)、[Phase 3](../plans/multi-engine-transcription-phase3.md) 与 [Phase 5](../plans/multi-engine-transcription-phase5.md) 详细计划。
+- [0006 — 统一资料上传与视频转录任务分流](../decisions/0006-unified-managed-upload-routing.md) 规定统一入口、独立领域状态和系统管理员边界。
 - [转录管理流程加固](../plans/transcription-admin-workflow-hardening.md) 记录 Phase 5 后续 PR 1/PR 2 的独立范围。
 - [faster-whisper Provider 接入](../plans/faster-whisper-provider-integration.md)
   记录 R2 代码边界与后续 R3 资格门禁。

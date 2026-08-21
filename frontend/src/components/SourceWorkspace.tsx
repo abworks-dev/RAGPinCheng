@@ -290,7 +290,7 @@ function SourceDetail({
   const detailScroll = useAutoHideScrollbar<HTMLDivElement>();
   const text = stripMarkdown(source.text);
   const visibleText = expanded || text.length <= 900 ? text : `${text.slice(0, 900)}…`;
-  const isPreviewableDocument = ["pdf", "docx", "xlsx", "pptx"].includes(source.doc_type);
+  const isPreviewableDocument = ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"].includes(source.doc_type);
 
   const playVideoAtLocation = () => {
     if (!source.media_id) return;

@@ -80,7 +80,34 @@ def test_scope_listing_hides_categories_not_available_as_filters(tmp_path):
     conn.commit()
     scope_ids = {scope["id"] for scope in list_knowledge_scopes(conn)}
     assert "cat-03" not in scope_ids
-    assert "cat-child" in scope_ids
+    assert "cat-child" not in scope_ids
+    conn.close()
+
+
+@pytest.mark.parametrize("parent_column", ["is_active", "chat_search_enabled"])
+def test_disabled_parent_excludes_enabled_descendants_from_all_scope(tmp_path, parent_column):
+    conn = _db(tmp_path)
+    conn.execute(f"UPDATE category_nodes SET {parent_column}=0 WHERE id='cat-03'")
+    conn.commit()
+
+    assert "company_child" not in resolve_category_scope(conn, None)
+    with pytest.raises(ValueError, match="knowledge_scope_unavailable"):
+        resolve_category_scope(conn, ["cat-child"])
+    assert "cat-child" not in {scope["id"] for scope in list_knowledge_scopes(conn)}
+
+    conn.execute(f"UPDATE category_nodes SET {parent_column}=1 WHERE id='cat-03'")
+    conn.commit()
+    assert "company_child" in resolve_category_scope(conn, None)
+    conn.close()
+
+
+def test_disabled_child_setting_survives_parent_reenable(tmp_path):
+    conn = _db(tmp_path)
+    conn.execute("UPDATE category_nodes SET chat_search_enabled=0 WHERE id='cat-child'")
+    conn.execute("UPDATE category_nodes SET chat_search_enabled=0 WHERE id='cat-03'")
+    conn.execute("UPDATE category_nodes SET chat_search_enabled=1 WHERE id='cat-03'")
+    conn.commit()
+    assert "company_child" not in resolve_category_scope(conn, None)
     conn.close()
 
 

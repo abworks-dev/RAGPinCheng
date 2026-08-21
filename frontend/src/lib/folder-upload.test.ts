@@ -22,15 +22,14 @@ describe("folder upload helpers", () => {
     expect(selection.entries.map((entry) => entry.relativePath)).toEqual([
       "资料包/01 建筑/guide.md",
       "资料包/report.pdf",
-    ]);
-    expect(selection.ignoredEntries.map((entry) => entry.relativePath)).toEqual([
       "资料包/视频/demo.mp4",
     ]);
+    expect(selection.ignoredEntries).toHaveLength(0);
     expect(selection.rootFolderNames).toEqual(["资料包"]);
-    expect(selection.folderCount).toBe(2);
-    expect(selection.fileCount).toBe(2);
+    expect(selection.folderCount).toBe(3);
+    expect(selection.fileCount).toBe(3);
     expect(selection.scannedFileCount).toBe(3);
-    expect(selection.totalSize).toBe(11);
+    expect(selection.totalSize).toBe(16);
   });
 
   it("rejects traversal and absolute relative paths", () => {

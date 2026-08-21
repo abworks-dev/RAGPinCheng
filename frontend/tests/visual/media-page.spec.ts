@@ -2,117 +2,67 @@ import { expect, test } from "@playwright/test";
 import { installAdminRoutes } from "./fixtures/admin-fixtures";
 import { expectInViewport, expectNoBodyOverflow } from "./helpers/layout";
 
-test.describe("视频媒体", () => {
-  test("媒体列表和转录任务状态可见", async ({ page }) => {
+test.describe("转录任务", () => {
+  test("旧入口保留深链参数并进入资料管理子页", async ({ page }) => {
     await installAdminRoutes(page);
-    await page.goto("/admin/media");
-    await expect(page.getByRole("heading", { name: "视频管理" })).toBeVisible();
+    await page.goto("/admin/media?media_id=media-ready&workbench=1");
+    await expect(page).toHaveURL(/\/admin\/content\?(?=[^#]*view=transcription)(?=[^#]*media_id=media-ready)(?=[^#]*workbench=1)/);
+    await expect(page.locator("h1").filter({ hasText: "转录任务" })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "项目交付培训" })).toBeVisible();
+    await expectNoBodyOverflow(page);
+  });
+
+  test("视频独立阶段和恢复操作可见", async ({ page }) => {
+    await installAdminRoutes(page);
+    await page.goto("/admin/content?view=transcription");
+    await expect(page.getByRole("heading", { name: "转录任务" })).toBeVisible();
     await expect(page.getByText("项目交付培训", { exact: true })).toBeVisible();
     await expect(page.getByText("转录服务当前暂停接收任务，请稍后重试。", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "重试" })).toBeEnabled();
+    await expect(page.getByTestId("media-record-row").nth(1).getByRole("button", { name: "完整删除" })).toBeEnabled();
     await expectNoBodyOverflow(page);
   });
 
   test("媒体空状态和错误状态可恢复", async ({ page }) => {
     await installAdminRoutes(page, "empty");
-    await page.goto("/admin/media");
-    await expect(page.getByText("暂无媒体资源")).toBeVisible();
+    await page.goto("/admin/content?view=transcription");
+    await expect(page.getByText("暂无转录任务")).toBeVisible();
     await expectNoBodyOverflow(page);
 
     await page.unrouteAll({ behavior: "ignoreErrors" });
     await installAdminRoutes(page, "error");
-    await page.goto("/admin/media");
+    await page.goto("/admin/content?view=transcription");
     await expect(page.getByText("合成加载失败").first()).toBeVisible();
   });
 
   test("整段转录显示活动状态而不是虚假的零进度", async ({ page }, testInfo) => {
     await installAdminRoutes(page, "media_progress");
-    await page.goto("/admin/media");
+    await page.goto("/admin/content?view=transcription");
     const row = page.getByTestId("media-record-row");
 
     await expect(row.getByText(/模型整段处理中/)).toContainText("视频时长 1小时20分");
     await expect(row.getByText(/模型整段处理中/)).not.toContainText("0%");
     await expect(row.getByRole("progressbar", { name: "转录进度：转录中" })).not.toHaveAttribute("aria-valuenow");
+    await expect(row.getByRole("button", { name: "取消" })).toBeEnabled();
     await expectNoBodyOverflow(page);
     const viewport = page.viewportSize()!;
     await page.screenshot({ path: testInfo.outputPath(`transcription-indeterminate-${viewport.width}x${viewport.height}.png`) });
   });
 
-  test("文件发送完成后明确显示服务端准备阶段", async ({ page }, testInfo) => {
-    await page.addInitScript(() => {
-      class ControlledUploadRequest {
-        upload = {
-          onprogress: null as ((event: ProgressEvent) => void) | null,
-          onload: null as ((event: ProgressEvent) => void) | null,
-        };
-        status = 200;
-        statusText = "OK";
-        responseText = JSON.stringify({ media_id: "media-uploaded", transcription_job_id: "job-uploaded" });
-        withCredentials = false;
-        onload: ((event: ProgressEvent) => void) | null = null;
-        onerror: ((event: ProgressEvent) => void) | null = null;
-        onabort: ((event: ProgressEvent) => void) | null = null;
-
-        open() {}
-        setRequestHeader() {}
-        send() {
-          window.setTimeout(() => this.upload.onprogress?.(new ProgressEvent("progress", {
-            lengthComputable: true,
-            loaded: 100,
-            total: 100,
-          })), 50);
-          window.setTimeout(() => this.upload.onload?.(new ProgressEvent("load")), 100);
-          window.setTimeout(() => this.onload?.(new ProgressEvent("load")), 10_000);
-        }
-      }
-      Object.defineProperty(window, "XMLHttpRequest", { value: ControlledUploadRequest });
-    });
-    await installAdminRoutes(page, "media_upload");
-    await page.goto("/admin/media");
-    await page.getByRole("button", { name: "上传视频" }).click();
-    await page.getByLabel("选择视频文件").setInputFiles({
-      name: "upload-progress.mp4",
-      mimeType: "video/mp4",
-      buffer: Buffer.alloc(256 * 1024, 1),
-    });
-    await page.getByRole("button", { name: "下一步：选择转写方式" }).click();
-    await page.getByRole("button", { name: /^自动转录/ }).click();
-    await page.getByRole("button", { name: "上传并创建自动转录任务" }).click();
-
-    await expect(page.getByText("文件已上传，正在准备音轨并创建转录任务")).toBeVisible();
-    await expect(page.getByRole("progressbar", { name: "upload-progress.mp4 上传进度" })).not.toHaveAttribute("aria-valuenow");
-    await expect(page.getByText(/服务端处理 1 个/)).toBeVisible();
+  test("永久失败任务保留禁用原因", async ({ page }, testInfo) => {
+    await installAdminRoutes(page, "media_permanent_failure");
+    await page.goto("/admin/content?view=transcription");
+    const retry = page.getByRole("button", { name: "重试" });
+    await expect(retry).toBeDisabled();
+    await expect(retry).toHaveAttribute("title", "仅可重试失败或已取消且允许恢复的转录任务");
     await expectNoBodyOverflow(page);
     const viewport = page.viewportSize()!;
-    await page.screenshot({ path: testInfo.outputPath(`media-upload-preparing-${viewport.width}x${viewport.height}.png`) });
-  });
-
-  test("同名视频可逐项选择重命名且窗口保持可读", async ({ page }, testInfo) => {
-    await installAdminRoutes(page, "media_conflict");
-    await page.goto("/admin/media");
-    await page.getByRole("button", { name: "上传视频" }).click();
-    await page.getByLabel("选择视频文件").setInputFiles({
-      name: "same-training.mp4",
-      mimeType: "video/mp4",
-      buffer: Buffer.alloc(128, 1),
-    });
-    await page.getByRole("button", { name: "下一步：选择转写方式" }).click();
-    await page.getByRole("button", { name: /^自动转录/ }).click();
-    await page.getByRole("button", { name: "上传并创建自动转录任务" }).click();
-
-    await expect(page.getByText("发现同名资料")).toBeVisible();
-    const strategy = page.getByText("处理方式").locator("..").locator("select");
-    await strategy.selectOption("rename");
-    await expect(page.getByText("新资料标题")).toBeVisible();
-    await expect(page.getByText("新源文件名")).toBeVisible();
-    await expect(page.getByRole("button", { name: "按选择上传" })).toBeVisible();
-    await expectNoBodyOverflow(page);
-    const viewport = page.viewportSize()!;
-    await page.screenshot({ path: testInfo.outputPath(`media-upload-conflict-${viewport.width}x${viewport.height}.png`) });
+    await page.screenshot({ path: testInfo.outputPath(`transcription-permanent-failure-${viewport.width}x${viewport.height}.png`) });
   });
 
   test("转写工作台 Markdown 校对布局", async ({ page }, testInfo) => {
     await installAdminRoutes(page);
-    await page.goto("/admin/media");
+    await page.goto("/admin/content?view=transcription");
     const row = page.getByText("项目交付培训", { exact: true }).locator("xpath=ancestor::li");
     await row.getByRole("button", { name: "进入转写工作台" }).click();
     const workbench = page.getByRole("dialog", { name: "项目交付培训" });

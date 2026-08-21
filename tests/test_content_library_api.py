@@ -8,17 +8,19 @@ import time
 import zipfile
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api import routes_content
+from api import content_bulk_operations, routes_admin, routes_content, routes_transcription
 from api import content_trash_cleanup
 from api.content_permission_catalog import LEGACY_CONTENT_PERMISSION_MAP
 from api.content_storage import ContentStorage
 from api.db import connect, get_db, init_db
 from api.media_transcript_catalog import ensure_media_transcript_catalog_item
+from api.schemas import BulkStartTranscriptionRequest, MediaAssetDTO
 from api.transcription_artifacts import LocalTranscriptionArtifactStore
 
 
@@ -80,7 +82,13 @@ def content_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     app.dependency_overrides[get_db] = override_db
     queued: list[str] = []
     monkeypatch.setattr(routes_content, "CONTENT_MANAGEMENT_ENABLED", True)
-    monkeypatch.setattr(routes_content, "_storage", ContentStorage(tmp_path / "content"))
+    storage = ContentStorage(tmp_path / "content")
+    monkeypatch.setattr(routes_content, "_storage", storage)
+    monkeypatch.setattr(content_bulk_operations, "_storage", storage)
+    monkeypatch.setattr(content_bulk_operations, "connect", lambda: connect(db_path))
+    monkeypatch.setattr(content_bulk_operations, "CONTENT_BULK_ARCHIVE_ROOT", tmp_path / "bulk-archives")
+    monkeypatch.setattr(content_bulk_operations, "CONTENT_BULK_ARCHIVE_MAX_BYTES", 10 * 1024 ** 3)
+    monkeypatch.setattr(content_bulk_operations, "CONTENT_BULK_ARCHIVE_RESERVE_BYTES", 0)
     media_dir = (tmp_path / "media").resolve()
     artifact_dir = (tmp_path / "transcription-artifacts").resolve()
     media_dir.mkdir(parents=True, exist_ok=True)
@@ -96,6 +104,243 @@ def _auth(sessions: dict[str, tuple[str, str]], employee_id: str, *, csrf: bool 
     sid, token = sessions[employee_id]
     headers = {"X-CSRF-Token": token} if csrf else {}
     return {"cookies": {"pc_sid": sid}, "headers": headers}
+
+
+def test_unified_upload_preflight_routes_mp4_only_for_system_admin(content_api):
+    client, sessions, _queued, _db_path = content_api
+    body = {
+        "category_id": "cat-03",
+        "entries": [{"filename": "training.mp4", "relative_path": "training.mp4", "size_bytes": 1024}],
+    }
+    blocked = client.post(
+        "/api/admin/content/uploads/preflight",
+        json=body,
+        **_auth(sessions, "organizer", csrf=True),
+    )
+    assert blocked.status_code == 200
+    assert blocked.json()["entries"][0] == {
+        "sequence": 1,
+        "filename": "training.mp4",
+        "relative_path": "training.mp4",
+        "kind": "video",
+        "status": "blocked",
+        "reason": "视频上传首期仅限系统管理员",
+        "reason_code": "video_admin_only",
+        "suggested_filename": None,
+        "conflict": None,
+    }
+    ready = client.post(
+        "/api/admin/content/uploads/preflight",
+        json=body,
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert ready.status_code == 200
+    assert ready.json()["entries"][0]["kind"] == "video"
+    assert ready.json()["entries"][0]["status"] == "ready"
+
+
+def test_unified_upload_routes_documents_and_videos_to_independent_pipelines(
+    content_api, monkeypatch: pytest.MonkeyPatch
+):
+    client, sessions, _queued, db_path = content_api
+    video_bytes = b"synthetic-mp4"
+    media_id = "123e4567-e89b-42d3-a456-426614174301"
+    job_id = "123e4567-e89b-42d3-a456-426614174302"
+    request_key = "123e4567-e89b-42d3-a456-426614174303"
+    calls: list[dict[str, object]] = []
+
+    async def fake_upload_media(**kwargs):
+        conn = kwargs["conn"]
+        admin = kwargs["admin"]
+        calls.append(kwargs)
+        now = int(time.time())
+        conn.execute(
+            """INSERT INTO media_assets(
+                   media_id,title,original_filename,storage_rel_path,mime_type,file_size,sha256,
+                   transcript_source_path,transcript_origin,status,created_by,created_at,updated_at,
+                   error,target_category_id
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                media_id,
+                kwargs["title"],
+                kwargs["original_filename"],
+                f"{media_id}/original.mp4",
+                "video/mp4",
+                len(video_bytes),
+                hashlib.sha256(video_bytes).hexdigest(),
+                None,
+                "generated",
+                "uploaded",
+                admin.id,
+                now,
+                now,
+                None,
+                kwargs["category_id"],
+            ),
+        )
+        conn.execute(
+            """INSERT INTO transcription_jobs(
+                   id,media_id,created_by,attempt_number,request_idempotency_key,execution_identity,
+                   profile_id,provider_key,profile_definition_version,config_hash,profile_snapshot_json,
+                   execution_config_json,execution_fingerprint,audio_sha256,input_kind,input_size_bytes,
+                   total_ms,status,created_at,updated_at,scheme_id
+               ) VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,'media',?,1000,'pending',?,?,?)""",
+            (
+                job_id,
+                media_id,
+                admin.id,
+                kwargs["request_idempotency_key"],
+                "synthetic-execution",
+                "synthetic-profile",
+                "synthetic-provider",
+                "1",
+                "a" * 64,
+                "{}",
+                "{}",
+                "b" * 64,
+                "c" * 64,
+                len(video_bytes),
+                now,
+                now,
+                kwargs["scheme_id"],
+            ),
+        )
+        conn.commit()
+        return MediaAssetDTO(
+            media_id=media_id,
+            title=kwargs["title"],
+            original_filename=kwargs["original_filename"],
+            mime_type="video/mp4",
+            file_size=len(video_bytes),
+            transcript_origin="generated",
+            status="uploaded",
+            created_at=now,
+            updated_at=now,
+            transcription_job_id=job_id,
+            category_id=kwargs["category_id"],
+        )
+
+    monkeypatch.setattr(routes_admin, "upload_media", fake_upload_media)
+    response = client.post(
+        "/api/admin/content/uploads",
+        data={
+            "category_id": "cat-03",
+            "relative_paths": ["guide.md", "training.mp4"],
+            "video_scheme_id": "scheme-synthetic",
+            # Blank document slots must survive multipart parsing so keys stay aligned.
+            "video_idempotency_keys": ["", request_key],
+        },
+        files=[
+            ("files", ("guide.md", b"# managed document", "text/markdown")),
+            ("files", ("training.mp4", video_bytes, "video/mp4")),
+        ],
+        **_auth(sessions, "admin", csrf=True),
+    )
+
+    assert response.status_code == 200, response.text
+    document, video = response.json()["entries"]
+    assert document["kind"] == "document"
+    assert document["item_id"] and document["version_id"]
+    assert document["media_id"] is None and document["transcription_job_id"] is None
+    assert video == {
+        "filename": "training.mp4",
+        "kind": "video",
+        "item_id": None,
+        "version_id": None,
+        "media_id": media_id,
+        "transcription_job_id": job_id,
+        "sha256": None,
+        "status": "accepted",
+        "reason": None,
+        "reason_code": None,
+        "resolution": "created",
+    }
+    assert calls[0]["request_idempotency_key"] == request_key
+    assert calls[0]["scheme_id"] == "scheme-synthetic"
+
+    conn = connect(db_path)
+    try:
+        assert conn.execute("SELECT count(*) FROM content_versions").fetchone()[0] == 1
+        assert conn.execute("SELECT count(*) FROM content_index_jobs").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM media_assets").fetchone()[0] == 1
+        assert conn.execute("SELECT count(*) FROM transcription_jobs").fetchone()[0] == 1
+        batch_entries = conn.execute(
+            """SELECT entry_kind,item_id,version_id,media_id,transcription_job_id
+               FROM upload_batch_entries WHERE batch_id=? ORDER BY sequence""",
+            (response.json()["batch_id"],),
+        ).fetchall()
+        assert tuple(batch_entries[0])[:1] == ("document",)
+        assert batch_entries[0]["item_id"] and batch_entries[0]["version_id"]
+        assert tuple(batch_entries[1]) == ("video", None, None, media_id, job_id)
+    finally:
+        conn.close()
+
+    mismatch = client.post(
+        "/api/admin/content/uploads",
+        data={
+            "category_id": "cat-03",
+            "video_scheme_id": "scheme-synthetic",
+            "video_idempotency_keys": request_key,
+        },
+        files=[
+            ("files", ("another.md", b"# another", "text/markdown")),
+            ("files", ("another.mp4", video_bytes, "video/mp4")),
+        ],
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert mismatch.status_code == 400
+    assert mismatch.json()["detail"] == "文件和视频幂等键数量不一致"
+
+    forbidden = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03", "video_scheme_id": "scheme-synthetic"},
+        files=[("files", ("forbidden.mp4", video_bytes, "video/mp4"))],
+        **_auth(sessions, "organizer", csrf=True),
+    )
+    assert forbidden.status_code == 403
+    assert len(calls) == 1
+
+
+def test_unified_video_upload_converts_storage_failure_to_failed_task(
+    content_api, monkeypatch: pytest.MonkeyPatch
+):
+    client, sessions, _queued, db_path = content_api
+
+    async def unavailable_upload(**_kwargs):
+        raise OSError("media root is read-only")
+
+    monkeypatch.setattr(routes_admin, "upload_media", unavailable_upload)
+    response = client.post(
+        "/api/admin/content/uploads",
+        data={
+            "category_id": "cat-03",
+            "video_scheme_id": "scheme-synthetic",
+            "video_idempotency_keys": "123e4567-e89b-42d3-a456-426614174310",
+        },
+        files=[("files", ("training.mp4", b"synthetic-mp4", "video/mp4"))],
+        **_auth(sessions, "admin", csrf=True),
+    )
+
+    assert response.status_code == 200, response.text
+    entry = response.json()["entries"][0]
+    assert entry["status"] == "skipped"
+    assert entry["reason_code"] == "media_storage_unavailable"
+    assert entry["reason"] == "服务器暂时无法保存视频，请稍后重试"
+
+    conn = connect(db_path)
+    try:
+        batch = conn.execute(
+            "SELECT status,error_summary FROM upload_batches WHERE id=?",
+            (response.json()["batch_id"],),
+        ).fetchone()
+        assert tuple(batch) == ("failed", "没有可接收的文件")
+        stored_entry = conn.execute(
+            "SELECT status,failure_code FROM upload_batch_entries WHERE batch_id=?",
+            (response.json()["batch_id"],),
+        ).fetchone()
+        assert tuple(stored_entry) == ("skipped", "media_storage_unavailable")
+    finally:
+        conn.close()
 
 
 def _insert_published_media(
@@ -199,6 +444,285 @@ def _insert_published_media(
     item_id = ensure_media_transcript_catalog_item(conn, media_id=media_id, now=now)
     conn.commit()
     return item_id
+
+
+def _insert_catalogued_media(
+    conn: sqlite3.Connection,
+    *,
+    media_id: str,
+    title: str,
+    filename: str,
+    now: int,
+    status: str = "uploaded",
+    job_status: str | None = None,
+    failure_classification: str | None = None,
+    batch_id: str | None = None,
+    sequence: int = 1,
+) -> tuple[str, str]:
+    conn.execute(
+        """INSERT INTO media_assets(
+               media_id,title,original_filename,storage_rel_path,mime_type,file_size,sha256,
+               transcript_source_path,transcript_origin,status,created_by,created_at,updated_at,error,target_category_id
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            media_id, title, filename, f"synthetic/{media_id}.mp4", "video/mp4", 1024,
+            None, None, "generated", status, None, now, now, None, "cat-03",
+        ),
+    )
+    if job_status:
+        job_id = f"{media_id[:-1]}job"
+        conn.execute(
+            """INSERT INTO transcription_jobs(
+                   id,media_id,attempt_number,request_idempotency_key,execution_identity,
+                   profile_id,provider_key,profile_definition_version,config_hash,
+                   profile_snapshot_json,execution_config_json,execution_fingerprint,audio_sha256,
+                   input_kind,input_size_bytes,total_ms,status,failure_classification,created_at,updated_at
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'media',?,1000,?,?,?,?)""",
+            (
+                job_id, media_id, 1, f"{media_id[:-1]}key", "synthetic-execution",
+                "synthetic-profile", "synthetic-provider", "1", "a" * 64,
+                "{}", "{}", "b" * 64, "c" * 64, 1024, job_status,
+                failure_classification, now, now,
+            ),
+        )
+    item_id = ensure_media_transcript_catalog_item(conn, media_id=media_id, now=now)
+    if batch_id:
+        conn.execute(
+            """INSERT INTO upload_batch_entries(
+                   batch_id,sequence,filename,relative_path,size_bytes,status,reason,item_id,version_id,
+                   entry_kind,media_id,transcription_job_id,failure_code,created_at
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                batch_id, sequence, filename, f"folder-{sequence}/{filename}", 1024, "accepted", None,
+                item_id, None, "video", media_id,
+                f"{media_id[:-1]}job" if job_status else None, None, now,
+            ),
+        )
+    conn.commit()
+    return item_id, f"media-pending-{media_id}"
+
+
+def test_untranscribed_video_can_move_to_trash_and_restore(content_api):
+    client, sessions, _queued, db_path = content_api
+    media_id = "123e4567-e89b-42d3-a456-426614174250"
+    conn = connect(db_path)
+    item_id, version_id = _insert_catalogued_media(
+        conn, media_id=media_id, title="待转录视频", filename="waiting.mp4", now=int(time.time()),
+    )
+    conn.close()
+
+    archived = client.request(
+        "DELETE", f"/api/admin/content/items/{item_id}",
+        json={"expected_version_id": version_id}, **_auth(sessions, "admin", csrf=True),
+    )
+    assert archived.status_code == 200, archived.text
+    assert archived.json()["previous_status"] == "awaiting_transcription"
+
+    refs = [{"item_id": item_id, "expected_version_id": version_id}]
+    blocked_preflight = client.post(
+        "/api/admin/content/bulk-restore/preflight",
+        json={"items": refs},
+        **_auth(sessions, "reviewer", csrf=True),
+    )
+    assert blocked_preflight.status_code == 403
+    preflight = client.post(
+        "/api/admin/content/bulk-restore/preflight",
+        json={"items": refs},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert preflight.status_code == 200, preflight.text
+    assert preflight.json()["results"][0]["status"] == "ready"
+    audit = client.get(
+        f"/api/admin/content/items/{item_id}/audit-events",
+        **_auth(sessions, "admin"),
+    )
+    assert audit.status_code == 200, audit.text
+    assert audit.json()[0]["event_type"] == "content.archived"
+
+    conn = connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT archived_at FROM content_items WHERE id=?", (item_id,)
+        ).fetchone()
+        media = conn.execute(
+            "SELECT status FROM media_assets WHERE media_id=?", (media_id,)
+        ).fetchone()
+        assert row["archived_at"] is not None
+        assert media["status"] == "archived"
+    finally:
+        conn.close()
+
+    forbidden_restore = client.post(
+        f"/api/admin/content/items/{item_id}/restore",
+        json={"expected_version_id": version_id},
+        **_auth(sessions, "reviewer", csrf=True),
+    )
+    assert forbidden_restore.status_code == 403
+    restored = client.post(
+        f"/api/admin/content/items/{item_id}/restore",
+        json={"expected_version_id": version_id}, **_auth(sessions, "admin", csrf=True),
+    )
+    assert restored.status_code == 200, restored.text
+    conn = connect(db_path)
+    try:
+        assert conn.execute("SELECT archived_at FROM content_items WHERE id=?", (item_id,)).fetchone()[0] is None
+        assert conn.execute("SELECT status FROM media_assets WHERE media_id=?", (media_id,)).fetchone()[0] == "uploaded"
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize(
+    ("job_status", "media_status", "failure_classification", "expected_lifecycle"),
+    [
+        ("failed", "failed", "transient", "transcription_failed"),
+        ("cancelled", "uploaded", None, "awaiting_transcription"),
+    ],
+)
+def test_retryable_terminal_video_can_move_to_trash_and_restore(
+    content_api,
+    job_status: str,
+    media_status: str,
+    failure_classification: str | None,
+    expected_lifecycle: str,
+):
+    client, sessions, _queued, db_path = content_api
+    suffix = "6" if job_status == "failed" else "7"
+    media_id = f"123e4567-e89b-42d3-a456-42661417425{suffix}"
+    conn = connect(db_path)
+    item_id, version_id = _insert_catalogued_media(
+        conn,
+        media_id=media_id,
+        title=f"{job_status} video",
+        filename=f"{job_status}.mp4",
+        now=int(time.time()),
+        status=media_status,
+        job_status=job_status,
+        failure_classification=failure_classification,
+    )
+    conn.close()
+
+    archived = client.request(
+        "DELETE",
+        f"/api/admin/content/items/{item_id}",
+        json={"expected_version_id": version_id},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert archived.status_code == 200, archived.text
+    assert archived.json()["previous_status"] == expected_lifecycle
+
+    restored = client.post(
+        f"/api/admin/content/items/{item_id}/restore",
+        json={"expected_version_id": version_id},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["restored_status"] == expected_lifecycle
+    conn = connect(db_path)
+    try:
+        assert conn.execute(
+            "SELECT archived_at FROM content_items WHERE id=?", (item_id,)
+        ).fetchone()[0] is None
+        assert conn.execute(
+            "SELECT status FROM media_assets WHERE media_id=?", (media_id,)
+        ).fetchone()[0] == media_status
+    finally:
+        conn.close()
+
+
+def test_active_transcription_blocks_video_archive(content_api):
+    client, sessions, _queued, db_path = content_api
+    media_id = "123e4567-e89b-42d3-a456-426614174251"
+    conn = connect(db_path)
+    item_id, version_id = _insert_catalogued_media(
+        conn, media_id=media_id, title="转录中视频", filename="running.mp4", now=int(time.time()),
+        status="transcribing", job_status="running",
+    )
+    conn.close()
+    response = client.request(
+        "DELETE", f"/api/admin/content/items/{item_id}",
+        json={"expected_version_id": version_id}, **_auth(sessions, "admin", csrf=True),
+    )
+    assert response.status_code == 409
+    conn = connect(db_path)
+    try:
+        assert conn.execute("SELECT archived_at FROM content_items WHERE id=?", (item_id,)).fetchone()[0] is None
+        assert conn.execute("SELECT status FROM media_assets WHERE media_id=?", (media_id,)).fetchone()[0] == "transcribing"
+    finally:
+        conn.close()
+
+
+def test_upload_task_projects_video_counts_for_subdirectories(
+    content_api, monkeypatch: pytest.MonkeyPatch
+):
+    client, sessions, _queued, db_path = content_api
+    now = int(time.time())
+    conn = connect(db_path)
+    conn.execute(
+        """INSERT INTO upload_batches(id,origin,status,created_by,created_at,updated_at,upload_mode,target_category_id,total_files,accepted_files,skipped_files,total_bytes,total_uploaded_bytes)
+           VALUES ('batch-video-counts','web','ready_for_review',1,?,?,?,?,?,?,?,?,?)""",
+        (now, now, "folder", "cat-03", 3, 3, 0, 3072, 3072),
+    )
+    _insert_catalogued_media(
+        conn, media_id="123e4567-e89b-42d3-a456-426614174252", title="待转录", filename="one.mp4", now=now,
+        batch_id="batch-video-counts", sequence=1,
+    )
+    _insert_catalogued_media(
+        conn, media_id="123e4567-e89b-42d3-a456-426614174253", title="转录中", filename="two.mp4", now=now,
+        status="transcribing", job_status="running", batch_id="batch-video-counts", sequence=2,
+    )
+    published_media_id = "123e4567-e89b-42d3-a456-426614174254"
+    published_item_id = _insert_published_media(
+        conn, media_id="123e4567-e89b-42d3-a456-426614174254", version_id="123e4567-e89b-42d3-a456-426614174255",
+        title="已发布", filename="three.mp4", now=now,
+    )
+    conn.execute(
+        """INSERT INTO upload_batch_entries(
+               batch_id,sequence,filename,relative_path,size_bytes,status,reason,item_id,version_id,
+               entry_kind,media_id,transcription_job_id,failure_code,created_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            "batch-video-counts", 3, "three.mp4", "folder-3/three.mp4", 1024, "accepted", None,
+            published_item_id, None, "video", published_media_id,
+            f"{published_media_id[:-1]}a", None, now,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    response = client.get("/api/admin/content/upload-tasks", **_auth(sessions, "admin"))
+    assert response.status_code == 200, response.text
+    task = next(row for row in response.json()["tasks"] if row["batch_id"] == "batch-video-counts")
+    assert task["video_count"] == 3
+    assert task["transcribable_video_count"] == 1
+    detail = client.get(
+        "/api/admin/content/upload-tasks/batch-video-counts",
+        **_auth(sessions, "admin"),
+    )
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["video_count"] == 3
+    assert detail.json()["transcribable_video_count"] == 1
+
+    monkeypatch.setattr(
+        routes_transcription,
+        "_check_start_scheme",
+        lambda _conn, _scheme_id: "synthetic-profile",
+    )
+    conn = connect(db_path)
+    try:
+        items = routes_transcription._preflight_bulk_items(
+            conn,
+            BulkStartTranscriptionRequest(
+                scheme_id="synthetic-scheme",
+                request_idempotency_key="123e4567-e89b-42d3-a456-426614174299",
+                upload_batch_id="batch-video-counts",
+            ),
+        )
+    finally:
+        conn.close()
+    by_media_id = {item.media_id: item for item in items}
+    assert by_media_id["123e4567-e89b-42d3-a456-426614174252"].status == "ready"
+    assert by_media_id[published_media_id].status == "unavailable"
+    assert by_media_id[published_media_id].reason == "该视频已完成转录"
 
 
 def test_content_endpoints_enforce_auth_permissions_csrf_and_role_separation(content_api):
@@ -443,7 +967,7 @@ def test_download_permission_separates_preview_attachment_and_batch_download(con
         "/api/admin/content/bulk-download",
         json={"version_ids": [f"version-{index}" for index in range(21)]},
         **_auth(sessions, "organizer", csrf=True),
-    ).status_code == 422
+    ).status_code == 404
 
     monkeypatch.setattr(routes_content, "_MAX_BULK_DOWNLOAD_BYTES", 1)
     assert client.post(
@@ -773,6 +1297,79 @@ def test_permanent_delete_archived_media_removes_lineage_files_indexes_and_recor
         conn.close()
 
 
+def test_permanent_delete_archived_untranscribed_video(
+    content_api, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    client, sessions, _queued, db_path = content_api
+    media_id = "123e4567-e89b-12d3-a456-426614174219"
+    conn = connect(db_path)
+    item_id, version_id = _insert_catalogued_media(
+        conn,
+        media_id=media_id,
+        title="未转录待清理视频",
+        filename="untranscribed-purge.mp4",
+        now=int(time.time()),
+    )
+    conn.close()
+
+    media_dir = (tmp_path / "media").resolve()
+    monkeypatch.setattr(content_trash_cleanup, "MEDIA_DIR", media_dir)
+    monkeypatch.setattr(
+        content_trash_cleanup,
+        "TRANSCRIPTION_ARTIFACT_DIR",
+        (tmp_path / "transcription-artifacts").resolve(),
+    )
+    monkeypatch.setattr(
+        content_trash_cleanup,
+        "_client",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("untranscribed video purge must not contact Qdrant")
+        ),
+    )
+    video_path = media_dir / "synthetic" / f"{media_id}.mp4"
+    video_path.parent.mkdir(parents=True, exist_ok=True)
+    video_path.write_bytes(b"synthetic-video")
+
+    archived = client.request(
+        "DELETE",
+        f"/api/admin/content/items/{item_id}",
+        json={"expected_version_id": version_id},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert archived.status_code == 200, archived.text
+    refs = [{"item_id": item_id, "expected_version_id": version_id}]
+    preflight = client.post(
+        "/api/admin/content/trash/purge/preflight",
+        json={"items": refs},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert preflight.status_code == 200, preflight.text
+    assert preflight.json()["items"][0]["status"] == "ready"
+    assert preflight.json()["items"][0]["transcript_version_count"] == 0
+
+    purged = client.post(
+        "/api/admin/content/trash/purge",
+        json={
+            "items": refs,
+            "confirmation": preflight.json()["confirmation_phrase"],
+        },
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert purged.status_code == 200, purged.text
+    assert purged.json()["succeeded_count"] == 1
+    assert not video_path.exists()
+    conn = connect(db_path)
+    try:
+        assert conn.execute(
+            "SELECT 1 FROM content_items WHERE id=?", (item_id,)
+        ).fetchone() is None
+        assert conn.execute(
+            "SELECT 1 FROM media_assets WHERE media_id=?", (media_id,)
+        ).fetchone() is None
+    finally:
+        conn.close()
+
+
 def test_media_purge_preflight_blocks_active_work_pending_revision_and_version_conflict(
     content_api, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
@@ -1056,6 +1653,46 @@ def test_category_manager_can_review_folder_request(content_api):
     assert approved.json()["created_category_id"]
 
 
+def test_folder_request_and_approval_create_a_fifth_level_category(content_api):
+    client, sessions, _queued, db_path = content_api
+    conn = connect(db_path)
+    now = int(time.time())
+    conn.executemany(
+        """INSERT INTO category_nodes
+           (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,1,?,?)""",
+        [
+            ("request-depth-2", "request_depth_2", "cat-01", "01", "第二级", 10, 2, now, now),
+            ("request-depth-3", "request_depth_3", "request-depth-2", "01", "第三级", 10, 3, now, now),
+            ("request-depth-4", "request_depth_4", "request-depth-3", "01", "第四级", 10, 4, now, now),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    created = client.post(
+        "/api/admin/content/folder-requests",
+        json={"parent_category_id": "request-depth-4", "display_name": "第五级"},
+        **_auth(sessions, "organizer", csrf=True),
+    )
+    assert created.status_code == 200
+    approved = client.post(
+        f"/api/admin/content/folder-requests/{created.json()['id']}/review",
+        json={"approved": True},
+        **_auth(sessions, "reviewer", csrf=True),
+    )
+    assert approved.status_code == 200
+    conn = connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT parent_id,level FROM category_nodes WHERE id=?",
+            (approved.json()["created_category_id"],),
+        ).fetchone()
+        assert tuple(row) == ("request-depth-4", 5)
+    finally:
+        conn.close()
+
+
 def test_folder_request_rejects_duplicate_pending_and_second_review(content_api):
     client, sessions, _queued, _db_path = content_api
     url = "/api/admin/content/folder-requests"
@@ -1116,6 +1753,10 @@ def test_folder_upload_preflights_path_contract_before_creating_batch(content_ap
     client, sessions, _queued, db_path = content_api
     for relative_path, detail in (
         ("../guide.md", "文件夹路径无效"),
+        ("/guide.md", "文件夹路径无效"),
+        ("C:/guide.md", "文件夹路径无效"),
+        ("资料包/\x00/guide.md", "文件夹路径无效"),
+        (f"{'a/' * 512}guide.md", "文件夹路径无效"),
         ("资料包/other.md", "文件名与相对路径不一致"),
     ):
         response = client.post(
@@ -1127,6 +1768,22 @@ def test_folder_upload_preflights_path_contract_before_creating_batch(content_ap
         assert response.status_code == 400
         assert response.json()["detail"] == detail
 
+    duplicate = client.post(
+        "/api/admin/content/uploads",
+        data={
+            "category_id": "cat-04",
+            "relative_paths": ["资料包/guide.md", "资料包/guide.md"],
+            "upload_mode": "folder",
+        },
+        files=[
+            ("files", ("guide.md", b"first", "text/markdown")),
+            ("files", ("guide.md", b"second", "text/markdown")),
+        ],
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert duplicate.status_code == 400
+    assert duplicate.json()["detail"] == "文件夹中存在重复的文件路径"
+
     conn = connect(db_path)
     try:
         assert conn.execute("SELECT count(*) FROM upload_batches").fetchone()[0] == 0
@@ -1135,7 +1792,7 @@ def test_folder_upload_preflights_path_contract_before_creating_batch(content_ap
         conn.close()
 
 
-def test_folder_upload_rejects_depth_count_and_total_size_limits(content_api, monkeypatch):
+def test_folder_upload_accepts_deep_paths_and_keeps_count_and_total_size_limits(content_api, monkeypatch):
     client, sessions, _queued, _db_path = content_api
     depth = client.post(
         "/api/admin/content/uploads",
@@ -1143,10 +1800,12 @@ def test_folder_upload_rejects_depth_count_and_total_size_limits(content_api, mo
         files=[("files", ("guide.md", b"# folder", "text/markdown"))],
         **_auth(sessions, "admin", csrf=True),
     )
-    assert depth.status_code == 400
-    assert depth.json()["detail"] == "文件夹路径超过资料目录四级限制"
+    assert depth.status_code == 200
+    assert depth.json()["entries"][0]["status"] == "accepted"
 
-    monkeypatch.setattr(routes_content, "_MAX_FOLDER_UPLOAD_FILES", 1)
+    monkeypatch.setattr(routes_content, "get_settings", lambda _conn: SimpleNamespace(
+        upload_max_file_mb=2000, upload_max_batch_files=1, upload_max_batch_mb=10240,
+    ))
     count = client.post(
         "/api/admin/content/uploads",
         data={"category_id": "cat-03", "upload_mode": "folder", "relative_paths": ["a/one.md", "a/two.md"]},
@@ -1159,8 +1818,9 @@ def test_folder_upload_rejects_depth_count_and_total_size_limits(content_api, mo
     assert count.status_code == 413
     assert "最多上传 1 个文件" in count.json()["detail"]
 
-    monkeypatch.setattr(routes_content, "_MAX_FOLDER_UPLOAD_FILES", 500)
-    monkeypatch.setattr(routes_content, "_MAX_FOLDER_UPLOAD_BYTES", 2)
+    monkeypatch.setattr(routes_content, "get_settings", lambda _conn: SimpleNamespace(
+        upload_max_file_mb=2000, upload_max_batch_files=500, upload_max_batch_mb=0,
+    ))
     total = client.post(
         "/api/admin/content/uploads",
         data={"category_id": "cat-03", "upload_mode": "folder", "relative_paths": "a/large.md"},
@@ -1349,14 +2009,82 @@ def test_folder_upload_preflight_and_resolution_for_existing_root(content_api):
         conn.close()
 
 
+def test_folder_upload_json_preflight_accepts_paths_beyond_four_levels(content_api):
+    client, sessions, _queued, _db_path = content_api
+    response = client.post(
+        "/api/admin/content/uploads/preflight",
+        json={
+            "category_id": "cat-03",
+            "upload_mode": "folder",
+            "entries": [{
+                "filename": "guide.md",
+                "relative_path": "a/b/c/d/e/f/guide.md",
+                "size_bytes": 8,
+            }],
+        },
+        **_auth(sessions, "admin", csrf=True),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["entries"][0]["status"] == "ready"
+
+
+def test_folder_upload_json_preflight_preserves_path_safety_contract(content_api):
+    client, sessions, _queued, _db_path = content_api
+    auth = _auth(sessions, "admin", csrf=True)
+    for relative_path, filename, expected_status, detail in (
+        ("../guide.md", "guide.md", 400, "文件夹路径无效"),
+        ("/guide.md", "guide.md", 400, "文件夹路径无效"),
+        ("C:/guide.md", "guide.md", 400, "文件夹路径无效"),
+        ("资料包/\x00/guide.md", "guide.md", 400, "文件夹路径无效"),
+        (f"{'a/' * 512}guide.md", "guide.md", 422, None),
+        ("资料包/other.md", "guide.md", 400, "文件名与相对路径不一致"),
+    ):
+        response = client.post(
+            "/api/admin/content/uploads/preflight",
+            json={
+                "category_id": "cat-03",
+                "upload_mode": "folder",
+                "entries": [{
+                    "filename": filename,
+                    "relative_path": relative_path,
+                    "size_bytes": 8,
+                }],
+            },
+            **auth,
+        )
+        assert response.status_code == expected_status
+        if detail is None:
+            assert response.json()["detail"][0]["type"] == "string_too_long"
+        else:
+            assert response.json()["detail"] == detail
+
+    duplicate = client.post(
+        "/api/admin/content/uploads/preflight",
+        json={
+            "category_id": "cat-03",
+            "upload_mode": "folder",
+            "entries": [
+                {"filename": "guide.md", "relative_path": "资料包/guide.md", "size_bytes": 8},
+                {"filename": "guide.md", "relative_path": "资料包/guide.md", "size_bytes": 8},
+            ],
+        },
+        **auth,
+    )
+    assert duplicate.status_code == 400
+    assert duplicate.json()["detail"] == "文件夹中存在重复的文件路径"
+
+
 def test_managed_office_upload_limit_cleans_staging_and_creates_no_content(content_api, monkeypatch):
     client, sessions, _queued, db_path = content_api
-    monkeypatch.setattr(routes_content, "_MAX_UPLOAD_BYTES", 4)
+    monkeypatch.setattr(routes_content, "get_settings", lambda _conn: SimpleNamespace(
+        upload_max_file_mb=1, upload_max_batch_files=5000, upload_max_batch_mb=10240,
+    ))
 
     response = client.post(
         "/api/admin/content/uploads",
         data={"category_id": "cat-03"},
-        files=[("files", ("large.docx", b"PK123", "application/octet-stream"))],
+        files=[("files", ("large.docx", b"PK" + b"x" * (1024 * 1024), "application/octet-stream"))],
         **_auth(sessions, "admin", csrf=True),
     )
 
@@ -1413,6 +2141,70 @@ def test_managed_pptx_upload_accepts_case_sensitive_relationship_paths(content_a
             (entry["version_id"],),
         ).fetchone()
         assert row["doc_type"] == "pptx"
+    finally:
+        conn.close()
+
+
+def test_managed_xmind_upload_and_draft_preview(content_api):
+    client, sessions, _queued, db_path = content_api
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("content.json", json.dumps([{
+            "id": "sheet-1",
+            "title": "实施计划",
+            "rootTopic": {
+                "id": "root",
+                "title": "资料平台",
+                "children": {"attached": [{"id": "child", "title": "上传与预览"}]},
+            },
+        }], ensure_ascii=False))
+
+    response = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("plan.xmind", payload.getvalue(), "application/x-xmind"))],
+        **_auth(sessions, "admin", csrf=True),
+    )
+
+    assert response.status_code == 200
+    entry = response.json()["entries"][0]
+    assert entry["status"] == "accepted"
+    conn = connect(db_path)
+    try:
+        assert conn.execute(
+            "SELECT doc_type FROM content_versions WHERE id=?", (entry["version_id"],)
+        ).fetchone()["doc_type"] == "xmind"
+    finally:
+        conn.close()
+
+    preview = client.get(
+        f"/api/admin/content/versions/{entry['version_id']}/xmind-preview",
+        **_auth(sessions, "admin"),
+    )
+    assert preview.status_code == 200
+    assert preview.json()["sheets"][0]["root_topic"]["children"][0]["title"] == "上传与预览"
+    assert client.get(
+        f"/api/admin/content/versions/{entry['version_id']}/xmind-preview"
+    ).status_code == 401
+
+
+def test_managed_xmind_upload_rejects_invalid_archive(content_api):
+    client, sessions, _queued, db_path = content_api
+
+    response = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[("files", ("broken.xmind", b"not-a-zip", "application/x-xmind"))],
+        **_auth(sessions, "admin", csrf=True),
+    )
+
+    assert response.status_code == 200
+    entry = response.json()["entries"][0]
+    assert entry["status"] == "skipped"
+    assert entry["reason_code"] == "xmind_archive_invalid"
+    conn = connect(db_path)
+    try:
+        assert conn.execute("SELECT count(*) FROM content_versions WHERE doc_type='xmind'").fetchone()[0] == 0
     finally:
         conn.close()
 
@@ -1488,15 +2280,15 @@ def test_upload_task_history_persists_partial_results_and_scopes_users(content_a
     assert [entry["status"] for entry in partial.json()["entries"]] == ["accepted", "skipped"]
     partial_batch_id = partial.json()["batch_id"]
 
-    failed = client.post(
+    video_upload = client.post(
         "/api/admin/content/uploads",
         data={"category_id": "cat-04"},
         files=[("files", ("unsupported.mp4", b"synthetic", "video/mp4"))],
         **_auth(sessions, "admin", csrf=True),
     )
-    assert failed.status_code == 200
-    assert failed.json()["entries"][0]["status"] == "skipped"
-    failed_batch_id = failed.json()["batch_id"]
+    assert video_upload.status_code == 200
+    assert video_upload.json()["entries"][0]["status"] == "accepted"
+    video_batch_id = video_upload.json()["batch_id"]
 
     assert client.get("/api/admin/content/upload-tasks", **_auth(sessions, "plain")).status_code == 403
     organizer_tasks = client.get(
@@ -1507,7 +2299,7 @@ def test_upload_task_history_persists_partial_results_and_scopes_users(content_a
     assert organizer_tasks.json()["tasks"][0]["status"] == "partial_success"
     assert organizer_tasks.json()["status_counts"] == {"partial_success": 1}
     assert client.get(
-        f"/api/admin/content/upload-tasks/{failed_batch_id}", **_auth(sessions, "organizer")
+        f"/api/admin/content/upload-tasks/{video_batch_id}", **_auth(sessions, "organizer")
     ).status_code == 404
 
     admin_tasks = client.get(
@@ -1515,14 +2307,14 @@ def test_upload_task_history_persists_partial_results_and_scopes_users(content_a
     )
     assert admin_tasks.status_code == 200
     assert admin_tasks.json()["total"] == 2
-    assert admin_tasks.json()["tasks"][0]["batch_id"] == failed_batch_id
-    assert admin_tasks.json()["status_counts"] == {"failed": 1, "partial_success": 1}
+    assert admin_tasks.json()["tasks"][0]["batch_id"] == video_batch_id
+    assert admin_tasks.json()["status_counts"] == {"completed": 1, "partial_success": 1}
     filtered = client.get(
-        "/api/admin/content/upload-tasks?status=failed&query=unsupported.mp4",
+        "/api/admin/content/upload-tasks?status=completed&query=unsupported.mp4",
         **_auth(sessions, "admin"),
     )
     assert filtered.status_code == 200
-    assert [task["batch_id"] for task in filtered.json()["tasks"]] == [failed_batch_id]
+    assert [task["batch_id"] for task in filtered.json()["tasks"]] == [video_batch_id]
 
     detail = client.get(
         f"/api/admin/content/upload-tasks/{partial_batch_id}", **_auth(sessions, "admin")
@@ -1533,6 +2325,14 @@ def test_upload_task_history_persists_partial_results_and_scopes_users(content_a
     assert detail.json()["skipped_files"] == 1
     assert [entry["status"] for entry in detail.json()["entries"]] == ["accepted", "skipped"]
     assert detail.json()["entries"][1]["reason"] == "当前目录下已存在同名资料"
+    video_detail = client.get(
+        f"/api/admin/content/upload-tasks/{video_batch_id}", **_auth(sessions, "admin")
+    )
+    assert video_detail.status_code == 200
+    assert video_detail.json()["status"] == "completed"
+    assert video_detail.json()["entries"][0]["kind"] == "video"
+    assert video_detail.json()["entries"][0]["media_id"]
+    assert video_detail.json()["entries"][0]["transcription_job_id"] is None
 
     conn = connect(db_path)
     try:
@@ -1866,6 +2666,28 @@ def test_category_create_at_occupied_number_requires_confirmation(content_api):
     assert [row["display_code"] for row in top_level] == [f"{index:02d}" for index in range(1, 9)]
 
 
+def test_category_creation_uses_level_specific_chat_defaults(content_api):
+    client, sessions, _queued, _db_path = content_api
+    auth = _auth(sessions, "category_manager", csrf=True)
+    root = client.post(
+        "/api/admin/content/categories",
+        json={"parent_id": None, "display_code": "08", "display_name": "默认一级"},
+        **auth,
+    )
+    assert root.status_code == 200
+    assert root.json()["chat_search_enabled"] is True
+    assert root.json()["chat_filter_selectable"] is True
+
+    child = client.post(
+        "/api/admin/content/categories",
+        json={"parent_id": root.json()["id"], "display_code": "01", "display_name": "默认子级"},
+        **auth,
+    )
+    assert child.status_code == 200
+    assert child.json()["chat_search_enabled"] is True
+    assert child.json()["chat_filter_selectable"] is False
+
+
 def test_category_manager_can_reorder_and_reparent_categories(content_api):
     client, sessions, _queued, db_path = content_api
     auth = _auth(sessions, "category_manager", csrf=True)
@@ -1942,7 +2764,7 @@ def test_category_display_code_is_unique_within_each_parent(content_api):
     assert another_parent.status_code == 200
 
 
-def test_category_move_rejects_cycles_depth_conflicts_and_stale_versions(content_api):
+def test_category_move_rejects_cycles_conflicts_and_stale_versions_but_allows_deep_targets(content_api):
     client, sessions, _queued, db_path = content_api
     conn = connect(db_path)
     now = int(time.time())
@@ -1974,8 +2796,10 @@ def test_category_move_rejects_cycles_depth_conflicts_and_stale_versions(content
         json={"target_parent_id": "cat-depth-4", "before_category_id": None, "expected_version": 1},
         **auth,
     )
-    assert too_deep.status_code == 409
-    assert too_deep.json()["detail"] == "移动后分类层级将超过四级"
+    assert too_deep.status_code == 200
+    moved = next(row for row in too_deep.json() if row["id"] == "cat-01")
+    assert moved["parent_id"] == "cat-depth-4"
+    assert moved["level"] == 5
 
     stale = client.post(
         "/api/admin/content/categories/cat-02/move",
@@ -2086,6 +2910,52 @@ def test_category_force_delete_requires_dedicated_permission_and_exact_path(cont
     assert "系统默认分类" in blocked.json()["detail"]
 
 
+def test_only_admin_can_preflight_or_delete_top_level_category(content_api):
+    client, sessions, _queued, _db_path = content_api
+    manager_csrf = _auth(sessions, "category_manager", csrf=True)
+    root = client.post(
+        "/api/admin/content/categories",
+        json={"parent_id": None, "display_code": "08", "display_name": "一级删除边界"},
+        **manager_csrf,
+    ).json()
+    child = client.post(
+        "/api/admin/content/categories",
+        json={"parent_id": root["id"], "display_code": "01", "display_name": "子级删除边界"},
+        **manager_csrf,
+    ).json()
+
+    assert client.get(
+        f"/api/admin/content/categories/{root['id']}/delete-preview",
+        **_auth(sessions, "category_manager"),
+    ).status_code == 403
+    assert client.request(
+        "DELETE", f"/api/admin/content/categories/{root['id']}",
+        json={"expected_version": root["version"], "confirmed": True}, **manager_csrf,
+    ).status_code == 403
+
+    child_preview = client.get(
+        f"/api/admin/content/categories/{child['id']}/delete-preview",
+        **_auth(sessions, "category_manager"),
+    )
+    assert child_preview.status_code == 200
+    assert client.request(
+        "DELETE", f"/api/admin/content/categories/{child['id']}",
+        json={"expected_version": child["version"], "confirmed": True}, **manager_csrf,
+    ).status_code == 200
+
+    current_root = next(row for row in client.get(
+        "/api/admin/content/categories?include_inactive=true", **_auth(sessions, "admin")
+    ).json() if row["id"] == root["id"])
+    assert client.get(
+        f"/api/admin/content/categories/{root['id']}/delete-preview", **_auth(sessions, "admin")
+    ).status_code == 200
+    assert client.request(
+        "DELETE", f"/api/admin/content/categories/{root['id']}",
+        json={"expected_version": current_root["version"], "confirmed": True},
+        **_auth(sessions, "admin", csrf=True),
+    ).status_code == 200
+
+
 @pytest.mark.parametrize("employee_id", ["plain", "category_manager"])
 def test_non_admin_cannot_read_or_maintain_permission_catalog_or_groups(content_api, employee_id):
     client, sessions, _queued, _db_path = content_api
@@ -2128,10 +2998,10 @@ def test_permission_catalog_and_dependency_validation(content_api):
     admin_write = _auth(sessions, "admin", csrf=True)
     catalog = client.get("/api/admin/content/permission-catalog", **admin_read)
     assert catalog.status_code == 200
-    assert catalog.json()["schema_version"] == 6
+    assert catalog.json()["schema_version"] == 7
     assert [item["key"] for item in catalog.json()["permissions"]] == [
-        "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
-        "item.move_draft", "item.archive_draft", "item.review", "item.move_review",
+        "workspace.view", "item.view", "item.download", "category.view", "item.upload",
+        "item.move_draft", "item.archive_draft",
         "item.publish", "item.reclassify_published", "item.archive_published", "trash.view", "trash.restore",
         "trash.purge", "trash.policy_manage",
         "category.manage", "category.force_delete", "folder.request", "folder.review", "import.server", "index.view",
@@ -2479,11 +3349,18 @@ def test_published_media_transcripts_share_library_listing_without_document_mirr
     assert second_move.status_code == 409
     assert second_move.json()["detail"] == "目标目录已有同标题或同源文件名的视频资料"
 
-    archived = client.request(
+    forbidden = client.request(
         "DELETE",
         f"/api/admin/content/items/{first_item_id}",
         json={"expected_version_id": first_version_id},
         **_auth(sessions, "publisher", csrf=True),
+    )
+    assert forbidden.status_code == 403
+    archived = client.request(
+        "DELETE",
+        f"/api/admin/content/items/{first_item_id}",
+        json={"expected_version_id": first_version_id},
+        **_auth(sessions, "admin", csrf=True),
     )
     assert archived.status_code == 200, archived.text
     assert archived.json()["version_id"] == first_version_id
@@ -2760,7 +3637,7 @@ def test_bulk_actions_enforce_permissions_csrf_limits_and_unique_ids(content_api
         "/api/admin/content/bulk-publish",
         json={"version_ids": [f"version-{i}" for i in range(21)]},
         **_auth(sessions, "publisher", csrf=True),
-    ).status_code == 422
+    ).status_code == 200
 
 
 def test_rename_creates_a_new_draft_version_and_checks_filename_conflict(content_api):
@@ -3376,3 +4253,506 @@ def test_category_key_is_server_generated_and_used_categories_cannot_be_disabled
     )
     assert disabled.status_code == 409
     assert "重新归类" in disabled.json()["detail"]
+
+
+def _create_bulk_test_category(client: TestClient, sessions, *, parent_id: str, code: str, name: str):
+    response = client.post(
+        "/api/admin/content/categories",
+        json={"parent_id": parent_id, "display_code": code, "display_name": name},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _upload_bulk_test_document(client: TestClient, sessions, *, category_id: str, filename: str):
+    response = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": category_id},
+        files=[("files", (filename, b"# synthetic managed content\n", "text/markdown"))],
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert response.status_code == 200, response.text
+    entry = response.json()["entries"][0]
+    assert entry["status"] == "accepted"
+    return entry
+
+
+def test_recursive_bulk_workflow_normalizes_roots_and_enforces_owner(content_api):
+    client, sessions, _queued, db_path = content_api
+    parent = _create_bulk_test_category(
+        client, sessions, parent_id="cat-03", code="01", name="递归批量父目录"
+    )
+    child = _create_bulk_test_category(
+        client, sessions, parent_id=parent["id"], code="01", name="递归批量子目录"
+    )
+    uploaded = _upload_bulk_test_document(
+        client, sessions, category_id=child["id"], filename="recursive.md"
+    )
+    body = {
+        "operation": "submit",
+        "categories": [
+            {"category_id": parent["id"], "expected_version": parent["version"]},
+            {"category_id": child["id"], "expected_version": child["version"]},
+        ],
+        "items": [],
+    }
+    preflight = client.post(
+        "/api/admin/content/bulk-operations/preflight",
+        json=body,
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert preflight.status_code == 200, preflight.text
+    snapshot = preflight.json()
+    assert sum(category["is_root"] for category in snapshot["categories"]) == 1
+    assert {category["category_id"] for category in snapshot["categories"]} == {parent["id"], child["id"]}
+    assert snapshot["items"][0]["item_id"] == uploaded["item_id"]
+    assert snapshot["items"][0]["scope_source"] == "category"
+
+    foreign = client.get(
+        f"/api/admin/content/bulk-operations/{snapshot['id']}",
+        **_auth(sessions, "reviewer"),
+    )
+    assert foreign.status_code == 403
+
+    execute = client.post(
+        f"/api/admin/content/bulk-operations/{snapshot['id']}/execute",
+        json={},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert execute.status_code == 200, execute.text
+    assert execute.json()["status"] == "succeeded"
+    conn = connect(db_path)
+    try:
+        status = conn.execute(
+            "SELECT lifecycle_status FROM content_versions WHERE id=?", (uploaded["version_id"],)
+        ).fetchone()[0]
+        assert status == "awaiting_review"
+    finally:
+        conn.close()
+
+
+def test_recursive_bulk_move_keeps_descendant_items_in_their_folder(content_api):
+    client, sessions, _queued, db_path = content_api
+    parent = _create_bulk_test_category(
+        client, sessions, parent_id="cat-03", code="01", name="整体移动目录"
+    )
+    child = _create_bulk_test_category(
+        client, sessions, parent_id=parent["id"], code="01", name="整体移动子目录"
+    )
+    inside = _upload_bulk_test_document(
+        client, sessions, category_id=child["id"], filename="inside.md"
+    )
+    direct = _upload_bulk_test_document(
+        client, sessions, category_id="cat-05", filename="direct.md"
+    )
+    preflight = client.post(
+        "/api/admin/content/bulk-operations/preflight",
+        json={
+            "operation": "move",
+            "categories": [{"category_id": parent["id"], "expected_version": parent["version"]}],
+            "items": [{"item_id": direct["item_id"], "expected_version_id": direct["version_id"]}],
+        },
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert preflight.status_code == 200, preflight.text
+    snapshot = preflight.json()
+    sources = {item["item_id"]: item["scope_source"] for item in snapshot["items"]}
+    assert sources == {inside["item_id"]: "category", direct["item_id"]: "direct"}
+
+    execute = client.post(
+        f"/api/admin/content/bulk-operations/{snapshot['id']}/execute",
+        json={"target_category_id": "cat-04"},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert execute.status_code == 200, execute.text
+    assert execute.json()["status"] == "succeeded"
+    conn = connect(db_path)
+    try:
+        moved_parent = conn.execute(
+            "SELECT parent_id FROM category_nodes WHERE id=?", (parent["id"],)
+        ).fetchone()[0]
+        inside_category = conn.execute(
+            "SELECT category_id FROM content_items WHERE id=?", (inside["item_id"],)
+        ).fetchone()[0]
+        direct_category = conn.execute(
+            "SELECT category_id FROM content_items WHERE id=?", (direct["item_id"],)
+        ).fetchone()[0]
+        assert moved_parent == "cat-04"
+        assert inside_category == child["id"]
+        assert direct_category == "cat-04"
+    finally:
+        conn.close()
+
+
+def test_recursive_bulk_archive_zip64_progress_range_limit_and_cancel(
+    content_api, monkeypatch: pytest.MonkeyPatch
+):
+    client, sessions, _queued, _db_path = content_api
+    folder = _create_bulk_test_category(
+        client, sessions, parent_id="cat-03", code="01", name="打包目录"
+    )
+    uploaded = _upload_bulk_test_document(
+        client, sessions, category_id=folder["id"], filename="archive.md"
+    )
+    queued: list[str] = []
+    monkeypatch.setattr(content_bulk_operations, "enqueue_archive", queued.append)
+
+    def create_download_run():
+        response = client.post(
+            "/api/admin/content/bulk-operations/preflight",
+            json={
+                "operation": "download",
+                "categories": [{"category_id": folder["id"], "expected_version": folder["version"]}],
+                "items": [],
+            },
+            **_auth(sessions, "admin", csrf=True),
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    snapshot = create_download_run()
+    start = client.post(
+        f"/api/admin/content/bulk-operations/{snapshot['id']}/execute",
+        json={},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert start.status_code == 200
+    assert start.json()["status"] == "queued"
+    assert queued == [snapshot["id"]]
+    content_bulk_operations._run_archive(snapshot["id"])
+
+    ready = client.get(
+        f"/api/admin/content/bulk-operations/{snapshot['id']}", **_auth(sessions, "admin")
+    ).json()
+    assert ready["status"] == "ready"
+    assert ready["processed_bytes"] == ready["total_bytes"]
+    archive_path = content_bulk_operations.CONTENT_BULK_ARCHIVE_ROOT / f"{snapshot['id']}.zip"
+    with zipfile.ZipFile(archive_path) as archive:
+        names = archive.namelist()
+        assert any(name.endswith("/") and "打包目录" in name for name in names)
+        file_name = next(name for name in names if name.endswith("archive.md"))
+        assert archive.read(file_name) == b"# synthetic managed content\n"
+
+    ranged = client.get(
+        f"/api/admin/content/bulk-operations/{snapshot['id']}/archive",
+        headers={**_auth(sessions, "admin")["headers"], "Range": "bytes=0-3"},
+        cookies=_auth(sessions, "admin")["cookies"],
+    )
+    assert ranged.status_code == 206
+    assert ranged.headers["content-range"].startswith("bytes 0-3/")
+    assert len(ranged.content) == 4
+
+    oversized = create_download_run()
+    monkeypatch.setattr(content_bulk_operations, "CONTENT_BULK_ARCHIVE_MAX_BYTES", 1)
+    rejected = client.post(
+        f"/api/admin/content/bulk-operations/{oversized['id']}/execute",
+        json={},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert rejected.status_code == 413
+
+    monkeypatch.setattr(content_bulk_operations, "CONTENT_BULK_ARCHIVE_MAX_BYTES", 10 * 1024 ** 3)
+    cancelled = create_download_run()
+    client.post(
+        f"/api/admin/content/bulk-operations/{cancelled['id']}/execute",
+        json={},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    cancel = client.post(
+        f"/api/admin/content/bulk-operations/{cancelled['id']}/cancel",
+        json={},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert cancel.status_code == 200
+    assert cancel.json()["status"] == "cancelled"
+    content_bulk_operations._run_archive(cancelled["id"])
+    assert not (content_bulk_operations.CONTENT_BULK_ARCHIVE_ROOT / f"{cancelled['id']}.zip").exists()
+
+    corrupted = create_download_run()
+    object_path = content_bulk_operations._storage.resolve_object(
+        corrupted["items"][0]["storage_rel_path"]
+    )
+    object_path.write_bytes(b"corrupted")
+    client.post(
+        f"/api/admin/content/bulk-operations/{corrupted['id']}/execute",
+        json={},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    content_bulk_operations._run_archive(corrupted["id"])
+    failed = client.get(
+        f"/api/admin/content/bulk-operations/{corrupted['id']}", **_auth(sessions, "admin")
+    ).json()
+    assert failed["status"] == "failed"
+    assert failed["error_summary"] == "资料文件完整性校验失败：archive.md"
+    assert not (
+        content_bulk_operations.CONTENT_BULK_ARCHIVE_ROOT / f"{corrupted['id']}.zip"
+    ).exists()
+
+
+def test_recursive_bulk_empty_folder_archive_and_force_delete_are_persistent_jobs(
+    content_api, monkeypatch: pytest.MonkeyPatch
+):
+    client, sessions, _queued, db_path = content_api
+    folder = _create_bulk_test_category(
+        client, sessions, parent_id="cat-03", code="01", name="空目录任务"
+    )
+    archive_queue: list[str] = []
+    force_delete_queue: list[str] = []
+    monkeypatch.setattr(content_bulk_operations, "enqueue_archive", archive_queue.append)
+    monkeypatch.setattr(content_bulk_operations, "enqueue_force_delete", force_delete_queue.append)
+
+    download = client.post(
+        "/api/admin/content/bulk-operations/preflight",
+        json={
+            "operation": "download",
+            "categories": [{"category_id": folder["id"], "expected_version": folder["version"]}],
+            "items": [],
+        },
+        **_auth(sessions, "admin", csrf=True),
+    ).json()
+    started = client.post(
+        f"/api/admin/content/bulk-operations/{download['id']}/execute",
+        json={},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert started.status_code == 200
+    content_bulk_operations._run_archive(download["id"])
+    archive_path = content_bulk_operations.CONTENT_BULK_ARCHIVE_ROOT / f"{download['id']}.zip"
+    with zipfile.ZipFile(archive_path) as archive:
+        assert archive.namelist() == [f"{download['categories'][0]['archive_path']}/"]
+
+    force_delete = client.post(
+        "/api/admin/content/bulk-operations/preflight",
+        json={
+            "operation": "force_delete",
+            "categories": [{"category_id": folder["id"], "expected_version": folder["version"]}],
+            "items": [],
+        },
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert force_delete.status_code == 200
+    force_snapshot = force_delete.json()
+    wrong = client.post(
+        f"/api/admin/content/bulk-operations/{force_snapshot['id']}/execute",
+        json={"confirmation": "错误确认文字"},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert wrong.status_code == 400
+    queued = client.post(
+        f"/api/admin/content/bulk-operations/{force_snapshot['id']}/execute",
+        json={"confirmation": force_snapshot["confirmation_phrase"]},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert queued.status_code == 200
+    assert queued.json()["status"] == "queued"
+    assert force_delete_queue == [force_snapshot["id"]]
+    conn = connect(db_path)
+    try:
+        assert conn.execute(
+            "SELECT deleted_at FROM category_nodes WHERE id=?", (folder["id"],)
+        ).fetchone()[0] is None
+    finally:
+        conn.close()
+
+
+def test_recursive_bulk_single_review_finalizes_without_reprocessing(content_api):
+    client, sessions, _queued, _db_path = content_api
+    folder = _create_bulk_test_category(
+        client, sessions, parent_id="cat-03", code="01", name="单项审核目录"
+    )
+    uploaded = _upload_bulk_test_document(
+        client, sessions, category_id=folder["id"], filename="single-review.md"
+    )
+    submitted = client.post(
+        f"/api/admin/content/versions/{uploaded['version_id']}/submit",
+        json={},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert submitted.status_code == 200, submitted.text
+
+    preflight = client.post(
+        "/api/admin/content/bulk-operations/preflight",
+        json={
+            "operation": "approve",
+            "categories": [{"category_id": folder["id"], "expected_version": folder["version"]}],
+            "items": [],
+        },
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert preflight.status_code == 200, preflight.text
+    run = preflight.json()
+
+    reviewed = client.post(
+        f"/api/admin/content/bulk-operations/{run['id']}/items/{uploaded['item_id']}/review",
+        json={"approved": True, "note": "单项确认"},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    result = reviewed.json()
+    assert result["status"] == "succeeded"
+    assert result["selected_files"] == 0
+    assert result["completed_files"] == 1
+    assert result["items"][0]["result_status"] == "succeeded"
+    assert result["items"][0]["selected"] is False
+
+
+def test_recursive_bulk_failure_counts_files_and_empty_roots_once(content_api):
+    client, sessions, _queued, db_path = content_api
+    populated = _create_bulk_test_category(
+        client, sessions, parent_id="cat-03", code="01", name="失败资料目录"
+    )
+    empty = _create_bulk_test_category(
+        client, sessions, parent_id="cat-03", code="02", name="失败空目录"
+    )
+    _upload_bulk_test_document(
+        client, sessions, category_id=populated["id"], filename="failed.md"
+    )
+    preflight = client.post(
+        "/api/admin/content/bulk-operations/preflight",
+        json={
+            "operation": "move",
+            "categories": [
+                {"category_id": populated["id"], "expected_version": populated["version"]},
+                {"category_id": empty["id"], "expected_version": empty["version"]},
+            ],
+            "items": [],
+        },
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert preflight.status_code == 200, preflight.text
+    run_id = preflight.json()["id"]
+    conn = connect(db_path)
+    try:
+        conn.execute(
+            """UPDATE content_bulk_operation_categories
+               SET result_status='failed',selected=0 WHERE run_id=? AND is_root=1""",
+            (run_id,),
+        )
+        conn.execute(
+            """UPDATE content_bulk_operation_items
+               SET result_status='failed',selected=0 WHERE run_id=?""",
+            (run_id,),
+        )
+        content_bulk_operations.finalize_sync_run(conn, run_id)
+    finally:
+        conn.close()
+    result = client.get(
+        f"/api/admin/content/bulk-operations/{run_id}", **_auth(sessions, "admin")
+    ).json()
+    assert result["status"] == "failed"
+    assert result["failed_files"] == 2
+
+
+def test_bulk_operation_boot_recovery_and_archive_expiration(
+    content_api, monkeypatch: pytest.MonkeyPatch
+):
+    client, sessions, _queued, db_path = content_api
+    folder = _create_bulk_test_category(
+        client, sessions, parent_id="cat-03", code="01", name="恢复任务目录"
+    )
+
+    def create_run(operation: str):
+        response = client.post(
+            "/api/admin/content/bulk-operations/preflight",
+            json={
+                "operation": operation,
+                "categories": [{"category_id": folder["id"], "expected_version": folder["version"]}],
+                "items": [],
+            },
+            **_auth(sessions, "admin", csrf=True),
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    packaging = create_run("download")
+    force_delete = create_run("force_delete")
+    expired = create_run("download")
+    conn = connect(db_path)
+    try:
+        conn.execute(
+            "UPDATE content_bulk_operations SET status='packaging',processed_bytes=123 WHERE id=?",
+            (packaging["id"],),
+        )
+        conn.execute(
+            "UPDATE content_bulk_operations SET status='running' WHERE id=?",
+            (force_delete["id"],),
+        )
+        conn.execute(
+            "UPDATE content_bulk_operations SET status='ready',archive_filename='expired.zip',expires_at=? WHERE id=?",
+            (int(time.time()) - 1, expired["id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    content_bulk_operations.CONTENT_BULK_ARCHIVE_ROOT.mkdir(parents=True, exist_ok=True)
+    expired_path = content_bulk_operations.CONTENT_BULK_ARCHIVE_ROOT / f"{expired['id']}.zip"
+    expired_path.write_bytes(b"expired")
+    archive_queue: list[str] = []
+    force_delete_queue: list[str] = []
+    monkeypatch.setattr(content_bulk_operations, "enqueue_archive", archive_queue.append)
+    monkeypatch.setattr(content_bulk_operations, "enqueue_force_delete", force_delete_queue.append)
+
+    content_bulk_operations.recover_bulk_operations_on_boot()
+
+    conn = connect(db_path)
+    try:
+        recovered = {
+            row["id"]: (row["status"], row["processed_bytes"])
+            for row in conn.execute(
+                "SELECT id,status,processed_bytes FROM content_bulk_operations"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+    assert recovered[packaging["id"]] == ("queued", 0)
+    assert recovered[force_delete["id"]][0] == "queued"
+    assert recovered[expired["id"]][0] == "expired"
+    assert archive_queue == [packaging["id"]]
+    assert force_delete_queue == [force_delete["id"]]
+    assert not expired_path.exists()
+
+
+def test_force_delete_worker_unexpected_failure_is_terminal_and_productized(
+    content_api, monkeypatch: pytest.MonkeyPatch
+):
+    client, sessions, _queued, _db_path = content_api
+    folder = _create_bulk_test_category(
+        client, sessions, parent_id="cat-03", code="01", name="异常永久删除目录"
+    )
+    queued: list[str] = []
+    monkeypatch.setattr(content_bulk_operations, "enqueue_force_delete", queued.append)
+    preflight = client.post(
+        "/api/admin/content/bulk-operations/preflight",
+        json={
+            "operation": "force_delete",
+            "categories": [{"category_id": folder["id"], "expected_version": folder["version"]}],
+            "items": [],
+        },
+        **_auth(sessions, "admin", csrf=True),
+    ).json()
+    started = client.post(
+        f"/api/admin/content/bulk-operations/{preflight['id']}/execute",
+        json={"confirmation": preflight["confirmation_phrase"]},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert started.status_code == 200, started.text
+    monkeypatch.setattr(
+        content_bulk_operations,
+        "force_delete_category",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("synthetic worker failure")),
+    )
+    monkeypatch.setattr(
+        content_bulk_operations,
+        "_force_delete_error_message",
+        lambda _exc: (_ for _ in ()).throw(RuntimeError("synthetic formatter failure")),
+    )
+
+    content_bulk_operations._run_force_delete(preflight["id"])
+
+    result = client.get(
+        f"/api/admin/content/bulk-operations/{preflight['id']}", **_auth(sessions, "admin")
+    ).json()
+    assert result["status"] == "failed"
+    assert result["finished_at"] is not None
+    assert result["error_summary"] == "批量永久删除任务异常中止，请刷新后检查已完成目录"

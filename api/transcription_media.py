@@ -8,7 +8,7 @@ import uuid
 import wave
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, Sequence
+from typing import Callable, Protocol, Sequence
 
 from src.transcription.runtime_ports import InputPart
 from src.transcription.types import (
@@ -82,6 +82,7 @@ class FfmpegMediaAudioPreparer:
     executable: str
     timeout_seconds: int
     runner: CommandRunner = SubprocessCommandRunner()
+    source_resolver: Callable[[str], Path] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.media_root, Path) or not self.media_root.is_absolute():
@@ -90,13 +91,22 @@ class FfmpegMediaAudioPreparer:
             raise ContractValidationError("invalid_ffmpeg_path", "executable")
         require_int(self.timeout_seconds, "timeout_seconds", positive=True)
 
-    def prepare(self, media_id: str) -> PreparedAudio:
+    def prepare(self, media_id: str, *, source_path: Path | None = None) -> PreparedAudio:
         validate_uuid(media_id, "media_id")
         root = self.media_root.resolve(strict=False)
         media_dir = (root / media_id).resolve(strict=False)
         if media_dir.parent != root:
             raise ContractValidationError("media_path_escape", "media_id")
-        source = media_dir / "original.mp4"
+        if source_path is not None:
+            if not isinstance(source_path, Path) or not source_path.is_absolute():
+                raise ContractValidationError("invalid_media_source", "source_path")
+            source = source_path.resolve(strict=False)
+            try:
+                source.relative_to(media_dir)
+            except ValueError as exc:
+                raise ContractValidationError("media_path_escape", "source_path") from exc
+        else:
+            source = self.source_resolver(media_id) if self.source_resolver is not None else media_dir / "original.mp4"
         final = media_dir / "prepared-audio-v1.wav"
         if final.exists():
             if final.is_symlink() or not final.is_file():
@@ -104,6 +114,7 @@ class FfmpegMediaAudioPreparer:
             return _validated_audio(final, media_id)
         if not source.is_file() or source.is_symlink():
             raise ContractValidationError("media_input_unavailable", "media_id")
+        media_dir.mkdir(parents=True, exist_ok=True)
 
         temporary = media_dir / f".prepared-audio-{uuid.uuid4()}.tmp.wav"
         args = (
