@@ -44,6 +44,7 @@ const BULK_DOWNLOAD_TOAST_ID = "managed-content-bulk-download";
 const ACTIVE_RECLASSIFICATION_STATUSES = new Set(["pending", "applying", "committing", "rolling_back"]);
 type SortKey = "docType" | "title" | "updatedAt" | "status" | "source";
 type SortDirection = "asc" | "desc";
+type TrashSortKey = "title" | "category" | "status" | "source" | "retention" | "archivedAt";
 type ManagedContentView = "library" | "trash" | "uploads" | "index";
 type MoveOperation = "move" | "reclassify" | "archive";
 type UploadConflictChoice = { strategy: "skip" | "rename" | "update"; filename?: string };
@@ -409,6 +410,14 @@ function statusVariant(status: string) {
   if (status.includes("failed") || status === "rejected") return "destructive" as const;
   if (status === "awaiting_review" || status === "publishing") return "warning" as const;
   return "secondary" as const;
+}
+
+function trashRetentionLabel(item: ManagedContentItem) {
+  return item.retention_status === "overdue"
+    ? `已超期 ${Math.abs(item.retention_days_remaining || 0)} 天`
+    : item.retention_status === "expiring"
+      ? `即将到期，剩余 ${item.retention_days_remaining || 0} 天`
+      : `保留中，剩余 ${item.retention_days_remaining || 0} 天`;
 }
 
 function PublicationFailure({ item }: { item: ManagedContentItem }) {
@@ -868,7 +877,9 @@ export function AdminManagedContentPage() {
   const [trashArchivedBy, setTrashArchivedBy] = useState("");
   const [trashArchivedFrom, setTrashArchivedFrom] = useState("");
   const [trashArchivedTo, setTrashArchivedTo] = useState("");
-  const [trashSortDirection, setTrashSortDirection] = useState<"asc" | "desc">("desc");
+  const [trashSort, setTrashSort] = useState<{ key: TrashSortKey; direction: SortDirection }>({ key: "archivedAt", direction: "desc" });
+  const trashSortDirection = trashSort.key === "archivedAt" ? trashSort.direction : "desc";
+  const setTrashSortDirection = (updater: (current: SortDirection) => SortDirection) => setTrashSort((current) => ({ ...current, direction: updater(current.direction) }));
   const [trashBulkTarget, setTrashBulkTarget] = useState("original");
   const [trashPreflight, setTrashPreflight] = useState<BulkRestorePreflightResult[]>([]);
   const [trashPreflightOpen, setTrashPreflightOpen] = useState(false);
@@ -1006,16 +1017,16 @@ export function AdminManagedContentPage() {
         category_id: trashCategoryFilter || undefined, archived_by: trashArchivedBy || undefined,
         archived_from: trashArchivedFrom ? Math.floor(new Date(`${trashArchivedFrom}T00:00:00`).getTime() / 1000) : undefined,
         archived_to: trashArchivedTo ? Math.floor(new Date(`${trashArchivedTo}T23:59:59`).getTime() / 1000) : undefined,
-        sort_direction: trashSortDirection, limit: PAGE_SIZE, offset: page * PAGE_SIZE,
+        sort_direction: trashSort.key === "archivedAt" ? trashSort.direction : "desc", limit: PAGE_SIZE, offset: page * PAGE_SIZE,
       });
       setTrashItems(listing.items); setTrashTotal(listing.total); setTrashRetentionCounts(listing.retention_counts || {});
     } catch (trashFailure) {
       setError(trashFailure instanceof Error ? trashFailure.message : "回收站加载失败");
     } finally { setTrashLoading(false); }
-  }, [page, query, trashArchivedBy, trashArchivedFrom, trashArchivedTo, trashCategoryFilter, trashRetentionFilter, trashSortDirection]);
+  }, [page, query, trashArchivedBy, trashArchivedFrom, trashArchivedTo, trashCategoryFilter, trashRetentionFilter, trashSort]);
 
   useEffect(() => { if (view === "trash") void loadTrash(); }, [loadTrash, view]);
-  useEffect(() => { setTrashSelected([]); }, [page, query, trashArchivedBy, trashArchivedFrom, trashArchivedTo, trashCategoryFilter, trashRetentionFilter, trashSortDirection]);
+  useEffect(() => { setTrashSelected([]); }, [page, query, trashArchivedBy, trashArchivedFrom, trashArchivedTo, trashCategoryFilter, trashRetentionFilter, trashSort]);
 
   const upload = async (
     targetFolderId = currentFolderId,
@@ -1436,6 +1447,29 @@ export function AdminManagedContentPage() {
     ? { key, direction: current.direction === "asc" ? "desc" : "asc" }
     : { key, direction: "asc" });
   const sortIcon = (key: SortKey) => sort?.key !== key ? <ArrowUpDown className="size-3.5" /> : sort.direction === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />;
+  const sortedTrashItems = useMemo(() => {
+    const getStatus = (item: ManagedContentItem) => item.pre_archive_lifecycle_status || item.lifecycle_status || "";
+    const getValue = (item: ManagedContentItem): string | number => {
+      switch (trashSort.key) {
+        case "title": return item.title || "";
+        case "category": return item.category_path || item.category_label || "";
+        case "status": return statusLabel[getStatus(item)] || getStatus(item);
+        case "source": return sourceLabel[item.source_origin] || item.source_origin || "";
+        case "retention": return trashRetentionLabel(item);
+        case "archivedAt": return item.archived_at || 0;
+      }
+    };
+    return [...trashItems].sort((left, right) => {
+      const a = getValue(left); const b = getValue(right);
+      const comparison = typeof a === "number" && typeof b === "number" ? a - b : String(a).localeCompare(String(b), "zh-CN", { numeric: true, sensitivity: "base" });
+      return trashSort.direction === "asc" ? comparison : -comparison;
+    });
+  }, [trashItems, trashSort]);
+  const toggleTrashSort = (key: TrashSortKey) => {
+    setTrashSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" });
+    setPage(0);
+  };
+  const trashSortIcon = (key: TrashSortKey) => trashSort.key !== key ? <ArrowUpDown className="size-3.5" /> : trashSort.direction === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />;
 
   const createFolder = async () => {
     if (!currentFolder || !newFolderName.trim()) return;
@@ -2059,7 +2093,7 @@ export function AdminManagedContentPage() {
         category_id: trashCategoryFilter || null, archived_by: trashArchivedBy,
         archived_from: trashArchivedFrom ? Math.floor(new Date(`${trashArchivedFrom}T00:00:00`).getTime() / 1000) : null,
         archived_to: trashArchivedTo ? Math.floor(new Date(`${trashArchivedTo}T23:59:59`).getTime() / 1000) : null,
-        sort_direction: trashSortDirection });
+        sort_direction: trashSort.key === "archivedAt" ? trashSort.direction : "desc" });
       triggerManagedDownload(result.blob, result.filename); toast.success("回收站处置清单已导出");
     } catch (failure) { toast.error(failure instanceof Error ? failure.message : "导出处置清单失败"); }
     finally { setBusyAction(null); }
@@ -2472,18 +2506,19 @@ export function AdminManagedContentPage() {
           onClear={() => { setQueryInput(""); setTrashRetentionFilter(""); setTrashCategoryFilter(""); setTrashArchivedBy(""); setTrashArchivedFrom(""); setTrashArchivedTo(""); setPage(0); }}
         />
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <Button size="sm" variant="outline" className="max-sm:h-control-md" disabled={Boolean(busyAction)} onClick={() => void exportTrash()}><Download className="size-4" />{busyAction === "trash-export" ? "导出中…" : "导出处置清单"}</Button>
           <Button size="sm" variant="outline" className="max-sm:h-control-md" onClick={() => void loadTrash()} disabled={trashLoading}><RefreshCw className={trashLoading ? "size-4 animate-spin" : "size-4"} />{trashLoading ? "刷新中…" : "刷新列表"}</Button>
           {(can("trash.policy_manage") || can("trash.purge")) && <ActionsMenu disabled={Boolean(busyAction)} triggerLabel="回收站管理" menuLabel="回收站管理" options={[
             ...(can("trash.policy_manage") ? [{ key: "trash-policy", label: "清理策略", icon: <SlidersHorizontal className="size-4" />, onSelect: () => void openTrashSettings() }] : []),
             ...(can("trash.purge") ? [{ key: "trash-overdue", label: "清理已超期资料", icon: <Trash2 className="size-4" />, destructive: true, onSelect: () => void previewOverdueTrashPurge() }] : []),
+            ...(can("trash.view") ? [{ key: "trash-export", label: busyAction === "trash-export" ? "导出中…" : "导出处置清单", icon: <Download className="size-4" />, onSelect: () => void exportTrash() }] : []),
           ]} />}
+          {can("trash.restore") || can("trash.purge") ? <ActionsMenu disabled={Boolean(busyAction) || trashSelected.length === 0} triggerLabel="批量操作" menuLabel="回收站批量操作" options={[
+            ...(can("trash.restore") ? [{ key: "trash-restore-selected", label: `恢复所选（${trashSelected.length}）`, icon: <ArchiveRestore className="size-4" />, onSelect: () => { setTrashBulkTarget("original"); setTrashPreflight([]); setTrashPreflightOpen(true); } }] : []),
+            ...(can("trash.purge") ? [{ key: "trash-purge-selected", label: `永久删除所选（${trashSelected.length}）`, icon: <Trash2 className="size-4" />, destructive: true, onSelect: () => void openTrashPurge() }] : []),
+          ]} /> : null}
         </div>
         {trashSelected.length > 0 && <div className="flex flex-col gap-2 rounded-ui-md border border-primary/30 bg-primary/5 px-3 py-2 sm:flex-row sm:items-center xl:col-span-3">
           <p className="mr-auto text-ui-sm">已选择 <strong>{trashSelected.length}</strong> 份资料</p>
-          {can("trash.restore") && <Button size="sm" className="max-sm:h-control-md" disabled={Boolean(busyAction)} onClick={() => { setTrashBulkTarget("original"); setTrashPreflight([]); setTrashPreflightOpen(true); }}><ArchiveRestore className="size-4" />恢复所选（{trashSelected.length}）</Button>}
-          {can("trash.purge") && <ActionsMenu disabled={Boolean(busyAction)} triggerLabel="批量操作" menuLabel="回收站批量操作" options={[{ key: "trash-purge-selected", label: `永久删除所选（${trashSelected.length}）`, icon: <Trash2 className="size-4" />, destructive: true, onSelect: () => void openTrashPurge() }]} />}
-          <Button size="sm" variant="ghost" className="max-sm:h-control-md" disabled={Boolean(busyAction)} onClick={() => setTrashSelected([])}>取消选择</Button>
         </div>}
       </div>
         {trashLoading ? <LoadingState className="min-h-48 border-0" label="正在加载回收站…" /> : trashItems.length === 0 ? <EmptyState className="rounded-none border-0" title="回收站为空" description="移至回收站的资料会显示在这里。" /> : <>
