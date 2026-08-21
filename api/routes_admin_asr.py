@@ -48,6 +48,7 @@ from .schemas import (
     AsrProfileAuditEventDTO,
     AsrProfileReleaseRequestCreate,
     AsrProfileReleaseRequestDTO,
+    AsrReleaseValidationDTO,
     AsrSegmentationDTO,
     AsrServiceStatusDTO,
     AsrSettingsResponse,
@@ -100,14 +101,22 @@ def _runtime_state() -> tuple[
         ASR_REQUEST_TIMEOUT_SECONDS,
         FUNASR_SENSEVOICE_PROVIDER_KEY,
     )
+    capabilities = None
+    diagnostics = None
+    identities = None
     try:
-        return (
-            factory.capabilities(),
-            factory.diagnostics(),
-            factory.profile_identities(),
-        )
+        capabilities = factory.capabilities()
     except Exception:
-        return None, None, None
+        pass
+    try:
+        diagnostics = factory.diagnostics()
+    except Exception:
+        pass
+    try:
+        identities = factory.profile_identities()
+    except Exception:
+        pass
+    return capabilities, diagnostics, identities
 
 
 def _diagnostic_profiles(diagnostics: dict[str, object] | None) -> dict[str, dict[str, object]]:
@@ -132,22 +141,45 @@ def _profile_identities(
     return {item.service_profile_id: item for item in identities.profiles}
 
 
-def _service_status(diagnostics: dict[str, object] | None) -> AsrServiceStatusDTO:
+def _service_status(
+    capabilities: ServiceCapabilities | None,
+    diagnostics: dict[str, object] | None,
+) -> AsrServiceStatusDTO:
     if not ASR_ENABLED:
         return AsrServiceStatusDTO(status="disabled")
-    if diagnostics is None:
+    if capabilities is None:
         return AsrServiceStatusDTO(status="unavailable")
+    if diagnostics is None:
+        return AsrServiceStatusDTO(status="degraded")
     queue_depth = diagnostics.get("queue_depth")
     queue_limit = diagnostics.get("queue_limit")
     pause_reason = diagnostics.get("pause_reason")
     profiles = _diagnostic_profiles(diagnostics)
-    all_available = bool(profiles) and all(item.get("available") is True for item in profiles.values())
+    advertised_profiles = set(capabilities.service_profiles)
+    all_available = bool(advertised_profiles) and all(
+        profiles.get(profile_id, {}).get("available") is True
+        for profile_id in advertised_profiles
+    )
     return AsrServiceStatusDTO(
         status="healthy" if diagnostics.get("enabled") is True and all_available and pause_reason is None else "degraded",
         queue_depth=queue_depth if type(queue_depth) is int and queue_depth >= 0 else None,
         queue_limit=queue_limit if type(queue_limit) is int and queue_limit > 0 else None,
         pause_reason=pause_reason if type(pause_reason) is str else None,
     )
+
+
+def _release_validation(
+    identities: ServiceProfileIdentities | None,
+) -> AsrReleaseValidationDTO:
+    if not ASR_ENABLED:
+        return AsrReleaseValidationDTO(
+            status="disabled", reason_code="asr_disabled"
+        )
+    if identities is None:
+        return AsrReleaseValidationDTO(
+            status="unavailable", reason_code="profile_identity_unavailable"
+        )
+    return AsrReleaseValidationDTO(status="ready")
 
 
 def _profile_dtos(
@@ -309,7 +341,8 @@ def _settings_response(conn: sqlite3.Connection) -> AsrSettingsResponse:
     profiles = _profile_dtos(capabilities, diagnostics, identities)
     profile_names = {item.profile_id: item.display_name for item in profiles}
     return AsrSettingsResponse(
-        service=_service_status(diagnostics),
+        service=_service_status(capabilities, diagnostics),
+        release_validation=_release_validation(identities),
         profiles=profiles,
         release_requests=_release_requests(conn, profile_names),
         audit_events=_audit_events(conn, profile_names),

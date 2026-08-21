@@ -36,8 +36,6 @@ def _category_path(conn: sqlite3.Connection, category_id: str) -> tuple[str, ...
             raise ValueError("category_not_found")
         parts.append(f"{row['display_code']}_{row['display_name']}")
         current = row["parent_id"]
-        if len(parts) > 4:
-            raise ValueError("category_depth_exceeded")
     return tuple(reversed(parts))
 
 

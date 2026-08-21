@@ -190,6 +190,9 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn('"${COMPOSE[@]}" exec -T backend python', workflow)
         self.assertIn("APP_ASR_DIAGNOSTIC", workflow)
         self.assertIn("capabilities_error_type", workflow)
+        self.assertIn("diagnostics_error_type", workflow)
+        self.assertIn("profile_identities_error_type", workflow)
+        self.assertIn("factory.profile_identities()", workflow)
         self.assertIn("asr_service_token_configured", workflow)
         self.assertNotIn("print(ASR_SERVICE_TOKEN", workflow)
         self.assertNotIn("print(ASR_SERVICE_URL", workflow)
@@ -285,6 +288,12 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("parse_transcription_admitted_profile_ids", workflow)
         self.assertIn("PREVIOUS_ASR_ENABLED", workflow)
         self.assertIn("APP_ONLY_ASR_STATE source=container-config", workflow)
+        self.assertIn("APP_ONLY_ASR_ADMISSION source=running-backend", workflow)
+        self.assertIn("APP_ONLY_ASR_ADMISSION source=container-config", workflow)
+        self.assertIn(
+            'export TRANSCRIPTION_ADMITTED_PROFILE_IDS="${PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS}"',
+            workflow,
+        )
         self.assertIn(".Config.Env", workflow)
         self.assertIn("export ASR_ENABLED=true", workflow)
         self.assertIn('export ASR_ENABLED="${PREVIOUS_ASR_ENABLED}"', workflow)
@@ -297,11 +306,8 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("DEPLOY_STATUS=$?", workflow)
         self.assertIn('if [ "${DEPLOY_STATUS}" -ne 0 ]; then', workflow)
         self.assertNotIn("if ! (", workflow)
-        self.assertIn('states[FASTER_WHISPER_PROFILE_ID] == ("enabled", "available")', workflow)
-        self.assertIn(
-            'states[WHISPERX_BALANCED_PROFILE_ID] == ("enabled", "available")',
-            workflow,
-        )
+        self.assertIn('states[profile_id] == ("enabled", "available")', workflow)
+        self.assertIn("for profile_id in expected:", workflow)
         self.assertIn("profiles=\" + \",\".join(sorted(expected))", workflow)
 
         compose = (ROOT / "docker" / "docker-compose.yml").read_text(encoding="utf-8")
@@ -384,6 +390,9 @@ class TestDeployGitSafety(unittest.TestCase):
             workflow,
         )
         self.assertIn("in SYSTEM_CONTENT_PERMISSION_GROUPS.items()", workflow)
+        self.assertIn("expected_permissions.issubset(actual_permissions)", workflow)
+        self.assertIn("unexpected_group_names", workflow)
+        self.assertNotIn("assert actual_groups == expected_groups", workflow)
         for system_group in (
             '"member"',
             '"viewer"',

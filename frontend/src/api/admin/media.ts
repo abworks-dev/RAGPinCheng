@@ -23,4 +23,11 @@ export const adminMediaApi = {
   reviewVersion: (...args: Parameters<typeof api.reviewTranscriptVersion>) => api.reviewTranscriptVersion(...args),
   publishVersion: (...args: Parameters<typeof api.publishTranscriptVersion>) => api.publishTranscriptVersion(...args),
   publicationJob: (...args: Parameters<typeof api.getTranscriptPublicationJob>) => api.getTranscriptPublicationJob(...args),
+  externalRoots: (...args: Parameters<typeof api.listExternalMediaRoots>) => api.listExternalMediaRoots(...args),
+  externalSources: (...args: Parameters<typeof api.listExternalMediaSources>) => api.listExternalMediaSources(...args),
+  createExternalSource: (...args: Parameters<typeof api.createExternalMediaSource>) => api.createExternalMediaSource(...args),
+  updateExternalSource: (...args: Parameters<typeof api.updateExternalMediaSource>) => api.updateExternalMediaSource(...args),
+  scanExternalSource: (...args: Parameters<typeof api.scanExternalMediaSource>) => api.scanExternalMediaSource(...args),
+  externalEntries: (...args: Parameters<typeof api.listExternalMediaEntries>) => api.listExternalMediaEntries(...args),
+  enqueueExternal: (...args: Parameters<typeof api.enqueueExternalMedia>) => api.enqueueExternalMedia(...args),
 };

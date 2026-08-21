@@ -38,8 +38,8 @@ export function Sidebar({
   const conversationScroll = useAutoHideScrollbar<HTMLDivElement>();
   const [conversationScrolledFromTop, setConversationScrolledFromTop] = useState(false);
   return (
-    <aside className={`flex h-full shrink-0 flex-col overflow-hidden bg-sidebar text-sidebar-foreground transition-[width] duration-normal ${collapsed ? "w-16" : "w-[17rem]"}`}>
-      <div className="px-3 py-3">
+    <aside className={`flex h-full shrink-0 flex-col bg-sidebar text-sidebar-foreground transition-[width] duration-normal ${collapsed ? "w-16" : "w-[17rem]"}`}>
+      <div className="overflow-hidden px-3 py-3">
         <div className="mb-3 flex h-9 items-center justify-between gap-2">
           {collapsed && onToggleCollapsed ? (
             <button

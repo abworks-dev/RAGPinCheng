@@ -172,14 +172,14 @@ def _media_lineage_ids(conn: sqlite3.Connection, item_id: str, current_media_id:
 def _media_snapshot(conn: sqlite3.Connection, item_id: str) -> dict[str, Any] | None:
     row = conn.execute(
         """SELECT i.id AS item_id,i.title,i.archived_at,i.content_kind,i.media_id,
-                  i.category_id,h.current_version_id AS version_id,m.original_filename,
+                   i.category_id,h.current_version_id AS version_id,m.original_filename,
                   m.file_size,m.storage_rel_path,
                   COALESCE(json_extract(a.metadata_json,'$.category_path'),
                            c.display_code || ' ' || c.display_name) AS category_path
            FROM content_items i
            JOIN category_nodes c ON c.id=i.category_id
            JOIN media_assets m ON m.media_id=i.media_id
-           JOIN media_transcript_heads h ON h.media_id=i.media_id
+            LEFT JOIN media_transcript_heads h ON h.media_id=i.media_id
            LEFT JOIN content_audit_events a ON a.id=(
              SELECT a2.id FROM content_audit_events a2 WHERE a2.item_id=i.id
              AND a2.event_type='content.archived' ORDER BY a2.created_at DESC,a2.id DESC LIMIT 1)
@@ -191,7 +191,7 @@ def _media_snapshot(conn: sqlite3.Connection, item_id: str) -> dict[str, Any] | 
     media_ids = _media_lineage_ids(conn, item_id, str(row["media_id"]))
     placeholders = ",".join("?" for _ in media_ids)
     media_rows = conn.execute(
-        f"SELECT media_id,file_size,storage_rel_path,transcript_source_path FROM media_assets WHERE media_id IN ({placeholders})",
+        f"SELECT media_id,file_size,storage_rel_path,transcript_source_path,storage_kind FROM media_assets WHERE media_id IN ({placeholders})",
         media_ids,
     ).fetchall()
     version_rows = conn.execute(
@@ -250,6 +250,9 @@ def _media_snapshot(conn: sqlite3.Connection, item_id: str) -> dict[str, Any] | 
         unsafe_path = True
 
     result = dict(row)
+    result["version_id"] = str(
+        row["version_id"] or f"media-pending-{row['media_id']}"
+    )
     result.update({
         "object_sha256": None,
         "size_bytes": sum(int(media["file_size"] or 0) for media in media_rows)
@@ -262,6 +265,7 @@ def _media_snapshot(conn: sqlite3.Connection, item_id: str) -> dict[str, Any] | 
         "transcript_version_count": len(version_rows),
         "artifact_count": len(artifact_paths),
         "index_job_count": index_job_count,
+        "has_external_media": any(media["storage_kind"] == "external" for media in media_rows),
         "unsafe_path": unsafe_path,
     })
     return result
@@ -293,6 +297,8 @@ def preflight_purge(
             status, reason = "blocked", "资料尚未超过保留期限"
         elif row["content_kind"] == "media_transcript" and row["unsafe_path"]:
             status, reason = "blocked", "视频或转录产物存储路径异常"
+        elif row["content_kind"] == "media_transcript" and row.get("has_external_media"):
+            status, reason = "blocked", "共享目录视频为只读外部资料，不能永久删除"
         elif row["content_kind"] == "media_transcript" and conn.execute(
             f"SELECT 1 FROM transcription_jobs WHERE media_id IN ({','.join('?' for _ in row['media_ids'])}) AND status IN ({','.join('?' for _ in _ACTIVE_TRANSCRIPTION_STATES)}) LIMIT 1",
             (*row["media_ids"], *_ACTIVE_TRANSCRIPTION_STATES),
@@ -388,6 +394,8 @@ def _delete_external(version_id: str, item_id: str, filename: str) -> tuple[int,
 
 
 def _delete_media_external(version_ids: list[str]) -> tuple[int, int]:
+    if not version_ids:
+        return 0, 0
     qdrant_count = 0
     client = _client()
     if client.collection_exists(COLLECTION):
@@ -547,7 +555,7 @@ def purge_items(
     conn: sqlite3.Connection, items: list[tuple[str, str]], *, actor_user_id: int | None,
     trigger_type: str = "manual", overdue_only: bool = False,
 ) -> dict[str, Any]:
-    if not 1 <= len(items) <= 20:
+    if not items:
         raise ValueError("invalid_purge_batch")
     preflight = preflight_purge(conn, items, overdue_only=overdue_only)
     settings = get_trash_settings(conn)

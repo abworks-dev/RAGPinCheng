@@ -30,6 +30,7 @@
 | 文档摄取与索引 | 已实现 | `index_single` | MinerU、Qdrant、parents.sqlite | [document-indexing.md](document-indexing.md) |
 | 引用与来源面板 | 已实现 | `SourceDTO` / `citations.ts` | 对话运行时 | [citations-and-sources.md](citations-and-sources.md) |
 | 视频转录链路 | 部分实现 | `chunk_transcript` | 文档索引、引用与来源 | [transcript-pipeline.md](transcript-pipeline.md) |
+| 外部媒体源 | 已实现（默认关闭） | `/api/admin/external-media` / `ExternalMediaSourcesPanel` | 视频转录链路、认证、只读网络挂载 | [external-media-sources.md](external-media-sources.md) |
 | 认证与授权 | 已实现 | `require_user` / `require_csrf` | app.sqlite、Cookie | [authentication.md](authentication.md) |
 | 反馈处理工作流 | 已实现 | `/api/admin/feedback` | feedback.jsonl、app.sqlite、管理员权限 | [feedback-management.md](feedback-management.md) |
 | 系统维护 | 已实现 | `/api/admin/maintenance` / `AdminMaintenancePage` | app.sqlite、管理员权限、认证 | [system-maintenance.md](system-maintenance.md) |

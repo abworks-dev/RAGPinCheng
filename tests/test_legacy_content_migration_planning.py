@@ -53,7 +53,7 @@ def test_inventory_synthetic_docs_media_tree_and_symlink(tmp_path):
     assert inventory(docs, "docs")[0]["status"] == "symlink_rejected"
 
 
-def test_mapping_dispositions_depth_limit_and_transcript_review():
+def test_mapping_dispositions_allow_deep_paths_and_require_transcript_review():
     inventory_payload = {"schema_version": 1, "entries": [
         _entry("docs", "公司标准/guide.pdf"),
         _entry("docs", "公司标准/report.preview.pdf"),
@@ -73,7 +73,7 @@ def test_mapping_dispositions_depth_limit_and_transcript_review():
     )
     plan = build_plan(inventory_payload, mapping, max_bytes=1024)
     assert {entry["relative_path"]: entry["disposition"] for entry in plan["entries"]} == {
-        "a/b/c/d/e/file.docx": "unsupported",
+        "a/b/c/d/e/file.docx": "import_document",
         "a/b/c/d/file.docx": "import_document",
         "公司标准/guide.pdf": "import_document",
         "公司标准/report.preview.pdf": "derived_artifact",
@@ -85,7 +85,7 @@ def test_mapping_dispositions_depth_limit_and_transcript_review():
         "video-1/original.mp4": "preserve_legacy_media",
     }
     assert plan["summary"]["unmapped_count"] == 1
-    assert plan["summary"]["exception_count"] == 3
+    assert plan["summary"]["exception_count"] == 2
     previews = [entry for entry in plan["entries"] if entry["disposition"] == "derived_artifact"]
     assert {entry["reason"] for entry in previews} == {"generated_preview"}
 

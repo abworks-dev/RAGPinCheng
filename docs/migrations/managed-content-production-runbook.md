@@ -41,7 +41,7 @@
 ├─ manifests/
 ├─ published/               # 发布解析工作副本，禁止作为分类事实来源
 ├─ quarantine/
-└─ views/current/           # 可重建的一至四级只读目录视图
+└─ views/current/           # 可重建的完整分类树只读目录视图
 ```
 
 `views/current` 中的目录名为 `<显示编号>_<显示名称>`。编号和显示名称来自数据库，不从文件原路径实时推导。该目录可删除后重建，但不得人工编辑或交给索引器扫描。
@@ -83,7 +83,7 @@ docker compose -p ragpincheng-prod \
 | 06 | 项目经验与案例 | `project_experience` |
 | 99 | 待确认资料 | `pending_confirmation` |
 
-后台导入会按父级逐层识别以下目录名：显示名称、`编号_显示名称`、`编号 显示名称`，以及显式配置的导入别名。无法映射或超过四级的资料进入 `99 待确认资料` 并标记 `needs_mapping=true`，不得因此自动发布。
+后台导入会按父级逐层识别任意深度的以下目录名：显示名称、`编号_显示名称`、`编号 显示名称`，以及显式配置的导入别名。无法映射的资料进入 `99 待确认资料` 并标记 `needs_mapping=true`，不得因此自动发布。
 
 ## 5. 网页上传流转
 
@@ -210,7 +210,7 @@ python scripts/plan_legacy_content_migration.py \
 | `preserve_legacy_media` | 保持在既有视频链路；不得交给普通资料导入器 |
 | `review_transcript_link` | 教学/培训视频 Markdown 转录稿；人工核对 media、版本和 transcript head，禁止自动重复登记 |
 | `pending_mapping` | 未命中显式映射；负责人补充或修正 mapping 后重新规划 |
-| `unsupported` | 类型不支持、超过大小限制、目录超过四级或 transcript 范围出现非 Markdown；先人工处理 |
+| `unsupported` | 类型不支持、超过大小限制或 transcript 范围出现非 Markdown；先人工处理 |
 | `symlink_rejected` | 符号链接；不得跟随或迁移 |
 
 同一映射前缀范围内相同 SHA-256 会进入 `duplicate_group`；不同映射范围或 docs/media 间相同 SHA-256 只列入 `related_sha256_paths`。两种标记都只供审查，不会删除文件或合并业务资料。

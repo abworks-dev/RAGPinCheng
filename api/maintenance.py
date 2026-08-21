@@ -12,12 +12,21 @@ DEFAULT_RETENTION_DAYS = 30
 MIN_RETENTION_DAYS = 7
 MAX_RETENTION_DAYS = 3650
 MAX_RUN_HISTORY = 200
+DEFAULT_UPLOAD_MAX_FILE_MB = 2000
+DEFAULT_UPLOAD_MAX_BATCH_FILES = 5000
+DEFAULT_UPLOAD_MAX_BATCH_MB = 10240
+MAX_UPLOAD_FILE_MB = 10240
+MAX_UPLOAD_BATCH_FILES = 10000
+MAX_UPLOAD_BATCH_MB = 102400
 
 
 @dataclass(frozen=True, slots=True)
 class MaintenanceSettings:
     conversation_cleanup_enabled: bool
     conversation_retention_days: int | None
+    upload_max_file_mb: int
+    upload_max_batch_files: int
+    upload_max_batch_mb: int
     updated_at: int | None
     updated_by: int | None
 
@@ -49,14 +58,22 @@ def get_settings(conn: sqlite3.Connection | None = None) -> MaintenanceSettings:
     try:
         row = db.execute(
             """SELECT conversation_cleanup_enabled, conversation_retention_days,
+                      upload_max_file_mb, upload_max_batch_files, upload_max_batch_mb,
                       updated_at, updated_by
                FROM maintenance_settings WHERE singleton_id = 1"""
         ).fetchone()
         if row is None:
-            return MaintenanceSettings(True, DEFAULT_RETENTION_DAYS, None, None)
+            return MaintenanceSettings(
+                True, DEFAULT_RETENTION_DAYS,
+                DEFAULT_UPLOAD_MAX_FILE_MB, DEFAULT_UPLOAD_MAX_BATCH_FILES,
+                DEFAULT_UPLOAD_MAX_BATCH_MB, None, None,
+            )
         return MaintenanceSettings(
             bool(row["conversation_cleanup_enabled"]),
             row["conversation_retention_days"],
+            row["upload_max_file_mb"],
+            row["upload_max_batch_files"],
+            row["upload_max_batch_mb"],
             row["updated_at"],
             row["updated_by"],
         )
@@ -65,25 +82,40 @@ def get_settings(conn: sqlite3.Connection | None = None) -> MaintenanceSettings:
             db.close()
 
 
-def save_settings(*, enabled: bool, retention_days: int | None, updated_by: int) -> MaintenanceSettings:
+def save_settings(
+    *, enabled: bool, retention_days: int | None,
+    upload_max_file_mb: int, upload_max_batch_files: int,
+    upload_max_batch_mb: int, updated_by: int,
+) -> MaintenanceSettings:
     if type(enabled) is not bool:
         raise ValueError("invalid_cleanup_enabled")
     if retention_days is not None and (type(retention_days) is not int or not MIN_RETENTION_DAYS <= retention_days <= MAX_RETENTION_DAYS):
         raise ValueError("invalid_retention_days")
+    if type(upload_max_file_mb) is not int or not 1 <= upload_max_file_mb <= MAX_UPLOAD_FILE_MB:
+        raise ValueError("invalid_upload_max_file_mb")
+    if type(upload_max_batch_files) is not int or not 1 <= upload_max_batch_files <= MAX_UPLOAD_BATCH_FILES:
+        raise ValueError("invalid_upload_max_batch_files")
+    if type(upload_max_batch_mb) is not int or not upload_max_file_mb <= upload_max_batch_mb <= MAX_UPLOAD_BATCH_MB:
+        raise ValueError("invalid_upload_max_batch_mb")
     now = int(time.time())
     conn = connect()
     try:
         conn.execute(
             """INSERT INTO maintenance_settings(
                    singleton_id, conversation_cleanup_enabled,
-                   conversation_retention_days, updated_at, updated_by
-               ) VALUES (1, ?, ?, ?, ?)
+                   conversation_retention_days, upload_max_file_mb,
+                   upload_max_batch_files, upload_max_batch_mb, updated_at, updated_by
+               ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(singleton_id) DO UPDATE SET
                    conversation_cleanup_enabled=excluded.conversation_cleanup_enabled,
                    conversation_retention_days=excluded.conversation_retention_days,
+                   upload_max_file_mb=excluded.upload_max_file_mb,
+                   upload_max_batch_files=excluded.upload_max_batch_files,
+                   upload_max_batch_mb=excluded.upload_max_batch_mb,
                    updated_at=excluded.updated_at,
                    updated_by=excluded.updated_by""",
-            (int(enabled), retention_days, now, updated_by),
+            (int(enabled), retention_days, upload_max_file_mb, upload_max_batch_files,
+             upload_max_batch_mb, now, updated_by),
         )
         conn.commit()
         return get_settings(conn)

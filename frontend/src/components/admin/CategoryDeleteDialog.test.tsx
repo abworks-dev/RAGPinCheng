@@ -114,7 +114,7 @@ describe("CategoryDeleteDialog", () => {
     render(<CategoryDeleteDialog category={category} canForceDelete onClose={vi.fn()} onDeleted={vi.fn()} />);
 
     expect(await screen.findByText("系统默认一级分类受保护，不能强制永久删除。")).toBeInTheDocument();
-    expect(screen.getByText("包含 2 份视频转录稿，请先在视频管理中处理。")).toBeInTheDocument();
+    expect(screen.getByText("包含 2 份视频转录稿，请先在转录任务中处理。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "强制永久删除" })).toBeDisabled();
   });
 });

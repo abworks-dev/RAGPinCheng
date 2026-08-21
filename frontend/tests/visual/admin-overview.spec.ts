@@ -22,6 +22,10 @@ test.describe("管理员概览", () => {
     await page.goto("/admin/maintenance");
     await expect(page.getByRole("heading", { name: "系统维护" })).toBeVisible();
     await expect(page.getByText("待清理对话").locator("xpath=..")).toContainText("4");
+    await expect(page.getByRole("heading", { name: "资料上传限制" })).toBeVisible();
+    await expect(page.getByLabel("单文件上限（MB）")).toHaveValue("2000");
+    await expect(page.getByLabel("单批文件数量")).toHaveValue("5000");
+    await expect(page.getByLabel("单批总大小（MB）")).toHaveValue("10240");
     await expect(page.getByRole("heading", { name: "最近运行记录" })).toBeVisible();
     await expect(page.getByRole("region", { name: "最近运行记录" }).getByText(/^自动(?:清理)?$/).filter({ visible: true })).toBeVisible();
     await expectNoBodyOverflow(page);

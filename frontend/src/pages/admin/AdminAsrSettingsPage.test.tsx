@@ -45,6 +45,7 @@ function profile(preset: "natural" | "balanced" | "fine", seconds: number | null
 
 const settings: AsrSettings = {
   service: { status: "healthy", queue_depth: 0, queue_limit: 8, pause_reason: null },
+  release_validation: { status: "ready", reason_code: null },
   profiles: [profile("natural", null), profile("balanced", 30), profile("fine", 15)],
   release_requests: [],
   audit_events: [],
@@ -106,11 +107,13 @@ describe("AdminAsrSettingsPage", () => {
     mocks.get.mockResolvedValue({
       ...settings,
       service: { status: "degraded", queue_depth: 1, queue_limit: 8, pause_reason: "bge_busy" },
+      release_validation: { status: "unavailable", reason_code: "profile_identity_unavailable" },
       profiles: settings.profiles.map((item) => ({ ...item, release_eligible: false })),
     });
     render(<AdminAsrSettingsPage />);
     expect((await screen.findAllByText("服务受限")).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "发布记录" }));
+    expect(screen.getByText("发布身份暂不可验证，请等待转录服务完成兼容升级。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "申请发布" })).toBeDisabled();
   });
 

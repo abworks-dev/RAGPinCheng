@@ -6,7 +6,7 @@ export type Source = {
   score: number;
   rrf_score: number;
   text: string;
-  doc_type: string; // "pdf" | "transcript" | "docx" | "xlsx" | "pptx"
+  doc_type: string; // "pdf" | "transcript" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx"
   start_time: string | null;
   media_id: string | null;
   company?: string | null;
@@ -132,6 +132,7 @@ export type ContentPermission =
   | "item.download"
   | "category.view"
   | "item.upload"
+  /** Historical values accepted only when rendering legacy records. */
   | "item.submit"
   | "item.move_draft"
   | "item.archive_draft"
@@ -288,6 +289,9 @@ export type SystemOverview = {
 export type MaintenanceSettings = {
   conversation_cleanup_enabled: boolean;
   conversation_retention_days: number | null;
+  upload_max_file_mb: number;
+  upload_max_batch_files: number;
+  upload_max_batch_mb: number;
   updated_at: number | null;
   updated_by: number | null;
 };
@@ -336,11 +340,17 @@ export type ManagedCategory = {
   parent_id: string | null;
   display_code: string;
   display_name: string;
+  category_kind?: "folder" | "shared_folder";
+  external_source_id?: string | null;
   sort_order: number;
   level: number;
   is_active: boolean;
   chat_search_enabled?: boolean;
   chat_filter_selectable?: boolean;
+  chat_search_effective?: boolean;
+  chat_filter_effective?: boolean;
+  chat_search_inherited?: boolean;
+  chat_filter_inherited?: boolean;
   version: number;
   created_at: number;
   updated_at: number;
@@ -388,6 +398,75 @@ export type CategoryDeleteResult = {
   deleted_index_job_count: number;
   qdrant_point_count: number;
   deleted_object_count: number;
+};
+
+export type BulkOperationAction = "move" | "submit" | "approve" | "reject" | "publish" | "download" | "delete" | "force_delete";
+
+export type BulkOperationCategory = {
+  run_id: string;
+  category_id: string;
+  parent_id: string | null;
+  full_path: string;
+  archive_path: string;
+  version: number;
+  root_category_id: string;
+  is_root: boolean;
+  eligible: boolean;
+  selected: boolean;
+  reason: string | null;
+  result_status: "pending" | "succeeded" | "failed" | "skipped";
+  result_message: string | null;
+  sort_order: number;
+};
+
+export type BulkOperationItem = {
+  run_id: string;
+  item_id: string;
+  version_id: string;
+  category_id: string;
+  category_path: string;
+  archive_path: string;
+  title: string;
+  original_filename: string;
+  content_kind: string;
+  lifecycle_status: string;
+  size_bytes: number;
+  scope_source: "category" | "direct";
+  root_category_id: string | null;
+  eligible: boolean;
+  selected: boolean;
+  reason: string | null;
+  result_status: "pending" | "succeeded" | "failed" | "skipped";
+  result_message: string | null;
+  index_job_id: string | null;
+  sort_order: number;
+};
+
+export type BulkOperation = {
+  id: string;
+  operation: BulkOperationAction;
+  status: "awaiting_confirmation" | "queued" | "running" | "packaging" | "ready" | "succeeded" | "partial" | "failed" | "cancelled" | "expired";
+  actor_user_id: number | null;
+  target_category_id: string | null;
+  note: string | null;
+  confirmation_phrase: string | null;
+  total_files: number;
+  selected_files: number;
+  completed_files: number;
+  failed_files: number;
+  total_folders: number;
+  total_bytes: number;
+  processed_bytes: number;
+  archive_filename: string | null;
+  error_summary: string | null;
+  created_at: number;
+  started_at: number | null;
+  finished_at: number | null;
+  expires_at: number | null;
+  updated_at: number;
+  max_archive_bytes: number;
+  categories: BulkOperationCategory[];
+  items: BulkOperationItem[];
 };
 
 export type KnowledgeScope = {
@@ -444,12 +523,31 @@ export type ManagedContentItem = {
   has_pending_revision: boolean;
   reclassification_job_id: string | null;
   reclassification_status: string | null;
+  media_status?: string | null;
+  transcription_job_id?: string | null;
+  transcription_job_status?: string | null;
+  transcription_stage?: string | null;
+  transcription_failure_classification?: string | null;
+  review_status?: string | null;
+  publication_status?: string | null;
 };
 
 export type ManagedPreview = {
   version_id: string;
   preview_parent_id: string;
   preview_status: "ready";
+};
+
+export type XMindTopic = {
+  id: string;
+  title: string;
+  notes: string | null;
+  children: XMindTopic[];
+};
+
+export type XMindPreview = {
+  version_id: string;
+  sheets: Array<{ id: string; title: string; root_topic: XMindTopic }>;
 };
 
 export type ContentTrashAuditEvent = {
@@ -642,6 +740,7 @@ export type ManagedUploadPreflightEntry = {
   sequence: number;
   filename: string;
   relative_path: string | null;
+  kind?: "document" | "video";
   status: "ready" | "conflict" | "blocked";
   reason: string | null;
   reason_code: string | null;
@@ -665,8 +764,11 @@ export type ManagedUploadResponse = {
   batch_id: string;
   entries: {
     filename: string;
+    kind?: "document" | "video";
     item_id: string | null;
     version_id: string | null;
+    media_id?: string | null;
+    transcription_job_id?: string | null;
     sha256: string | null;
     status: "accepted" | "skipped";
     reason: string | null;
@@ -679,11 +781,15 @@ export type ManagedUploadTaskEntry = {
   sequence: number;
   filename: string;
   relative_path: string | null;
+  kind?: "document" | "video";
   size_bytes: number;
   status: "accepted" | "skipped";
   reason: string | null;
   item_id: string | null;
   version_id: string | null;
+  media_id?: string | null;
+  transcription_job_id?: string | null;
+  failure_code?: string | null;
   created_at: number;
 };
 
@@ -698,6 +804,8 @@ export type ManagedUploadTask = {
   skipped_files: number;
   total_bytes: number;
   total_uploaded_bytes: number;
+  video_count: number;
+  transcribable_video_count: number;
   created_by_name: string;
   created_at: number;
   updated_at: number;
@@ -911,6 +1019,11 @@ export type AsrServiceStatus = {
   pause_reason: string | null;
 };
 
+export type AsrReleaseValidation = {
+  status: "disabled" | "ready" | "unavailable";
+  reason_code: "asr_disabled" | "profile_identity_unavailable" | null;
+};
+
 export type AsrProfileReleaseRequest = {
   request_id: string;
   profile_id: string;
@@ -934,6 +1047,7 @@ export type AsrProfileAuditEvent = {
 
 export type AsrSettings = {
   service: AsrServiceStatus;
+  release_validation: AsrReleaseValidation;
   profiles: AsrManagedProfile[];
   release_requests: AsrProfileReleaseRequest[];
   audit_events: AsrProfileAuditEvent[];
@@ -965,6 +1079,31 @@ export type TranscriptionJob = {
   started_at: number | null;
   finished_at: number | null;
   updated_at: number;
+};
+
+export type BulkTranscriptionItem = {
+  media_id: string;
+  title: string;
+  original_filename: string;
+  category_path: string | null;
+  status: "ready" | "started" | "already_started" | "unavailable" | "failed";
+  reason: string | null;
+  transcription_job_id: string | null;
+};
+
+export type BulkTranscriptionPreflight = {
+  scheme_id: string;
+  items: BulkTranscriptionItem[];
+  ready_count: number;
+  blocked_count: number;
+};
+
+export type BulkTranscriptionResult = {
+  scheme_id: string;
+  items: BulkTranscriptionItem[];
+  requested: number;
+  started: number;
+  failed: number;
 };
 
 export type TranscriptReviewStatus =
@@ -1051,6 +1190,9 @@ export type MediaAsset = {
   updated_at: number;
   error: string | null;
   transcription_job_id?: string | null;
+  transcription_job_status?: TranscriptionJobStatus | null;
+  transcription_stage?: string | null;
+  current_phase?: "upload" | "transcription" | "review" | "publication" | "index" | "ready" | "failed";
   review_status?: TranscriptReviewStatus | null;
   publication_status?: TranscriptPublicationStatus | null;
   publication_index_status?: "pending" | "parsing" | "chunking" | "embedding" | "done" | "failed" | null;
@@ -1062,7 +1204,55 @@ export type MediaAsset = {
   category_path?: string | null;
   catalog_item_id?: string | null;
   current_version_id?: string | null;
+  storage_kind?: "managed" | "external";
+  external_source_id?: string | null;
+  external_relative_path?: string | null;
+  external_availability?: "available" | "missing" | "superseded" | null;
+  available_actions?: string[];
+  disabled_actions?: Record<string, string>;
 };
+
+export type ExternalMediaRoot = { alias: string };
+export type ExternalMediaSource = {
+  id: string;
+  name: string;
+  root_alias: string;
+  relative_path: string;
+  target_category_id: string;
+  default_scheme_id: string;
+  auto_enqueue: boolean;
+  scan_interval_seconds: number;
+  enabled: boolean;
+  status: "never_scanned" | "scanning" | "available" | "unavailable" | "scan_failed";
+  total_files: number;
+  available_files: number;
+  missing_files: number;
+  last_scan_at: number | null;
+  last_successful_scan_at: number | null;
+  last_error_code: string | null;
+  created_at: number;
+  updated_at: number;
+  version: number;
+};
+export type ExternalMediaEntry = {
+  id: string;
+  kind: "folder" | "video";
+  name: string;
+  relative_path: string;
+  file_size?: number | null;
+  modified_ns?: number | null;
+  availability?: "available" | "missing" | "superseded" | null;
+  media_id?: string | null;
+  media_status?: string | null;
+  transcription_job_id?: string | null;
+  transcription_job_status?: string | null;
+  review_status?: string | null;
+  publication_status?: string | null;
+  index_status?: string | null;
+};
+export type ExternalMediaEntryList = { source_id: string; parent_relative_path: string; entries: ExternalMediaEntry[] };
+export type ExternalMediaScan = { run_id: string; source_id: string; discovered_count: number; added_count: number; changed_count: number; missing_count: number; enqueued_count: number; enqueue_failures: number };
+export type ExternalMediaEnqueueResult = { requested: number; enqueued: number; failed: number; failures: Record<string, string> };
 
 export type MediaUploadConflict = {
   media_id: string;

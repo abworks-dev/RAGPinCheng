@@ -130,9 +130,6 @@ def _reason_and_disposition(
         return "unsupported", "content_too_large", document_type
     if rule is None:
         return "pending_mapping", "explicit_mapping_required", document_type
-    directory_depth = len(PurePosixPath(entry["relative_path"]).parts) - 1
-    if directory_depth > 4:
-        return "unsupported", "directory_depth_exceeds_four", document_type
     if rule.handling == "transcript":
         if document_type != "markdown":
             return "unsupported", "transcript_must_be_markdown", document_type

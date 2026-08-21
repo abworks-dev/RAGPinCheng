@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # ── auth ────────────────────────────────────────────────────────────────────
@@ -214,6 +214,9 @@ class AdminFeedbackPatchRequest(BaseModel):
 class MaintenanceSettingsDTO(BaseModel):
     conversation_cleanup_enabled: bool
     conversation_retention_days: int | None
+    upload_max_file_mb: int
+    upload_max_batch_files: int
+    upload_max_batch_mb: int
     updated_at: int | None = None
     updated_by: int | None = None
 
@@ -221,6 +224,15 @@ class MaintenanceSettingsDTO(BaseModel):
 class MaintenanceSettingsPatchRequest(BaseModel):
     conversation_cleanup_enabled: bool
     conversation_retention_days: int | None = Field(default=None, ge=7, le=3650)
+    upload_max_file_mb: int = Field(ge=1, le=10240)
+    upload_max_batch_files: int = Field(ge=1, le=10000)
+    upload_max_batch_mb: int = Field(ge=1, le=102400)
+
+    @model_validator(mode="after")
+    def validate_upload_limits(self):
+        if self.upload_max_batch_mb < self.upload_max_file_mb:
+            raise ValueError("单批总大小不能小于单文件上限")
+        return self
 
 
 class CleanupPreviewResponse(BaseModel):
@@ -380,11 +392,17 @@ class ManagedCategoryDTO(BaseModel):
     parent_id: str | None
     display_code: str
     display_name: str
+    category_kind: Literal["folder", "shared_folder"] = "folder"
+    external_source_id: str | None = None
     sort_order: int
     level: int
     is_active: bool
     chat_search_enabled: bool
     chat_filter_selectable: bool
+    chat_search_effective: bool = True
+    chat_filter_effective: bool = True
+    chat_search_inherited: bool = False
+    chat_filter_inherited: bool = False
     version: int
     created_at: int
     updated_at: int
@@ -403,6 +421,18 @@ class CreateManagedCategoryRequest(BaseModel):
     sort_order: int = Field(default=0, ge=0, le=999_999)
     target_position: int | None = Field(default=None, ge=1, le=99_999)
     confirm_number_shift: bool = False
+
+
+class CreateSharedFolderRequest(BaseModel):
+    parent_id: str | None = None
+    display_name: str = Field(min_length=1, max_length=100)
+    target_position: int | None = Field(default=None, ge=1, le=99_999)
+    confirm_number_shift: bool = False
+    root_alias: str = Field(min_length=1, max_length=64)
+    relative_path: str = Field(default="", max_length=1000)
+    default_scheme_id: str = Field(min_length=1, max_length=100)
+    auto_enqueue: bool = False
+    scan_interval_seconds: int = Field(default=900, ge=60, le=86400)
 
 
 class UpdateManagedCategoryRequest(BaseModel):
@@ -535,6 +565,7 @@ class ManagedUploadPreflightEntryDTO(BaseModel):
     sequence: int
     filename: str
     relative_path: str | None = None
+    kind: Literal["document", "video"] = "document"
     status: Literal["ready", "conflict", "blocked"]
     reason: str | None = None
     reason_code: str | None = None
@@ -556,8 +587,11 @@ class ManagedUploadConflictAction(BaseModel):
 
 class ManagedUploadEntryDTO(BaseModel):
     filename: str
+    kind: Literal["document", "video"] = "document"
     item_id: str | None = None
     version_id: str | None = None
+    media_id: str | None = None
+    transcription_job_id: str | None = None
     sha256: str | None = None
     status: Literal["accepted", "skipped"]
     reason: str | None = None
@@ -574,11 +608,15 @@ class ManagedUploadTaskEntryDTO(BaseModel):
     sequence: int
     filename: str
     relative_path: str | None = None
+    kind: Literal["document", "video"] = "document"
     size_bytes: int
     status: Literal["accepted", "skipped"]
     reason: str | None = None
     item_id: str | None = None
     version_id: str | None = None
+    media_id: str | None = None
+    transcription_job_id: str | None = None
+    failure_code: str | None = None
     created_at: int
 
 
@@ -593,6 +631,8 @@ class ManagedUploadTaskDTO(BaseModel):
     skipped_files: int
     total_bytes: int
     total_uploaded_bytes: int
+    video_count: int = 0
+    transcribable_video_count: int = 0
     created_by_name: str
     created_at: int
     updated_at: int
@@ -655,6 +695,13 @@ class ManagedContentItemDTO(BaseModel):
     has_pending_revision: bool = False
     reclassification_job_id: str | None = None
     reclassification_status: str | None = None
+    media_status: str | None = None
+    transcription_job_id: str | None = None
+    transcription_job_status: str | None = None
+    transcription_stage: str | None = None
+    transcription_failure_classification: str | None = None
+    review_status: str | None = None
+    publication_status: str | None = None
 
 
 class ManagedContentListResponse(BaseModel):
@@ -739,16 +786,16 @@ class BulkManagedContentItemRef(BaseModel):
 
 
 class BulkMoveManagedContentRequest(BaseModel):
-    items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
+    items: list[BulkManagedContentItemRef] = Field(min_length=1)
     target_category_id: str = Field(min_length=1, max_length=100)
 
 
 class BulkArchiveManagedContentRequest(BaseModel):
-    items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
+    items: list[BulkManagedContentItemRef] = Field(min_length=1)
 
 
 class BulkRestoreManagedContentRequest(BaseModel):
-    items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
+    items: list[BulkManagedContentItemRef] = Field(min_length=1)
     target_category_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
@@ -793,12 +840,12 @@ class UpdateTrashSettingsRequest(BaseModel):
 
 
 class TrashPurgeRequest(BaseModel):
-    items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
+    items: list[BulkManagedContentItemRef] = Field(min_length=1)
     confirmation: str = Field(min_length=1, max_length=100)
 
 
 class TrashPurgePreflightRequest(BaseModel):
-    items: list[BulkManagedContentItemRef] = Field(min_length=1, max_length=20)
+    items: list[BulkManagedContentItemRef] = Field(min_length=1)
 
 
 class TrashPurgeItemDTO(BaseModel):
@@ -850,7 +897,104 @@ class TrashPurgeResponse(BaseModel):
 
 
 class BulkDownloadManagedContentRequest(BaseModel):
-    version_ids: list[str] = Field(min_length=1, max_length=20)
+    version_ids: list[str] = Field(min_length=1)
+
+
+class BulkOperationCategoryRef(BaseModel):
+    category_id: str = Field(min_length=1, max_length=128)
+    expected_version: int = Field(gt=0)
+
+
+class BulkOperationItemRef(BaseModel):
+    item_id: str = Field(min_length=1, max_length=128)
+    expected_version_id: str = Field(min_length=1, max_length=128)
+
+
+class BulkOperationPreflightRequest(BaseModel):
+    operation: Literal["move", "submit", "approve", "reject", "publish", "download", "delete", "force_delete"]
+    categories: list[BulkOperationCategoryRef] = Field(default_factory=list)
+    items: list[BulkOperationItemRef] = Field(default_factory=list)
+
+
+class BulkOperationSelectionRequest(BaseModel):
+    item_ids: list[str] = Field(min_length=1, max_length=5000)
+    selected: bool
+
+
+class BulkOperationExecuteRequest(BaseModel):
+    target_category_id: str | None = Field(default=None, max_length=128)
+    note: str | None = Field(default=None, max_length=2000)
+    confirmation: str | None = Field(default=None, max_length=2000)
+
+
+class BulkOperationCategoryDTO(BaseModel):
+    run_id: str
+    category_id: str
+    parent_id: str | None
+    full_path: str
+    archive_path: str
+    version: int
+    root_category_id: str
+    is_root: bool
+    eligible: bool
+    selected: bool
+    reason: str | None
+    result_status: str
+    result_message: str | None
+    sort_order: int
+
+
+class BulkOperationItemDTO(BaseModel):
+    run_id: str
+    item_id: str
+    version_id: str
+    category_id: str
+    category_path: str
+    archive_path: str
+    title: str
+    original_filename: str
+    content_kind: str
+    lifecycle_status: str
+    object_sha256: str | None
+    storage_rel_path: str | None
+    size_bytes: int
+    scope_source: Literal["category", "direct"]
+    root_category_id: str | None
+    eligible: bool
+    selected: bool
+    reason: str | None
+    result_status: str
+    result_message: str | None
+    index_job_id: str | None
+    sort_order: int
+
+
+class BulkOperationDTO(BaseModel):
+    id: str
+    operation: str
+    status: str
+    actor_user_id: int | None
+    target_category_id: str | None
+    note: str | None
+    source_json: str
+    confirmation_phrase: str | None
+    total_files: int
+    selected_files: int
+    completed_files: int
+    failed_files: int
+    total_folders: int
+    total_bytes: int
+    processed_bytes: int
+    archive_filename: str | None
+    error_summary: str | None
+    created_at: int
+    started_at: int | None
+    finished_at: int | None
+    expires_at: int | None
+    updated_at: int
+    max_archive_bytes: int
+    categories: list[BulkOperationCategoryDTO] = Field(default_factory=list)
+    items: list[BulkOperationItemDTO] = Field(default_factory=list)
 
 
 class CreateFolderRequest(BaseModel):
@@ -878,7 +1022,7 @@ class FolderRequestDTO(BaseModel):
 
 
 class BulkManagedContentRequest(BaseModel):
-    version_ids: list[str] = Field(min_length=1, max_length=20)
+    version_ids: list[str] = Field(min_length=1)
     approved: bool | None = None
     note: str | None = Field(default=None, max_length=2000)
     category_id: str | None = None
@@ -914,6 +1058,24 @@ class ManagedPreviewDTO(BaseModel):
     version_id: str
     preview_parent_id: str
     preview_status: Literal["ready"] = "ready"
+
+
+class XMindTopicDTO(BaseModel):
+    id: str
+    title: str
+    notes: str | None = None
+    children: list["XMindTopicDTO"] = Field(default_factory=list)
+
+
+class XMindSheetDTO(BaseModel):
+    id: str
+    title: str
+    root_topic: XMindTopicDTO
+
+
+class XMindPreviewDTO(BaseModel):
+    version_id: str
+    sheets: list[XMindSheetDTO]
 
 
 class ContentReclassificationJobDTO(BaseModel):
@@ -1046,6 +1208,9 @@ class MediaAssetDTO(BaseModel):
     updated_at: int
     error: str | None = None
     transcription_job_id: str | None = None
+    transcription_job_status: str | None = None
+    transcription_stage: str | None = None
+    current_phase: Literal["upload", "transcription", "review", "publication", "index", "ready", "failed"] = "upload"
     review_status: str | None = None
     publication_status: str | None = None
     publication_index_status: str | None = None
@@ -1057,6 +1222,12 @@ class MediaAssetDTO(BaseModel):
     category_path: str | None = None
     catalog_item_id: str | None = None
     current_version_id: str | None = None
+    storage_kind: Literal["managed", "external"] = "managed"
+    external_source_id: str | None = None
+    external_relative_path: str | None = None
+    external_availability: Literal["available", "missing", "superseded"] | None = None
+    available_actions: list[str] = Field(default_factory=list)
+    disabled_actions: dict[str, str] = Field(default_factory=dict)
 
 
 class MediaUploadPreflightItem(BaseModel):
@@ -1095,6 +1266,103 @@ class MediaUploadPreflightEntryDTO(BaseModel):
 class MediaUploadPreflightResponse(BaseModel):
     category_id: str
     entries: list[MediaUploadPreflightEntryDTO]
+
+
+class ExternalMediaRootDTO(BaseModel):
+    alias: str
+
+
+class ExternalMediaSourceCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=100)
+    root_alias: str = Field(min_length=1, max_length=64)
+    relative_path: str = Field(default="", max_length=1000)
+    target_category_id: str = Field(min_length=1, max_length=100)
+    default_scheme_id: str = Field(min_length=1, max_length=100)
+    auto_enqueue: bool = False
+    scan_interval_seconds: int = Field(default=900, ge=60, le=86400)
+
+
+class ExternalMediaSourceUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=100)
+    target_category_id: str = Field(min_length=1, max_length=100)
+    default_scheme_id: str = Field(min_length=1, max_length=100)
+    auto_enqueue: bool
+    scan_interval_seconds: int = Field(ge=60, le=86400)
+    enabled: bool
+    expected_version: int = Field(gt=0)
+
+
+class ExternalMediaSourceDTO(BaseModel):
+    id: str
+    name: str
+    root_alias: str
+    relative_path: str
+    target_category_id: str
+    default_scheme_id: str
+    auto_enqueue: bool
+    scan_interval_seconds: int
+    enabled: bool
+    status: Literal["never_scanned", "scanning", "available", "unavailable", "scan_failed"]
+    total_files: int
+    available_files: int
+    missing_files: int
+    last_scan_at: int | None
+    last_successful_scan_at: int | None
+    last_error_code: str | None
+    created_at: int
+    updated_at: int
+    version: int
+
+
+class ExternalMediaScanDTO(BaseModel):
+    run_id: str
+    source_id: str
+    discovered_count: int
+    added_count: int
+    changed_count: int
+    missing_count: int
+    enqueued_count: int = 0
+    enqueue_failures: int = 0
+
+
+class ExternalMediaEntryDTO(BaseModel):
+    id: str
+    kind: Literal["folder", "video"]
+    name: str
+    relative_path: str
+    file_size: int | None = None
+    modified_ns: int | None = None
+    availability: Literal["available", "missing", "superseded"] | None = None
+    media_id: str | None = None
+    media_status: str | None = None
+    transcription_job_id: str | None = None
+    transcription_job_status: str | None = None
+    review_status: str | None = None
+    publication_status: str | None = None
+    index_status: str | None = None
+
+
+class ExternalMediaEntryListDTO(BaseModel):
+    source_id: str
+    parent_relative_path: str
+    entries: list[ExternalMediaEntryDTO]
+
+
+class ExternalMediaEnqueueRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    entry_ids: list[str] | None = Field(default=None, max_length=500)
+
+
+class ExternalMediaEnqueueResult(BaseModel):
+    requested: int
+    enqueued: int
+    failed: int
+    failures: dict[str, str]
 
 
 class MediaTranscriptSegmentDTO(BaseModel):
@@ -1167,6 +1435,11 @@ class AsrServiceStatusDTO(BaseModel):
     pause_reason: str | None = None
 
 
+class AsrReleaseValidationDTO(BaseModel):
+    status: Literal["disabled", "ready", "unavailable"]
+    reason_code: Literal["asr_disabled", "profile_identity_unavailable"] | None = None
+
+
 class AsrProfileReleaseRequestDTO(BaseModel):
     request_id: str
     profile_id: str
@@ -1190,6 +1463,7 @@ class AsrProfileAuditEventDTO(BaseModel):
 
 class AsrSettingsResponse(BaseModel):
     service: AsrServiceStatusDTO
+    release_validation: AsrReleaseValidationDTO
     profiles: list[AsrManagedProfileDTO]
     release_requests: list[AsrProfileReleaseRequestDTO]
     audit_events: list[AsrProfileAuditEventDTO]
@@ -1415,6 +1689,49 @@ class RetryTranscriptionRequest(BaseModel):
 
     profile_id: str
     request_idempotency_key: str
+
+
+class StartTranscriptionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scheme_id: str = Field(min_length=1, max_length=100)
+    request_idempotency_key: str = Field(min_length=36, max_length=36)
+
+
+class BulkStartTranscriptionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scheme_id: str = Field(min_length=1, max_length=100)
+    request_idempotency_key: str = Field(min_length=36, max_length=36)
+    media_ids: list[str] | None = Field(default=None, max_length=100)
+    upload_batch_id: str | None = Field(default=None, max_length=100)
+    category_id: str | None = Field(default=None, max_length=100)
+    recursive: bool = False
+
+
+class BulkTranscriptionItemDTO(BaseModel):
+    media_id: str
+    title: str
+    original_filename: str
+    category_path: str | None = None
+    status: Literal["ready", "started", "already_started", "unavailable", "failed"]
+    reason: str | None = None
+    transcription_job_id: str | None = None
+
+
+class BulkTranscriptionPreflightResponse(BaseModel):
+    scheme_id: str
+    items: list[BulkTranscriptionItemDTO]
+    ready_count: int
+    blocked_count: int
+
+
+class BulkTranscriptionResponse(BaseModel):
+    scheme_id: str
+    items: list[BulkTranscriptionItemDTO]
+    requested: int
+    started: int
+    failed: int
 
 
 class AnswerVersionDTO(BaseModel):
