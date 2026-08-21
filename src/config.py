@@ -61,7 +61,58 @@ def parse_external_media_roots(raw: str) -> dict[str, Path]:
     return roots
 
 
-EXTERNAL_MEDIA_ROOTS = parse_external_media_roots(os.getenv("EXTERNAL_MEDIA_ROOTS_JSON", ""))
+def _normalize_unc_root(value: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError("external UNC root is invalid")
+    clean = value.strip().replace("/", "\\").rstrip("\\")
+    if not re.fullmatch(r"\\\\[^\\]+\\[^\\]+", clean):
+        raise ValueError("external UNC root is invalid")
+    return clean.casefold()
+
+
+def parse_external_unc_roots(raw: str) -> dict[str, tuple[str, Path]]:
+    """Parse administrator-approved UNC roots mapped to server mount paths."""
+    if not raw.strip():
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("EXTERNAL_MEDIA_UNC_ROOTS_JSON must be a JSON object") from exc
+    if not isinstance(value, dict):
+        raise ValueError("EXTERNAL_MEDIA_UNC_ROOTS_JSON must be a JSON object")
+    result: dict[str, tuple[str, Path]] = {}
+    for alias, entry in value.items():
+        if not isinstance(alias, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", alias):
+            raise ValueError("external UNC root alias is invalid")
+        if not isinstance(entry, dict) or not isinstance(entry.get("unc"), str) or not isinstance(entry.get("path"), str):
+            raise ValueError(f"external UNC root mapping is invalid: {alias}")
+        mount = Path(entry["path"]).expanduser()
+        if not mount.is_absolute():
+            raise ValueError(f"external UNC root mount must be absolute: {alias}")
+        result[alias] = (_normalize_unc_root(entry["unc"]), mount.resolve(strict=False))
+    return result
+
+
+def resolve_external_unc_path(value: str, roots: dict[str, tuple[str, Path]]) -> tuple[str, str]:
+    if not isinstance(value, str) or "\x00" in value:
+        raise ValueError("invalid_external_unc_path")
+    clean = value.strip().replace("/", "\\").rstrip("\\")
+    match = re.fullmatch(r"\\\\([^\\]+)\\([^\\]+)(?:\\(.*))?", clean)
+    if not match:
+        raise ValueError("invalid_external_unc_path")
+    unc_root = f"\\\\{match.group(1)}\\{match.group(2)}".casefold()
+    relative = (match.group(3) or "").replace("\\", "/")
+    parts = relative.split("/") if relative else []
+    if any(part in {"", ".", ".."} for part in parts):
+        raise ValueError("invalid_external_unc_path")
+    for alias, (configured_unc, _mount) in roots.items():
+        if configured_unc == unc_root:
+            return alias, "/".join(parts)
+    raise ValueError("external_unc_root_unconfigured")
+
+
+EXTERNAL_MEDIA_UNC_ROOTS = parse_external_unc_roots(os.getenv("EXTERNAL_MEDIA_UNC_ROOTS_JSON", ""))
+EXTERNAL_MEDIA_ROOTS = {**parse_external_media_roots(os.getenv("EXTERNAL_MEDIA_ROOTS_JSON", "")), **{alias: mount for alias, (_unc, mount) in EXTERNAL_MEDIA_UNC_ROOTS.items()}}
 EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE = int(os.getenv("EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE", "10000"))
 EXTERNAL_MEDIA_SCAN_POLL_SECONDS = int(os.getenv("EXTERNAL_MEDIA_SCAN_POLL_SECONDS", "60"))
 if EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE < 1:

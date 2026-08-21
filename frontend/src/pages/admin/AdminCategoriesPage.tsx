@@ -55,7 +55,7 @@ type CategoryDraft = {
   chat_filter_selectable: boolean;
 };
 type CategoryCreateDraft = { parent_id: string; display_name: string; target_position: string };
-type SharedFolderDraft = { parent_id: string; display_name: string; root_alias: string; relative_path: string; default_scheme_id: string };
+type SharedFolderDraft = { parent_id: string; display_name: string; root_alias: string; relative_path: string; unc_path: string; default_scheme_id: string };
 type PendingAction =
   | { kind: "select"; id: string }
   | { kind: "refresh" }
@@ -114,7 +114,7 @@ export function AdminCategoriesPage() {
   const [sharedError, setSharedError] = useState<string | null>(null);
   const [sharedRoots, setSharedRoots] = useState<ExternalMediaRoot[]>([]);
   const [sharedSchemes, setSharedSchemes] = useState<TranscriptionSchemeOption[]>([]);
-  const [sharedDraft, setSharedDraft] = useState<SharedFolderDraft>({ parent_id: "", display_name: "", root_alias: "", relative_path: "", default_scheme_id: "" });
+  const [sharedDraft, setSharedDraft] = useState<SharedFolderDraft>({ parent_id: "", display_name: "", root_alias: "", relative_path: "", unc_path: "", default_scheme_id: "" });
   const [createDraft, setCreateDraft] = useState<CategoryCreateDraft>({ parent_id: "", display_name: "", target_position: "1" });
   const [createSaving, setCreateSaving] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -281,7 +281,7 @@ export function AdminCategoriesPage() {
       const [roots, schemes] = await Promise.all([adminMediaApi.externalRoots(), adminContentApi.transcriptionSchemes()]);
       const available = schemes.filter((item) => item.enabled && !item.archived && item.availability === "available");
       setSharedRoots(roots); setSharedSchemes(available);
-      setSharedDraft({ parent_id: "", display_name: "", root_alias: roots[0]?.alias || "", relative_path: "", default_scheme_id: available[0]?.scheme_id || "" });
+      setSharedDraft({ parent_id: "", display_name: "", root_alias: roots[0]?.alias || "", relative_path: "", unc_path: "", default_scheme_id: available[0]?.scheme_id || "" });
     } catch (cause) { setSharedError(cause instanceof Error ? cause.message : "共享目录配置加载失败"); }
     setSharedOpen(true);
   };
@@ -568,10 +568,10 @@ export function AdminCategoriesPage() {
             {sharedRoots.length === 0 && <Alert role="status"><AlertTitle>未配置共享目录根</AlertTitle><AlertDescription>请先在服务端配置可选根别名。</AlertDescription></Alert>}
             <Field label="父分类"><Select value={sharedDraft.parent_id} onChange={(event) => setSharedDraft({ ...sharedDraft, parent_id: event.target.value })}><option value="">一级分类</option>{categories.filter((item) => item.is_active && item.category_kind !== "shared_folder").map((item) => <option key={item.id} value={item.id}>{item.full_path}</option>)}</Select></Field>
             <Field label="显示名称"><Input value={sharedDraft.display_name} maxLength={100} onChange={(event) => setSharedDraft({ ...sharedDraft, display_name: event.target.value })} placeholder="例如 培训视频共享目录" /></Field>
-            <Field label="共享根别名"><Select value={sharedDraft.root_alias} onChange={(event) => setSharedDraft({ ...sharedDraft, root_alias: event.target.value })}><option value="">请选择</option>{sharedRoots.map((root) => <option key={root.alias} value={root.alias}>{root.alias}</option>)}</Select></Field>
-            <Field label="相对目录"><Input value={sharedDraft.relative_path} onChange={(event) => setSharedDraft({ ...sharedDraft, relative_path: event.target.value })} placeholder="可留空，例如 2026/培训" /></Field>
+          <Field label="Windows 共享路径（可选）"><Input value={sharedDraft.unc_path} onChange={(event) => setSharedDraft({ ...sharedDraft, unc_path: event.target.value, root_alias: event.target.value ? "" : sharedDraft.root_alias })} placeholder="例如 \\\\192.168.0.252\\项目工程\\品成知识库\\1.2内部教学视频（MP4）" /></Field>
+          {!sharedDraft.unc_path && <><Field label="共享根别名"><Select value={sharedDraft.root_alias} onChange={(event) => setSharedDraft({ ...sharedDraft, root_alias: event.target.value })}><option value="">请选择</option>{sharedRoots.map((root) => <option key={root.alias} value={root.alias}>{root.alias}</option>)}</Select></Field><Field label="相对目录"><Input value={sharedDraft.relative_path} onChange={(event) => setSharedDraft({ ...sharedDraft, relative_path: event.target.value })} placeholder="可留空，例如 2026/培训" /></Field></>}
             <Field label="默认转录方案"><Select value={sharedDraft.default_scheme_id} onChange={(event) => setSharedDraft({ ...sharedDraft, default_scheme_id: event.target.value })}><option value="">请选择</option>{sharedSchemes.map((scheme) => <option key={scheme.scheme_id} value={scheme.scheme_id}>{scheme.name}</option>)}</Select></Field>
-            <Button className="w-full" onClick={() => void createSharedFolder()} disabled={sharedSaving || !sharedDraft.display_name.trim() || !sharedDraft.root_alias || !sharedDraft.default_scheme_id}>{sharedSaving ? "创建中…" : "创建共享文件夹"}</Button>
+            <Button className="w-full" onClick={() => void createSharedFolder()} disabled={sharedSaving || !sharedDraft.display_name.trim() || (!sharedDraft.root_alias && !sharedDraft.unc_path.trim()) || !sharedDraft.default_scheme_id}>{sharedSaving ? "创建中…" : "创建共享文件夹"}</Button>
           </div>
         </SheetContent>
       </Sheet>
