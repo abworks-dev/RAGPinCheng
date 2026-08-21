@@ -42,7 +42,7 @@ def apply_production_volumes(config: dict[str, Any]) -> None:
     default_network = networks.setdefault("default", {})
     default_network["name"] = "ragpincheng-prod_default"
     backend = config["services"]["backend"]
-    backend["volumes"] = [
+    volumes = [
         {"type": "bind", "source": os.environ["DATA_PATH"], "target": "/app/data"},
         {"type": "bind", "source": os.environ["CONTENT_HOST_PATH"], "target": "/app/content"},
         {
@@ -53,6 +53,10 @@ def apply_production_volumes(config: dict[str, Any]) -> None:
         },
         {"type": "bind", "source": os.environ["MEDIA_HOST_PATH"], "target": "/app/media"},
     ]
+    external_root = os.environ.get("EXTERNAL_SOURCES_HOST_PATH")
+    if external_root:
+        volumes.append({"type": "bind", "source": external_root, "target": "/app/external-sources", "read_only": True})
+    backend["volumes"] = volumes
 
 
 def main() -> int:

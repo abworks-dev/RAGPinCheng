@@ -83,6 +83,15 @@ def test_production_mount_contract_is_explicit(monkeypatch):
     assert config["networks"]["default"]["name"] == "ragpincheng-prod_default"
 
 
+def test_production_mount_contract_includes_explicit_external_sources(monkeypatch):
+    from scripts.sanitize_source_decoupled_override import apply_production_volumes
+    config = {"services": {"backend": {"volumes": []}}}
+    for key, value in {"DATA_PATH": "/data/app", "CONTENT_HOST_PATH": "/data/content", "MEDIA_HOST_PATH": "/data/media", "EXTERNAL_SOURCES_HOST_PATH": "/data/external-sources"}.items():
+        monkeypatch.setenv(key, value)
+    apply_production_volumes(config)
+    assert config["services"]["backend"]["volumes"][-1] == {"type": "bind", "source": "/data/external-sources", "target": "/app/external-sources", "read_only": True}
+
+
 @pytest.mark.parametrize(
     "config",
     [
