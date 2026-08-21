@@ -2,12 +2,12 @@
 
 ## 状态
 
-已实现，默认关闭。服务端配置至少一个外部根别名后，管理员可以登记其下相对目录、递归扫描 MP4、浏览特殊共享文件夹/视频条目，并将选择的视频批量加入现有自动转录队列。真实 SMB 挂载、凭据、服务账号权限和生产业务数据尚未配置或验收。
+已实现，默认关闭。服务端配置至少一个外部根别名后，管理员可以在分类管理中创建带共享标记的只读共享文件夹，递归扫描其中的 MP4，并将视频加入现有自动转录队列。共享视频不能在应用中移动、重命名或删除；真实 SMB 挂载、凭据、服务账号权限和生产业务数据尚未配置或验收。
 
 ## 入口与调用链
 
 - 页面：`frontend/src/pages/admin/AdminMediaPage.tsx`
-- 共享资料源面板：`frontend/src/components/admin/ExternalMediaSourcesPanel.tsx`
+- 分类创建入口：`frontend/src/pages/admin/AdminCategoriesPage.tsx`
 - 前端 API：`frontend/src/api/admin/media.ts`、`frontend/src/api/client.ts`
 - HTTP 路由：`api/routes_external_media.py`
 - 扫描与协调：`api/external_media.py`

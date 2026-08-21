@@ -853,8 +853,10 @@ def post_shared_folder(
         source_id = str(uuid.uuid4())
         now = int(time.time())
         row = create_category(
-            conn, category_key=None, parent_id=body.parent_id, display_code="99",
-            display_name=body.display_name, sort_order=0, actor_user_id=user.id,
+            conn, category_key=None, parent_id=body.parent_id,
+            display_code=next_category_display_code(conn, body.parent_id),
+            display_name=body.display_name,
+            sort_order=next_category_sort_order(conn, body.parent_id), actor_user_id=user.id,
             target_position=body.target_position, confirm_number_shift=body.confirm_number_shift, commit=False,
         )
         conn.execute(
