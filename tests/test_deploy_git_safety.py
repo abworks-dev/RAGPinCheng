@@ -196,10 +196,13 @@ class TestDeployGitSafety(unittest.TestCase):
             deploy.index("compose up -d --no-deps --force-recreate backend"),
         )
 
-    def test_emergency_app_deploy_explicitly_applies_pending_schema_migrations(self):
+    def test_emergency_app_deploy_explicitly_blocks_schema_migrations(self):
         workflow = self.emergency_workflow
         deploy_app = workflow.split("  deploy-app:", 1)[1]
-        self.assertIn("SCHEMA_MIGRATION_ACTION: APPLY_PENDING", deploy_app)
+        self.assertIn("SCHEMA_MIGRATION_ACTION: BLOCK_PENDING", deploy_app)
+        self.assertIn("manual app workflow owns backup, migration, and rollback", deploy_app)
+        self.assertIn("EMERGENCY_SCHEMA status=ready", workflow)
+        self.assertIn("schema_migration=APPLY_PENDING", workflow)
         self.assertLess(
             deploy_app.index("SCHEMA_MIGRATION_ACTION: APPLY_PENDING"),
             deploy_app.index('bash "${REPO_PATH}/scripts/deploy-app.sh"'),
