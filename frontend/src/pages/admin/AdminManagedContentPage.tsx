@@ -5730,38 +5730,6 @@ export function AdminManagedContentPage() {
                 />
               )}
             </div>
-            {trashSelected.length > 0 && (
-              <div className="flex flex-col gap-2 rounded-ui-md border border-primary/30 bg-primary/5 px-3 py-2 sm:flex-row sm:items-center xl:col-span-3">
-                <p className="mr-auto text-ui-sm">
-                  已选择 <strong>{trashSelected.length}</strong> 份资料
-                </p>
-                {can("trash.purge") && (
-                  <ActionsMenu
-                    disabled={Boolean(busyAction)}
-                    triggerLabel="回收站处置菜单"
-                    menuLabel="回收站批量操作"
-                    options={[
-                      {
-                        key: "trash-purge-selected",
-                        label: `永久删除所选（${trashSelected.length}）`,
-                        icon: <Trash2 className="size-4" />,
-                        destructive: true,
-                        onSelect: () => void openTrashPurge(),
-                      },
-                    ]}
-                  />
-                )}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="max-sm:h-control-md"
-                  disabled={Boolean(busyAction)}
-                  onClick={() => setTrashSelected([])}
-                >
-                  取消选择
-                </Button>
-              </div>
-            )}
           </div>
           {trashLoading ? (
             <LoadingState
