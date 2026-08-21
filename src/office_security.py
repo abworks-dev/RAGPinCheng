@@ -4,6 +4,7 @@ import io
 import posixpath
 import zipfile
 import xml.etree.ElementTree as ET
+import zlib
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -13,12 +14,27 @@ LEGACY_OFFICE_EXTENSIONS = frozenset({".doc", ".xls", ".ppt"})
 OLE_COMPOUND_FILE_SIGNATURE = bytes.fromhex("D0CF11E0A1B11AE1")
 
 _RELATIONSHIP_SUFFIX = ".rels"
-_PACKAGE_RELATIONSHIP_SUFFIX = "/package"
-_HYPERLINK_RELATIONSHIP_SUFFIX = "/hyperlink"
+_OLE_RELATIONSHIP_SUFFIXES = ("/oleobject", "/control")
+_PACKAGE_RELATIONSHIP_TYPES = frozenset(
+    {
+        "http://schemas.openxmlformats.org/officedocument/2006/relationships/package",
+        "http://purl.oclc.org/ooxml/officedocument/relationships/package",
+    }
+)
 _MACRO_MARKERS = ("vba", "macro", "vbaproject")
 _MAX_XML_BYTES = 1024 * 1024
 _MAX_ARCHIVE_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
 _MAX_ARCHIVE_RATIO = 200
+_ARCHIVE_READ_ERRORS = (
+    EOFError,
+    KeyError,
+    NotImplementedError,
+    OSError,
+    RuntimeError,
+    zipfile.BadZipFile,
+    zipfile.LargeZipFile,
+    zlib.error,
+)
 
 
 class _InvalidOfficeXml(ValueError):
@@ -71,15 +87,21 @@ def _is_external_target(target: str) -> bool:
 
 def _parse_office_xml(payload: bytes) -> ET.Element:
     lowered = payload.lower()
+    encoded_markers = tuple(
+        marker.encode(encoding)
+        for marker in ("<!doctype", "<!entity")
+        for encoding in ("utf-16-le", "utf-16-be", "utf-32-le", "utf-32-be")
+    )
     if (
         len(payload) > _MAX_XML_BYTES
         or b"<!doctype" in lowered
         or b"<!entity" in lowered
+        or any(marker in lowered for marker in encoded_markers)
     ):
         raise _InvalidOfficeXml("unsafe_or_oversized_xml")
     try:
         return ET.fromstring(payload)
-    except ET.ParseError as exc:
+    except (ET.ParseError, LookupError, ValueError) as exc:
         raise _InvalidOfficeXml("malformed_xml") from exc
 
 
@@ -105,6 +127,11 @@ def _is_embedded_member(name: str) -> bool:
     return "embeddings" in parts[:-1]
 
 
+def _is_ole_member(name: str) -> bool:
+    filename = posixpath.basename(name.replace("\\", "/")).lower()
+    return filename.startswith(("oleobject", "control"))
+
+
 def _is_chart_part(source: str) -> bool:
     parts = [part.lower() for part in source.split("/")]
     return len(parts) >= 3 and parts[0] == "ppt" and parts[1] == "charts"
@@ -128,9 +155,12 @@ def _contains_macro_payload(names: list[str], archive: zipfile.ZipFile) -> bool:
 
 
 def _relationship_elements(root: ET.Element) -> list[ET.Element]:
-    if _local_name(root.tag) == "relationship":
-        return [root]
-    return [element for element in root.iter() if _local_name(element.tag) == "relationship"]
+    if _local_name(root.tag) != "relationships":
+        raise _InvalidOfficeXml("invalid_relationship_root")
+    elements = list(root)
+    if any(_local_name(element.tag) != "relationship" for element in elements):
+        raise _InvalidOfficeXml("invalid_relationship_element")
+    return elements
 
 
 def _scan_archive(
@@ -155,11 +185,17 @@ def _scan_archive(
         source = _relationship_source(rels_name)
         if source is None:
             return "office_package_invalid"
+        if source and source not in name_set:
+            return "office_package_invalid"
         try:
             root = _parse_office_xml(archive.read(rels_name))
-        except (KeyError, _InvalidOfficeXml):
+        except _ARCHIVE_READ_ERRORS + (_InvalidOfficeXml,):
             return "office_package_invalid"
-        for relationship in _relationship_elements(root):
+        try:
+            relationship_elements = _relationship_elements(root)
+        except _InvalidOfficeXml:
+            return "office_package_invalid"
+        for relationship in relationship_elements:
             attributes = {
                 key.rsplit("}", 1)[-1].lower(): value
                 for key, value in relationship.attrib.items()
@@ -167,22 +203,26 @@ def _scan_archive(
             target = attributes.get("target", "")
             relationship_type = attributes.get("type", "").lower()
             target_mode = attributes.get("targetmode", "").lower()
-            if target_mode == "external":
-                return "office_external_link"
+            if not relationship_type:
+                return "office_package_invalid"
+            if not target:
+                return "office_package_invalid"
             try:
                 is_external = _is_external_target(target)
             except ValueError:
                 return "office_package_invalid"
-            if relationship_type.endswith(_HYPERLINK_RELATIONSHIP_SUFFIX) and is_external:
+            if target_mode == "external" or is_external:
                 return "office_external_link"
-            if not target:
-                return "office_package_invalid"
+            if relationship_type.endswith(_OLE_RELATIONSHIP_SUFFIXES):
+                return "office_embedded_object"
             resolved_target = _resolve_internal_target(source, target)
             if not target.startswith("#") and resolved_target not in name_set:
                 return "office_package_invalid"
             relationships.append((source, relationship_type, target, resolved_target))
 
-    embedded_names = [name for name in names if _is_embedded_member(name)]
+    embedded_names = [
+        name for name in names if _is_embedded_member(name) or _is_ole_member(name)
+    ]
     if not embedded_names:
         return None
     if not allow_chart_workbook:
@@ -196,7 +236,7 @@ def _scan_archive(
             return "office_package_invalid"
         if (
             _is_chart_part(source)
-            and relationship_type.endswith(_PACKAGE_RELATIONSHIP_SUFFIX)
+            and relationship_type in _PACKAGE_RELATIONSHIP_TYPES
             and resolved_target.lower().endswith(".xlsx")
         ):
             allowed_workbooks.add(resolved_target)
@@ -210,18 +250,34 @@ def _scan_archive(
         try:
             workbook_bytes = archive.read(workbook_name)
             with zipfile.ZipFile(io.BytesIO(workbook_bytes)) as workbook:
+                if not _archive_within_limits(workbook):
+                    return "office_package_invalid"
+                workbook_names = set(workbook.namelist())
+                if not {"[Content_Types].xml", "xl/workbook.xml"}.issubset(workbook_names):
+                    return "office_package_invalid"
+                _parse_office_xml(workbook.read("[Content_Types].xml"))
+                workbook_root = _parse_office_xml(workbook.read("xl/workbook.xml"))
+                if _local_name(workbook_root.tag) != "workbook":
+                    return "office_package_invalid"
                 issue = _scan_archive(workbook, allow_chart_workbook=False)
-        except (KeyError, zipfile.BadZipFile, OSError):
+        except _ARCHIVE_READ_ERRORS:
+            return "office_package_invalid"
+        except _InvalidOfficeXml:
             return "office_package_invalid"
         if issue:
             return issue
     return None
 
 
-def find_unsafe_office_content(path: Path) -> str | None:
+def find_unsafe_office_content(
+    path: Path,
+    *,
+    extension: str | None = None,
+) -> str | None:
     """Return a stable rejection code for unsafe OOXML relationships/content."""
+    extension = (extension or path.suffix).lower()
     try:
         with zipfile.ZipFile(path) as archive:
-            return _scan_archive(archive, allow_chart_workbook=True)
-    except (zipfile.BadZipFile, OSError):
+            return _scan_archive(archive, allow_chart_workbook=extension == ".pptx")
+    except _ARCHIVE_READ_ERRORS:
         return "office_package_invalid"

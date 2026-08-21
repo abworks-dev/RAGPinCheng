@@ -1637,7 +1637,10 @@ async def upload_managed_documents(
                 upload, batch_id=batch_id, max_bytes=settings.upload_max_file_mb * 1024 * 1024
             )
             if doc_type in {"docx", "xlsx", "pptx"}:
-                package_issue = find_unsafe_office_content(stored.absolute_path)
+                package_issue = find_unsafe_office_content(
+                    stored.absolute_path,
+                    extension=f".{doc_type}",
+                )
                 if package_issue:
                     if stored.created:
                         stored.absolute_path.unlink(missing_ok=True)

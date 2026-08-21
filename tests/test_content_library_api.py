@@ -2109,6 +2109,7 @@ def test_managed_pptx_upload_accepts_case_sensitive_relationship_paths(content_a
     office_bytes = io.BytesIO()
     with zipfile.ZipFile(office_bytes, "w") as archive:
         archive.writestr("[Content_Types].xml", "<Types />")
+        archive.writestr("ppt/slideMasters/slideMaster1.xml", "<slideMaster />")
         archive.writestr(
             "ppt/slideMasters/_rels/slideMaster1.xml.rels",
             "<Relationships />",
@@ -4086,6 +4087,7 @@ def test_published_pptx_preview_status_and_regeneration(content_api, monkeypatch
     office_bytes = io.BytesIO()
     with zipfile.ZipFile(office_bytes, "w") as archive:
         archive.writestr("[Content_Types].xml", "<Types />")
+        archive.writestr("ppt/slideMasters/slideMaster1.xml", "<slideMaster />")
         archive.writestr(
             "ppt/slideMasters/_rels/slideMaster1.xml.rels",
             "<Relationships />",

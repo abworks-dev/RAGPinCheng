@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import io
 import zipfile
+import zlib
 from pathlib import Path
+from unittest.mock import patch
 
 from api.routes_admin import (
     _check_office_external_links_or_embeds,
@@ -12,7 +14,7 @@ from api.routes_admin import (
     _check_zip_bomb,
     _verify_office_signature,
 )
-from src.office_security import has_valid_office_signature
+from src.office_security import find_unsafe_office_content, has_valid_office_signature
 
 
 _RELATIONSHIP_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
@@ -93,7 +95,12 @@ def test_office_zip_bomb_ratio_and_corrupt_zip_are_rejected(tmp_path: Path):
 def test_office_external_links_and_embeds_are_rejected(tmp_path: Path):
     external = tmp_path / "external.docx"
     with zipfile.ZipFile(external, "w") as archive:
-        archive.writestr("word/_rels/document.xml.rels", '<Relationship TargetMode="External" Type="hyperlink"/>')
+        archive.writestr("word/document.xml", "<document />")
+        archive.writestr(
+            "word/_rels/document.xml.rels",
+            '<Relationships><Relationship TargetMode="External" Type="hyperlink" '
+            'Target="https://example.invalid/data"/></Relationships>',
+        )
     embedded = tmp_path / "embedded.docx"
     with zipfile.ZipFile(embedded, "w") as archive:
         archive.writestr("word/embeddings/oleObject1.bin", b"synthetic")
@@ -105,15 +112,18 @@ def test_office_external_links_and_embeds_are_rejected(tmp_path: Path):
 def test_office_relationship_scan_preserves_case_sensitive_member_names(tmp_path: Path):
     safe = tmp_path / "safe.pptx"
     with zipfile.ZipFile(safe, "w") as archive:
+        archive.writestr("ppt/slideMasters/slideMaster1.xml", "<slideMaster />")
         archive.writestr(
             "ppt/slideMasters/_rels/slideMaster1.xml.rels",
             "<Relationships />",
         )
     external = tmp_path / "external.pptx"
     with zipfile.ZipFile(external, "w") as archive:
+        archive.writestr("ppt/slideMasters/slideMaster1.xml", "<slideMaster />")
         archive.writestr(
             "ppt/slideMasters/_rels/slideMaster1.xml.rels",
-            '<Relationship TargetMode="External" Type="hyperlink"/>',
+            '<Relationships><Relationship TargetMode="External" Type="hyperlink" '
+            'Target="https://example.invalid/data"/></Relationships>',
         )
 
     assert _check_office_external_links_or_embeds(safe) is None
@@ -125,6 +135,13 @@ def test_chart_linked_embedded_xlsx_is_allowed(tmp_path: Path):
     path.write_bytes(_chart_pptx(_safe_embedded_xlsx()))
 
     assert _check_office_external_links_or_embeds(path) is None
+
+
+def test_chart_linked_embedded_xlsx_is_rejected_for_non_pptx(tmp_path: Path):
+    path = tmp_path / "chart.docx"
+    path.write_bytes(_chart_pptx(_safe_embedded_xlsx()))
+
+    assert find_unsafe_office_content(path) == "office_embedded_object"
 
 
 def test_unreferenced_embedded_xlsx_is_rejected(tmp_path: Path):
@@ -155,10 +172,84 @@ def test_chart_linked_embedded_xlsx_external_link_is_rejected(tmp_path: Path):
     assert _check_office_external_links_or_embeds(path) == "office_external_link"
 
 
+def test_ole_relationship_outside_embeddings_is_rejected(tmp_path: Path):
+    path = tmp_path / "ole.pptx"
+    path.write_bytes(_zip_bytes({
+        "[Content_Types].xml": "<Types />",
+        "ppt/slides/slide1.xml": "<slide />",
+        "ppt/oleObject1.bin": b"synthetic",
+        "ppt/slides/_rels/slide1.xml.rels": (
+            f'<Relationships xmlns="{_RELATIONSHIP_NS}">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject" '
+            'Target="../oleObject1.bin"/>'
+            "</Relationships>"
+        ),
+    }))
+
+    assert _check_office_external_links_or_embeds(path) == "office_embedded_object"
+
+
+def test_ole_relationship_to_non_ole_named_target_is_rejected(tmp_path: Path):
+    path = tmp_path / "ole-target.pptx"
+    path.write_bytes(_zip_bytes({
+        "[Content_Types].xml": "<Types />",
+        "ppt/slides/slide1.xml": "<slide />",
+        "ppt/objects/object.bin": b"synthetic",
+        "ppt/slides/_rels/slide1.xml.rels": (
+            f'<Relationships xmlns="{_RELATIONSHIP_NS}">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject" '
+            'Target="../objects/object.bin"/>'
+            "</Relationships>"
+        ),
+    }))
+
+    assert _check_office_external_links_or_embeds(path) == "office_embedded_object"
+
+
+def test_chart_package_relationship_type_must_be_known(tmp_path: Path):
+    path = tmp_path / "custom-package.pptx"
+    path.write_bytes(_zip_bytes({
+        "[Content_Types].xml": "<Types />",
+        "ppt/charts/chart1.xml": "<chart />",
+        "ppt/charts/_rels/chart1.xml.rels": (
+            f'<Relationships xmlns="{_RELATIONSHIP_NS}">'
+            '<Relationship Id="rId1" Type="http://example.invalid/package" '
+            'Target="../embeddings/workbook.xlsx"/>'
+            "</Relationships>"
+        ),
+        "ppt/embeddings/workbook.xlsx": _safe_embedded_xlsx(),
+    }))
+
+    assert _check_office_external_links_or_embeds(path) == "office_embedded_object"
+
+
+def test_chart_embedded_xlsx_requires_workbook_structure(tmp_path: Path):
+    path = tmp_path / "arbitrary-zip.pptx"
+    path.write_bytes(_chart_pptx(_zip_bytes({"evil.bin": b"synthetic"})))
+
+    assert _check_office_external_links_or_embeds(path) == "office_package_invalid"
+
+
+def test_external_relationship_without_target_is_invalid(tmp_path: Path):
+    path = tmp_path / "missing-external-target.pptx"
+    path.write_bytes(_zip_bytes({
+        "[Content_Types].xml": "<Types />",
+        "ppt/presentation.xml": "<presentation />",
+        "ppt/_rels/presentation.xml.rels": (
+            f'<Relationships xmlns="{_RELATIONSHIP_NS}">'
+            '<Relationship Id="rId1" TargetMode="External" Type="http://example.invalid/hyperlink"/>'
+            "</Relationships>"
+        ),
+    }))
+
+    assert _check_office_external_links_or_embeds(path) == "office_package_invalid"
+
+
 def test_chart_linked_embedded_xlsx_nested_embedding_is_rejected(tmp_path: Path):
     path = tmp_path / "nested-chart.pptx"
     path.write_bytes(_chart_pptx(_zip_bytes({
         "[Content_Types].xml": "<Types />",
+        "xl/workbook.xml": "<workbook />",
         "xl/embeddings/oleObject1.bin": b"synthetic",
     })))
 
@@ -204,6 +295,44 @@ def test_internal_relationship_requires_existing_target_part(tmp_path: Path):
     assert _check_office_external_links_or_embeds(path) == "office_package_invalid"
 
 
+def test_internal_relationship_requires_existing_source_part(tmp_path: Path):
+    path = tmp_path / "missing-source.pptx"
+    path.write_bytes(_zip_bytes({
+        "[Content_Types].xml": "<Types />",
+        "ppt/slides/slide1.xml": "<slide />",
+        "ppt/_rels/missing.xml.rels": (
+            f'<Relationships xmlns="{_RELATIONSHIP_NS}">'
+            '<Relationship Id="rId1" Type="http://example.invalid/internal" '
+            'Target="../slides/slide1.xml"/>'
+            "</Relationships>"
+        ),
+    }))
+
+    assert _check_office_external_links_or_embeds(path) == "office_package_invalid"
+
+
+def test_relationship_file_requires_valid_root_and_type(tmp_path: Path):
+    invalid_root = tmp_path / "invalid-root.pptx"
+    invalid_root.write_bytes(_zip_bytes({
+        "[Content_Types].xml": "<Types />",
+        "ppt/presentation.xml": "<presentation />",
+        "ppt/_rels/presentation.xml.rels": "<NotRelationships />",
+    }))
+    missing_type = tmp_path / "missing-type.pptx"
+    missing_type.write_bytes(_zip_bytes({
+        "[Content_Types].xml": "<Types />",
+        "ppt/presentation.xml": "<presentation />",
+        "ppt/_rels/presentation.xml.rels": (
+            f'<Relationships xmlns="{_RELATIONSHIP_NS}">'
+            '<Relationship Id="rId1" Target="presentation.xml"/>'
+            "</Relationships>"
+        ),
+    }))
+
+    assert _check_office_external_links_or_embeds(invalid_root) == "office_package_invalid"
+    assert _check_office_external_links_or_embeds(missing_type) == "office_package_invalid"
+
+
 def test_malformed_content_types_are_rejected_as_invalid_package(tmp_path: Path):
     path = tmp_path / "malformed-content-types.pptx"
     path.write_bytes(_zip_bytes({"[Content_Types].xml": "<Types"}))
@@ -235,6 +364,51 @@ def test_relationship_dtd_is_rejected_as_invalid_package(tmp_path: Path):
         "ppt/_rels/presentation.xml.rels": (
             f'<!DOCTYPE Relationships [<!ENTITY unsafe "x">]>'
             f'<Relationships xmlns="{_RELATIONSHIP_NS}"/>'
+        ),
+    }))
+
+    assert _check_office_external_links_or_embeds(path) == "office_package_invalid"
+
+
+def test_utf16_relationship_dtd_is_rejected_as_invalid_package(tmp_path: Path):
+    path = tmp_path / "utf16-relationship-dtd.pptx"
+    path.write_bytes(_zip_bytes({
+        "[Content_Types].xml": "<Types />",
+        "ppt/_rels/presentation.xml.rels": (
+            '<!DOCTYPE Relationships [<!ENTITY unsafe "x">]>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>'
+        ).encode("utf-16"),
+    }))
+
+    assert _check_office_external_links_or_embeds(path) == "office_package_invalid"
+
+
+def test_unsupported_zip_read_error_is_rejected_as_invalid_package(
+    tmp_path: Path,
+):
+    path = tmp_path / "unsupported-compression.pptx"
+    path.write_bytes(_zip_bytes({"[Content_Types].xml": "<Types />"}))
+
+    with patch.object(zipfile.ZipFile, "read", side_effect=NotImplementedError):
+        assert _check_office_external_links_or_embeds(path) == "office_package_invalid"
+
+
+def test_corrupt_zip_read_error_is_rejected_as_invalid_package(tmp_path: Path):
+    path = tmp_path / "corrupt-compression.pptx"
+    path.write_bytes(_zip_bytes({"[Content_Types].xml": "<Types />"}))
+
+    with patch.object(zipfile.ZipFile, "read", side_effect=zlib.error("corrupt")):
+        assert _check_office_external_links_or_embeds(path) == "office_package_invalid"
+
+
+def test_unknown_xml_encoding_is_rejected_as_invalid_package(tmp_path: Path):
+    path = tmp_path / "unknown-encoding.pptx"
+    path.write_bytes(_zip_bytes({
+        "[Content_Types].xml": "<Types />",
+        "ppt/presentation.xml": "<presentation />",
+        "ppt/_rels/presentation.xml.rels": (
+            '<?xml version="1.0" encoding="x-unknown"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>'
         ),
     }))
 
