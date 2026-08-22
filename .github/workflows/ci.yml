@@ -26,6 +26,10 @@ jobs:
         shell: pwsh
         run: ./scripts/tests/Test-CodexWorkspace.ps1
 
+      - name: Test Codex delivery harness
+        shell: pwsh
+        run: ./scripts/tests/Test-CodexDelivery.ps1
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

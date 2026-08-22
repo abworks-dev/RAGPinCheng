@@ -10,6 +10,7 @@ $manualRoot = Join-Path $testRoot ".worktrees\project repo"
 $linked = Join-Path $manualRoot "linked worktree"
 $feature = Join-Path $manualRoot "feature worktree"
 $detached = Join-Path $manualRoot "detached worktree"
+$uppercaseCodex = Join-Path $manualRoot "uppercase codex worktree"
 $testCodexHome = Join-Path $testRoot "codex-home"
 $managed = Join-Path $testCodexHome "worktrees\managed\project repo"
 $legacyInternal = Join-Path $repository ".codex-worktrees\legacy task"
@@ -92,6 +93,7 @@ try {
     Invoke-GitChecked @("-C", $repository, "worktree", "add", "-b", "codex/legacy-internal", $legacyInternal, "master")
     Invoke-GitChecked @("-C", $repository, "worktree", "add", "-b", "codex/legacy-sibling", $legacySibling, "master")
     Invoke-GitChecked @("-C", $repository, "worktree", "add", "-b", "codex/legacy-temp", $legacyTemp, "master")
+    Invoke-GitChecked @("-C", $repository, "worktree", "add", "-b", "CODEX/case-test", $uppercaseCodex, "master")
     Invoke-GitChecked @("init", "-b", "master", $otherRepository)
 
     $primaryVenv = Join-Path $repository ".venv"
@@ -206,11 +208,20 @@ try {
     )
     Invoke-GitChecked @("-C", $repository, "update-ref", "refs/remotes/origin/master", $masterCommit)
 
+    $case = Invoke-WorkspaceCheck -Path $repository -Mode ReadOnly -ExtraArguments @(
+        "-ExpectedBranch", "no-such-branch"
+    )
+    Assert-Case "readonly expected branch mismatch warns without failing" (
+        $case.ExitCode -eq 0 -and
+        @($case.Result.warnings | Where-Object { $_ -like "*does not match current branch*" }).Count -gt 0
+    )
+
     $case = Invoke-WorkspaceCheck -Path $repository -Mode Write -ExtraArguments @("-Intent", "New")
     Assert-Case "primary write rejected" (
         $case.ExitCode -ne 0 -and -not $case.Result.allowed -and
         $case.Result.reason_codes -contains "PRIMARY_WORKTREE_WRITE_FORBIDDEN" -and
-        $case.Result.recommended_action -eq "CREATE_MANAGED_WORKTREE"
+        $case.Result.recommended_action -eq "CREATE_MANAGED_WORKTREE" -and
+        $case.Result.recommended_environment -eq "none"
     )
 
     $case = Invoke-WorkspaceCheck -Path $repository -Mode Write
@@ -288,6 +299,32 @@ try {
         $case.Result.exception_reason -eq "approved release branch"
     )
 
+    $decision = Invoke-WorkspaceDecision -Path $repository -Mode Write -TaskRisk R2 `
+        -ExtraArguments @("-Intent", "Continue", "-ExpectedBranch", "feature/test-task")
+    Assert-Case "resolver blocks non-codex continuation without exception" (
+        $decision.ExitCode -ne 0 -and -not $decision.Result.allowed -and
+        $decision.Result.reason_codes -contains "NON_CODEX_BRANCH_FORBIDDEN"
+    )
+
+    $decision = Invoke-WorkspaceDecision -Path $repository -Mode Write -TaskRisk R2 `
+        -ExtraArguments @(
+            "-Intent", "Continue", "-ExpectedBranch", "feature/test-task",
+            "-AllowNonCodexBranch", "-ExceptionReason", "approved release continuation"
+        )
+    Assert-Case "resolver forwards non-codex exception to continuation gate" (
+        $decision.ExitCode -eq 0 -and $decision.Result.allowed -and
+        $decision.Result.workspace_allowed -and $decision.Result.exception_used -and
+        $decision.Result.exception_reason -eq "approved release continuation" -and
+        $decision.Result.candidate_worktree -eq $feature -and
+        $decision.Result.recommended_worktree_action -eq "reuse_existing"
+    )
+
+    $case = Invoke-WorkspaceCheck -Path $uppercaseCodex -Mode Write -ExtraArguments @("-Intent", "New")
+    Assert-Case "uppercase codex prefix rejected for write" (
+        $case.ExitCode -ne 0 -and -not $case.Result.allowed -and
+        $case.Result.reason_codes -contains "NON_CODEX_BRANCH_FORBIDDEN"
+    )
+
     $case = Invoke-WorkspaceCheck -Path $linked -Mode Write -ExtraArguments @(
         "-Intent", "Continue", "-ExpectedBranch", "codex/other"
     )
@@ -348,7 +385,8 @@ try {
     if (Test-Path -LiteralPath $testRoot) {
         if (Test-Path -LiteralPath $repository) {
             foreach ($fixtureWorktree in @(
-                $linked, $feature, $detached, $managed, $legacyInternal, $legacySibling, $legacyTemp
+                $linked, $feature, $detached, $managed, $legacyInternal, $legacySibling, $legacyTemp,
+                $uppercaseCodex
             )) {
                 if (Test-Path -LiteralPath $fixtureWorktree) {
                     & git -C $repository worktree remove --force -- $fixtureWorktree 2>$null
