@@ -259,3 +259,7 @@ N/A
         [System.IO.Directory]::Delete($testRoot, $true)
     }
 }
+
+# CI wraps this suite with `pwsh -command`; without an explicit exit the stale
+# $LASTEXITCODE of the last child process becomes the step result.
+exit 0

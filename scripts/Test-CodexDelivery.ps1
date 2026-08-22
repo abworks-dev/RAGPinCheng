@@ -222,3 +222,5 @@ if ($Json) {
 }
 
 if (-not $result.allowed) { exit 1 }
+
+exit 0
