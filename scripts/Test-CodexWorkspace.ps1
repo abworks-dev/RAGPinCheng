@@ -210,6 +210,12 @@ try {
         "current"
     }
 
+    if ($Mode -eq "ReadOnly" -and -not $isDetached -and
+        -not [string]::IsNullOrWhiteSpace($ExpectedBranch) -and
+        $branch -cne $ExpectedBranch) {
+        $warnings.Add("ExpectedBranch '$ExpectedBranch' does not match current branch '$branch'; read-only mode does not enforce branch matching.")
+    }
+
     if ($Mode -eq "Write") {
         if ([string]::IsNullOrWhiteSpace($Intent)) {
             Add-WorkspaceError -Code "WRITE_INTENT_REQUIRED" `
@@ -235,7 +241,7 @@ try {
             Add-WorkspaceError -Code "DETACHED_HEAD_WRITE_FORBIDDEN" `
                 -Message "Write mode requires an attached branch, not detached HEAD." `
                 -RecommendedAction "ATTACH_CODEX_BRANCH"
-        } elseif ($branch -notlike "codex/*") {
+        } elseif ($branch -cnotlike "codex/*") {
             if ($AllowNonCodexBranch) {
                 if ([string]::IsNullOrWhiteSpace($ExceptionReason)) {
                     Add-WorkspaceError -Code "EXCEPTION_REASON_REQUIRED" `
@@ -292,6 +298,10 @@ try {
     $currentVenv = Join-Path $repositoryRoot ".venv"
     $primaryVenv = if ($null -ne $primaryPath) { Join-Path $primaryPath ".venv" } else { $null }
     $recommendedEnvironment = if ($Mode -eq "ReadOnly") {
+        "none"
+    } elseif ($isPrimary) {
+        # The primary worktree never accepts writes; its .venv belongs to the shared
+        # environment and must not be offered as an isolated task environment.
         "none"
     } elseif (Test-Path -LiteralPath $currentVenv -PathType Container) {
         "isolated"
@@ -405,3 +415,5 @@ if ($Json) {
 }
 
 if (-not $result.allowed) { exit 1 }
+
+exit 0

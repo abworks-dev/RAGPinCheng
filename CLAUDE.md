@@ -21,7 +21,7 @@
 ## 工作前必须做
 
 1. 阅读与任务相关的入口、调用链、类型和配置；
-2. 先运行 `pwsh -NoProfile -File scripts/Resolve-CodexWorkspace.ps1 -Mode <ReadOnly|Write> -TaskRisk <R0|R1|R2|R3> [-Intent <New|Continue>] [-ExpectedBranch <branch>]` 获取只读的 worktree、环境和基线建议；计划修改依赖时追加 `-DependencyIntent Change`；
+2. 先运行 `pwsh -NoProfile -File scripts/Resolve-CodexWorkspace.ps1 -Mode <ReadOnly|Write> -TaskRisk <R0|R1|R2|R3> [-Intent <New|Continue>] [-ExpectedBranch <branch>] [-AllowNonCodexBranch -ExceptionReason <reason>]` 获取只读的 worktree、环境和基线建议；计划修改依赖时追加 `-DependencyIntent Change`；
 3. 只读任务在目标目录运行 `pwsh -NoProfile -File scripts/Test-CodexWorkspace.ps1 -Mode ReadOnly`；新写任务在编辑前运行 `-Mode Write -Intent New`，继续既有任务运行 `-Mode Write -Intent Continue -ExpectedBranch <branch>`；
 4. 检查 `git status --short --branch`，保护用户已有修改；workspace 预检失败时停止编辑，不得自动创建、切换、清理或修复 worktree；
 5. 新写任务优先使用 Codex App 在 `$CODEX_HOME/worktrees` 创建的受管 worktree；人工长期 worktree只放在主仓库父目录的 `.worktrees/<仓库名>`，旧位置只用于继续原任务；

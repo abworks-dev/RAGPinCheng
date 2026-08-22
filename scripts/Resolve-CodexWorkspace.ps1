@@ -15,6 +15,10 @@ param(
 
     [string]$ExpectedBranch,
 
+    [switch]$AllowNonCodexBranch,
+
+    [string]$ExceptionReason,
+
     [ValidateSet("Auto", "Change")]
     [string]$DependencyIntent = "Auto",
 
@@ -55,7 +59,9 @@ function Invoke-WorkspaceGate {
         [Parameter(Mandatory = $true)][string]$Path,
         [Parameter(Mandatory = $true)][string]$CheckMode,
         [string]$CheckIntent,
-        [string]$CheckExpectedBranch
+        [string]$CheckExpectedBranch,
+        [switch]$CheckAllowNonCodexBranch,
+        [string]$CheckExceptionReason
     )
 
     $gateArguments = @(
@@ -69,6 +75,12 @@ function Invoke-WorkspaceGate {
     }
     if (-not [string]::IsNullOrWhiteSpace($CheckExpectedBranch)) {
         $gateArguments += @("-ExpectedBranch", $CheckExpectedBranch)
+    }
+    if ($CheckAllowNonCodexBranch) {
+        $gateArguments += @("-AllowNonCodexBranch")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($CheckExceptionReason)) {
+        $gateArguments += @("-ExceptionReason", $CheckExceptionReason)
     }
 
     $output = @(& $pwsh @gateArguments 2>&1)
@@ -169,7 +181,8 @@ $reasonCodes = [System.Collections.Generic.List[string]]::new()
 
 try {
     $initialGate = Invoke-WorkspaceGate -Path $RepositoryPath -CheckMode $Mode `
-        -CheckIntent $Intent -CheckExpectedBranch $ExpectedBranch
+        -CheckIntent $Intent -CheckExpectedBranch $ExpectedBranch `
+        -CheckAllowNonCodexBranch:$AllowNonCodexBranch -CheckExceptionReason $ExceptionReason
     $initial = $initialGate.Result
     foreach ($warning in @($initial.warnings)) { $warnings.Add([string]$warning) }
     $currentWorkspaceReasonCodes = @($initial.reason_codes)
@@ -241,7 +254,8 @@ try {
                 $candidatePath = [string]$matches[0].Path
                 $candidateBranch = [string]$matches[0].Branch
                 $candidateGate = Invoke-WorkspaceGate -Path $candidatePath -CheckMode Write `
-                    -CheckIntent Continue -CheckExpectedBranch $ExpectedBranch
+                    -CheckIntent Continue -CheckExpectedBranch $ExpectedBranch `
+                    -CheckAllowNonCodexBranch:$AllowNonCodexBranch -CheckExceptionReason $ExceptionReason
                 $selectedGate = $candidateGate.Result
                 foreach ($warning in @($selectedGate.warnings)) {
                     if (-not $warnings.Contains([string]$warning)) { $warnings.Add([string]$warning) }
@@ -334,6 +348,8 @@ try {
         recommended_worktree_action = $worktreeAction
         candidate_worktree = $candidatePath
         candidate_branch = $candidateBranch
+        exception_used = [bool]$AllowNonCodexBranch
+        exception_reason = if ([string]::IsNullOrWhiteSpace($ExceptionReason)) { $null } else { $ExceptionReason }
         recommended_environment = $recommendedEnvironment
         environment_path = $environmentPath
         environment_exists = $environmentExists
@@ -364,6 +380,8 @@ try {
         recommended_worktree_action = "blocked"
         candidate_worktree = $null
         candidate_branch = $null
+        exception_used = [bool]$AllowNonCodexBranch
+        exception_reason = if ([string]::IsNullOrWhiteSpace($ExceptionReason)) { $null } else { $ExceptionReason }
         recommended_environment = "missing"
         environment_path = $null
         environment_exists = $false
@@ -389,3 +407,5 @@ if ($Json) {
 }
 
 if (-not $result.allowed) { exit 1 }
+
+exit 0

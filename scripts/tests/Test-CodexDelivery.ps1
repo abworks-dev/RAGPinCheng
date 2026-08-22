@@ -239,6 +239,12 @@ N/A
         $case.Result.reason_codes -contains "NON_CODEX_DELIVERY_BRANCH"
     )
 
+    $case = Invoke-DeliveryCheck -PullRequest (New-PullRequestFixture -Branch "CODEX/Delivery-Test")
+    Assert-Case "uppercase codex delivery branch rejected" (
+        $case.ExitCode -ne 0 -and
+        $case.Result.reason_codes -contains "NON_CODEX_DELIVERY_BRANCH"
+    )
+
     $case = Invoke-DeliveryCheck -PullRequest (New-PullRequestFixture -Base "release")
     Assert-Case "non-master base rejected" (
         $case.ExitCode -ne 0 -and
@@ -253,3 +259,7 @@ N/A
         [System.IO.Directory]::Delete($testRoot, $true)
     }
 }
+
+# CI wraps this suite with `pwsh -command`; without an explicit exit the stale
+# $LASTEXITCODE of the last child process becomes the step result.
+exit 0

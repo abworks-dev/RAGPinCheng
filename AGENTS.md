@@ -26,7 +26,7 @@ Codex 不主动接管 Claude Code 正在负责的工作，不因发现邻近问�
 
 ## 任务环境选择
 
-- 在选择任务目录前，可运行 `pwsh -NoProfile -File scripts/Resolve-CodexWorkspace.ps1 -Mode <ReadOnly|Write> -TaskRisk <R0|R1|R2|R3> [-Intent <New|Continue>] [-ExpectedBranch <branch>]` 获取只读建议。计划修改依赖时追加 `-DependencyIntent Change`；默认 `Auto` 会检查未提交、已暂存、未跟踪及相对 `origin/master` 的依赖清单变化。
+- 在选择任务目录前，可运行 `pwsh -NoProfile -File scripts/Resolve-CodexWorkspace.ps1 -Mode <ReadOnly|Write> -TaskRisk <R0|R1|R2|R3> [-Intent <New|Continue>] [-ExpectedBranch <branch>] [-AllowNonCodexBranch -ExceptionReason <reason>]` 获取只读建议。计划修改依赖时追加 `-DependencyIntent Change`；默认 `Auto` 会检查未提交、已暂存、未跟踪及相对 `origin/master` 的依赖清单变化。
 - 决策器的 `recommended_worktree_action` 只说明应使用主目录、复用原 worktree、创建新 worktree或阻断；`recommended_environment` 只说明无需环境、共享环境、隔离环境或环境缺失。`allowed=true` 仅表示生成了安全的下一步建议；只有目标 worktree 的 `workspace_allowed=true` 且下述 `Test-CodexWorkspace.ps1` 写预检通过后才能编辑。
 - 只读调查、解释、方案和代码审查可以使用主 worktree，但不得在其中编辑文件、切换分支或执行会改变 Git 状态的命令。开始前运行 `pwsh -NoProfile -File scripts/Test-CodexWorkspace.ps1 -Mode ReadOnly`。
 - 任何写任务必须使用同一仓库正式注册的 linked worktree。新任务在编辑前运行 `pwsh -NoProfile -File scripts/Test-CodexWorkspace.ps1 -Mode Write -Intent New`；继续原任务运行 `pwsh -NoProfile -File scripts/Test-CodexWorkspace.ps1 -Mode Write -Intent Continue -ExpectedBranch <branch>`。主 worktree 即使当前不在 `master` 也不得用于写任务。

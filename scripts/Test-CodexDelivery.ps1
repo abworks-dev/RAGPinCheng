@@ -118,7 +118,7 @@ try {
     if ($isLegacyPullRequest) {
         $warnings.Add("Pull request #$PullRequestNumber predates the delivery-policy baseline and is exempt from delivery checks.")
     } else {
-        if ($branch -notlike "codex/*") {
+        if ($branch -cnotlike "codex/*") {
             Add-PolicyError -Code "NON_CODEX_DELIVERY_BRANCH" `
                 -Message "Delivery requires a codex/* branch; current branch is '$branch'." `
                 -Action "USE_CODEX_BRANCH"
@@ -222,3 +222,5 @@ if ($Json) {
 }
 
 if (-not $result.allowed) { exit 1 }
+
+exit 0
