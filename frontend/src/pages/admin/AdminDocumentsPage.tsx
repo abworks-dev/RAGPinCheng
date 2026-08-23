@@ -411,12 +411,16 @@ function ManagedJobsTable({
                       <Eye className="size-4" />
                       查看文件
                     </a>
-                    {canPublish && !job.is_archived && job.status === "failed" && job.is_latest_attempt && (
-                      <Button size="sm" className="max-sm:h-control-md" disabled={Boolean(retryingJobId)} onClick={() => onRetry(job)}>
-                        <Rocket className={cn("size-4", retrying && "animate-pulse")} />
-                        {retrying ? "发布中…" : "重新发布"}
-                      </Button>
-                    )}
+                    <Button
+                      size="sm"
+                      className="max-sm:h-control-md"
+                      disabled={!canPublish || Boolean(retryingJobId) || job.is_archived || job.status !== "failed" || !job.is_latest_attempt}
+                      title={!canPublish ? "当前账号没有发布权限" : job.is_archived ? "回收站资料不可重试" : job.status !== "failed" ? "仅失败任务可重试" : !job.is_latest_attempt ? "仅最新尝试可重试" : "重试索引"}
+                      onClick={() => onRetry(job)}
+                    >
+                      <Rocket className={cn("size-4", retrying && "animate-pulse")} />
+                      {retrying ? "发布中…" : "重新发布"}
+                    </Button>
                   </div>
                 </td>
               </tr>

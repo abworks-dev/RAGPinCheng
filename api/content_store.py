@@ -1832,8 +1832,9 @@ _CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
                 )),0) AS version_number,
                m.original_filename,'video' AS doc_type,
                CASE
-                 WHEN m.status='failed' THEN 'transcription_failed'
                  WHEN mj.status IN ('pending','running') THEN 'transcribing'
+                 WHEN mj.status='succeeded' THEN 'transcript_ready'
+                 WHEN m.status='failed' THEN 'transcription_failed'
                  WHEN mj.status='failed' THEN 'transcription_failed'
                  WHEN tv.review_status='awaiting_review' THEN 'awaiting_review'
                  WHEN tv.review_status='review_rejected' THEN 'rejected'
@@ -2040,9 +2041,10 @@ def _archive_media_transcript_item_locked(conn: sqlite3.Connection, item_id: str
     row = conn.execute("""SELECT i.media_id,i.archived_at,i.category_id,m.status AS media_status,
                                  h.current_version_id,tv.publication_status,
                                  latest_job.status AS job_status,
-                                 CASE
-                                   WHEN m.status='failed' OR latest_job.status='failed' THEN 'transcription_failed'
+               CASE
                                    WHEN latest_job.status IN ('pending','running') THEN 'transcribing'
+                                   WHEN latest_job.status='succeeded' THEN 'transcript_ready'
+                                   WHEN m.status='failed' OR latest_job.status='failed' THEN 'transcription_failed'
                                    WHEN tv.review_status='awaiting_review' THEN 'awaiting_review'
                                    WHEN tv.review_status='review_rejected' THEN 'rejected'
                                    WHEN tv.publication_status='publishing' THEN 'publishing'
