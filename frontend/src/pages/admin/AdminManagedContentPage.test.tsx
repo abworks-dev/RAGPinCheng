@@ -1046,7 +1046,7 @@ describe("AdminManagedContentPage", () => {
     fireEvent.focus(screen.getByRole("textbox", { name: "搜索资料" }));
     expect(within(screen.getByRole("dialog", { name: "搜索筛选" })).getByRole("combobox", { name: "状态" })).toHaveValue("");
     expect(screen.getAllByRole("status").some((node) => node.textContent?.includes("未选择资料"))).toBe(true);
-    expect(screen.queryByRole("button", { name: "批量操作" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "批量操作" })).toBeInTheDocument();
   });
 
   it("places index tasks after upload tasks and keeps the selected view in the URL", async () => {
