@@ -79,16 +79,12 @@ export function DocxPreview({
   }
 
   return (
-    <div className="h-full flex flex-col bg-secondary">
-      {loading && (
-        <div className="flex items-center justify-center py-8 text-sm text-muted">
-          加载 DOCX…
-        </div>
-      )}
+    <div className="relative min-h-full bg-secondary">
+      {loading && <div className="absolute inset-0 z-10 flex items-center justify-center bg-secondary text-sm text-muted">加载 DOCX…</div>}
       <div
         ref={containerRef}
-        className="flex-1 overflow-auto px-4 py-4"
-        style={{ display: loading ? "none" : "block", zoom }}
+        className="min-h-full px-4 py-4"
+        style={{ visibility: loading ? "hidden" : "visible", zoom }}
       />
     </div>
   );

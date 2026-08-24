@@ -33,7 +33,7 @@ export function SpreadsheetPreview({ sheetName, parentId, onLoad, onError, zoom 
   }, [parentId, sheetName, onLoad, onError]);
 
   if (error) return <div className="flex h-full items-center justify-center p-4 text-sm text-red-600">暂时无法预览此 Excel 表格，请确认源文件仍然存在且格式有效。</div>;
-  if (loading) return <div className="flex h-full items-center justify-center text-sm text-muted">加载 XLSX…</div>;
+  if (loading) return <div className="flex min-h-full items-center justify-center bg-secondary text-sm text-muted">加载 XLSX…</div>;
   if (!sheets.length) return <div className="flex h-full items-center justify-center text-sm text-muted">此文件没有工作表</div>;
   const current = sheets[activeSheet];
 
@@ -43,7 +43,7 @@ export function SpreadsheetPreview({ sheetName, parentId, onLoad, onError, zoom 
       {sheets.map((sheet, index) => <button key={sheet.name} type="button" onClick={() => setActiveSheet(index)} className={`border-r border-gray-200 px-3 py-2 text-xs whitespace-nowrap dark:border-gray-700 ${index === activeSheet ? "bg-white font-semibold text-accent dark:bg-gray-900" : "text-muted hover:bg-gray-100 dark:hover:bg-gray-700"}`}>{sheet.name}</button>)}
       </div>
     </div>
-    <div className="flex-1 overflow-auto p-4">
+    <div className="min-h-full p-4">
       {current.rows.length ? <div className="relative origin-top-left" style={{ transform: `scale(${zoom})`, transformOrigin: "top left" }}><table className="border-collapse bg-background text-xs shadow-sm" aria-label={current.name}>
         <colgroup>{current.columnWidths.map((width, index) => <col key={index} style={{ width, minWidth: width }} />)}</colgroup>
         <tbody>{current.rows.map((row) => <tr key={row.key} style={{ height: row.height }}>{row.cells.map((cell) => <td key={cell.key} colSpan={cell.colSpan} rowSpan={cell.rowSpan} className="overflow-hidden border border-gray-200 px-1.5 py-1 dark:border-gray-700" style={cell.style}>{cell.text}</td>)}</tr>)}</tbody>
