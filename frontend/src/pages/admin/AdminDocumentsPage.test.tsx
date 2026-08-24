@@ -516,7 +516,7 @@ describe("AdminDocumentsPage", () => {
 
   it("reports retry failures and hides retry on an older attempt", async () => {
     mocks.publishManagedContent.mockRejectedValueOnce(new Error("资料状态已变化"));
-    const { rerender } = render(<AdminDocumentsPage />);
+    const { unmount } = render(<AdminDocumentsPage />);
     await screen.findByText(failedJob.title);
     fireEvent.click(screen.getByRole("button", { name: "重新发布" }));
     await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("资料状态已变化"));
@@ -526,8 +526,8 @@ describe("AdminDocumentsPage", () => {
       ...listing,
       jobs: [{ ...failedJob, is_latest_attempt: false }],
     });
-    rerender(<AdminDocumentsPage />);
-    fireEvent.click(screen.getByRole("button", { name: "刷新列表" }));
+    unmount();
+    render(<AdminDocumentsPage />);
     await waitFor(() => expect(screen.getByRole("button", { name: "重新发布" })).toBeDisabled());
   });
 
