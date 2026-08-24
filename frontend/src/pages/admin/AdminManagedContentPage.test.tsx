@@ -1046,7 +1046,7 @@ describe("AdminManagedContentPage", () => {
     fireEvent.focus(screen.getByRole("textbox", { name: "搜索资料" }));
     expect(within(screen.getByRole("dialog", { name: "搜索筛选" })).getByRole("combobox", { name: "状态" })).toHaveValue("");
     expect(screen.getAllByRole("status").some((node) => node.textContent?.includes("未选择资料"))).toBe(true);
-    expect(screen.getByRole("button", { name: "批量操作" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "批量操作" })).not.toBeInTheDocument();
   });
 
   it("places index tasks after upload tasks and keeps the selected view in the URL", async () => {
@@ -2377,7 +2377,7 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getByText("未完成 1 个")).toBeInTheDocument();
     const failedRow = screen.getByTestId("upload-task-row");
     const failedActions = within(failedRow).getAllByRole("button");
-    expect(failedActions.map((button) => button.getAttribute("aria-label"))).toEqual(["重试上传", "查看上传任务详情"]);
+    expect(failedActions.map((button) => button.getAttribute("aria-label"))).toEqual(["重试上传", "查看上传任务详情", "删除任务及资料"]);
     expect(failedActions[0]).toBeDisabled();
     expect(failedActions[0]).toHaveAttribute("aria-label", "重试上传");
 
