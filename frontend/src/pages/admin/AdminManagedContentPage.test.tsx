@@ -1387,7 +1387,7 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准" })[0]);
     expect(screen.getByText("已选择", { exact: false })).toHaveTextContent("已选择 1 份");
     expect(screen.getByText("已选择", { exact: false })).not.toHaveTextContent("单次最多");
-    expect(screen.queryByRole("button", { name: "批量操作" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "批量操作" })).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准2" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
     expect(screen.getByRole("menu", { name: "批量操作" })).toBeInTheDocument();
