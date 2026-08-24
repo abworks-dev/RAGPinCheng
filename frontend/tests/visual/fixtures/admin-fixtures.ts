@@ -1124,6 +1124,25 @@ export async function installAdminRoutes(
           : {},
       });
     }
+    if (path === "/api/admin/content/publication-jobs") {
+      const includesArchived = url.searchParams.get("include_archived") === "true";
+      const sourceJobs = scenario === "empty" ? [] : includesArchived ? [...managedIndexJobs, archivedManagedIndexJob] : managedIndexJobs;
+      const jobs = sourceJobs.map((job) => ({
+        ...job,
+        task_type: "document",
+        task_type_label: "普通资料",
+        status: job.status === "done" ? "published" : job.status === "failed" ? "failed" : "processing",
+        retryable: Boolean(job.failure?.retryable ?? job.status === "failed"),
+        media_id: null,
+        publication_id: job.publication_id,
+        is_latest_attempt: job.is_latest_attempt,
+      }));
+      return json(route, {
+        jobs,
+        total: jobs.length,
+        status_counts: jobs.length ? { processing: 0, published: includesArchived ? 1 : 0, failed: 1 } : {},
+      });
+    }
     if (path === "/api/admin/content/permissions") {
       return json(route, scenario === "empty" ? [] : permissionUsers);
     }
