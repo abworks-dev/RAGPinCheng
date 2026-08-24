@@ -1046,7 +1046,7 @@ describe("AdminManagedContentPage", () => {
     fireEvent.focus(screen.getByRole("textbox", { name: "搜索资料" }));
     expect(within(screen.getByRole("dialog", { name: "搜索筛选" })).getByRole("combobox", { name: "状态" })).toHaveValue("");
     expect(screen.getAllByRole("status").some((node) => node.textContent?.includes("未选择资料"))).toBe(true);
-    expect(screen.getByRole("button", { name: "批量操作" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "批量操作" })).not.toBeInTheDocument();
   });
 
   it("places index tasks after upload tasks and keeps the selected view in the URL", async () => {
@@ -2451,7 +2451,7 @@ describe("AdminManagedContentPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "下一页" }));
     await waitFor(() => expect(mocks.uploadTasks).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 10, offset: 10 })));
-    expect(screen.queryByRole("button", { name: "批量操作" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "批量操作" })).toBeInTheDocument();
     expect(screen.getByText("03 公司内部标准 / 任务 11")).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole("combobox", { name: "每页上传任务条数" }), { target: { value: "25" } });
