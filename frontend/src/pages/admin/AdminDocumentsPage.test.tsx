@@ -231,7 +231,7 @@ describe("AdminDocumentsPage", () => {
       jobs: [{
         ...failedJob,
         id: "job-ready",
-        status: "done",
+        status: "published",
         failure: null,
         error_code: null,
         error_summary: null,

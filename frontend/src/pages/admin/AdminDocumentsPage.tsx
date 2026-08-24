@@ -179,9 +179,9 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
         ...job,
         status: job.status === "published" ? "done" : job.status === "processing" ? "pending" : "failed",
         publication_id: job.publication_id || `video:${job.id}`,
-        is_archived: false,
-        is_current_head: job.status === "published",
-        is_latest_attempt: true,
+        is_archived: job.is_archived,
+        is_current_head: job.is_current_head,
+        is_latest_attempt: job.is_latest_attempt,
         failure: job.error_code ? { code: job.error_code, message: job.error_summary || job.error_code, retryable: job.retryable } : null,
       })) as unknown as ManagedIndexJob[],
     });
