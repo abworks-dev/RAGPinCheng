@@ -693,6 +693,7 @@ class ManagedContentItemDTO(BaseModel):
     retention_days_remaining: int | None = None
     media_duration_ms: int | None = None
     media_file_size: int | None = None
+    file_size: int | None = None
     has_pending_revision: bool = False
     reclassification_job_id: str | None = None
     reclassification_status: str | None = None

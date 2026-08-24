@@ -254,6 +254,7 @@ const item = {
   latest_review_note: null,
   media_duration_ms: null,
   media_file_size: null,
+  file_size: 2457600,
   has_pending_revision: false,
   reclassification_job_id: null,
   reclassification_status: null,
@@ -532,6 +533,7 @@ describe("AdminManagedContentPage", () => {
     expect(screen.queryByRole("dialog", { name: "建模标准" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getAllByRole("button", { name: "查看“建模标准”的详细信息" })[0]);
+    expect(screen.getByText("文件大小").parentElement).toHaveTextContent("2.3 MB");
     const updatedAtLabel = screen.getByText("最后更新时间");
     expect(updatedAtLabel.parentElement).toHaveClass("grid-cols-[max-content_minmax(0,1fr)]", "[&_dt]:whitespace-nowrap");
     fireEvent.click(screen.getByRole("button", { name: "预览文件" }));
