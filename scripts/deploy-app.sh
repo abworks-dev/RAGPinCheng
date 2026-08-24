@@ -15,6 +15,7 @@ BACKUP_DIR="${BACKUP_DIR:?BACKUP_DIR must be provided by the private deployment 
 DATA_PATH="${DATA_PATH:?DATA_PATH must be provided by the private deployment environment}"
 COMPOSE_BASE="${REPO_PATH}/docker/docker-compose.yml"
 COMPOSE_OVERRIDE="${COMPOSE_OVERRIDE:?COMPOSE_OVERRIDE must be provided by the private deployment environment}"
+ORIGINAL_COMPOSE_OVERRIDE="${COMPOSE_OVERRIDE}"
 COMPOSE_SOURCE_DECOUPLED="${REPO_PATH}/docker/compose.source-decoupled.yml"
 COMPOSE_ENV_FILE="${COMPOSE_ENV_FILE:?COMPOSE_ENV_FILE must be provided by the private deployment environment}"
 export COMPOSE_ENV_FILE
@@ -198,7 +199,10 @@ compose build backend 2>&1 | tail -5
 # deployment so production cannot reuse an image with stale conversion limits
 # or conversion code after a source commit changes.
 echo ">> Building LibreOffice image"
-compose build libreoffice 2>&1 | tail -5
+docker compose -p "${COMPOSE_PROJECT}" \
+    -f "${COMPOSE_BASE}" -f "${ORIGINAL_COMPOSE_OVERRIDE}" \
+    --env-file "${COMPOSE_ENV_FILE}" \
+    build libreoffice 2>&1 | tail -5
 
 # ── 7. Apply and verify application schema migrations ─────────────────────
 if [ "${SCHEMA_MIGRATION_ACTION}" = "APPLY_PENDING" ]; then
