@@ -590,9 +590,6 @@ export type PublicationFailure = {
   code: string;
   message: string;
   retryable: boolean;
-  is_archived: boolean;
-  is_current_head: boolean;
-  is_latest_attempt: boolean;
   recommended_action: string;
 };
 
