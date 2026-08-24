@@ -1,4 +1,4 @@
-import { CheckCircle2, CircleAlert, Clock3, Eye, ListChecks, RefreshCw, Rocket, Search, SlidersHorizontal } from "lucide-react";
+import { CheckCircle2, CircleAlert, Clock3, Eye, ListChecks, RefreshCw, Rocket, Search, SlidersHorizontal, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { adminContentApi } from "../../api/admin/content";
 import { Badge } from "../../components/ui/badge";
@@ -152,7 +152,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
   }, [query, categoryId, docType, sourceOrigin, status, history, includeArchived, pageSize]);
 
   useEffect(() => {
-    setSelectedJobIds((current) => current.filter((id) => listing.jobs.some((job) => job.id === id && job.status === "failed" && job.is_latest_attempt && !job.is_archived)));
+    setSelectedJobIds((current) => current.filter((id) => listing.jobs.some((job) => job.id === id && job.is_latest_attempt && !job.is_archived)));
   }, [listing.jobs]);
 
   const params = useMemo(() => ({
@@ -211,7 +211,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
   };
 
   const retryPublication = async (job: ManagedIndexJob) => {
-    if (!canPublish || retryingJobId || job.is_archived || job.status !== "failed" || !job.is_latest_attempt) return;
+    if (!canPublish || retryingJobId || job.is_archived || !["failed", "done"].includes(job.status) || !job.is_latest_attempt) return;
     setRetryingJobId(job.id);
     try {
       await adminContentApi.publish(job.version_id);
@@ -224,21 +224,23 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
     }
   };
 
-  const selectableJobs = listing.jobs.filter((job) => job.status === "failed" && job.is_latest_attempt && !job.is_archived);
+  const selectableJobs = listing.jobs.filter((job) => job.is_latest_attempt && !job.is_archived);
+  const actionableJobs = listing.jobs.filter((job) => selectedJobIds.includes(job.id) && ["failed", "done"].includes(job.status) && job.is_latest_attempt && !job.is_archived);
   const toggleJob = (id: string) => setSelectedJobIds((current) => current.includes(id) ? current.filter((item) => item !== id) : current.length >= BULK_LIMIT ? current : [...current, id]);
   const togglePage = () => {
     const ids = selectableJobs.map((job) => job.id);
     setSelectedJobIds((current) => ids.every((id) => current.includes(id)) ? current.filter((id) => !ids.includes(id)) : [...new Set([...current, ...ids])].slice(0, BULK_LIMIT));
   };
   const bulkRepublish = async () => {
-    const jobs = listing.jobs.filter((job) => selectedJobIds.includes(job.id));
+    const jobs = actionableJobs;
     if (!jobs.length || bulkBusy) return;
     setBulkBusy(true);
     try {
       const result = await adminContentApi.bulkPublish(jobs.map((job) => job.version_id));
       const failed = result.results.filter((item) => item.status === "failed");
       setSelectedJobIds(jobs.filter((job) => failed.some((item) => item.version_id === job.version_id)).map((job) => job.id));
-      toast.success(failed.length ? `已提交 ${result.succeeded} 个任务，${failed.length} 个失败` : `已提交 ${result.succeeded} 个任务`);
+      const skipped = selectedJobIds.length - jobs.length;
+      toast.success(failed.length || skipped ? `已提交 ${result.succeeded} 个任务，${failed.length + skipped} 个未处理` : `已提交 ${result.succeeded} 个任务`);
       await load(true);
     } catch (caught) { toast.error(caught instanceof Error ? caught.message : "批量重新发布失败"); }
     finally { setBulkBusy(false); }
@@ -276,7 +278,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
             </p>
           </div>
           <IndexTaskSearchFilters searchInput={searchInput} categoryId={categoryId} docType={docType} sourceOrigin={sourceOrigin} status={status} history={history} includeArchived={includeArchived} categories={categories} onSearchInputChange={setSearchInput} onCategoryChange={setCategoryId} onDocTypeChange={setDocType} onSourceChange={setSourceOrigin} onStatusChange={setStatus} onHistoryChange={setHistory} onIncludeArchivedChange={setIncludeArchived} onClear={clearFilters} />
-          <div className="flex shrink-0 flex-wrap items-center gap-2">{selectedJobIds.length > 0 && <Button size="sm" className="max-sm:h-control-md" disabled={bulkBusy} onClick={() => void bulkRepublish()}><Rocket className={cn("size-4", bulkBusy && "animate-pulse")} />批量重新发布（{selectedJobIds.length}）</Button>}<Button variant="outline" size="sm" className="max-sm:h-control-md" disabled={loading || refreshing} onClick={() => void load(true)}><RefreshCw className={cn("size-4", refreshing && "animate-spin")} />{refreshing ? "刷新中…" : "刷新列表"}</Button></div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">{selectedJobIds.length > 0 && <><span className="text-ui-xs text-muted-foreground">已选 {selectedJobIds.length} 条</span><Button size="sm" className="max-sm:h-control-md" disabled={bulkBusy || actionableJobs.length === 0} onClick={() => void bulkRepublish()}><Rocket className={cn("size-4", bulkBusy && "animate-pulse")} />批量重新发布</Button><Button size="sm" variant="ghost" className="max-sm:h-control-md" disabled={bulkBusy} onClick={() => setSelectedJobIds([])}><X className="size-4" />清除选择</Button></>}<Button variant="outline" size="sm" className="max-sm:h-control-md" disabled={loading || refreshing} onClick={() => void load(true)}><RefreshCw className={cn("size-4", refreshing && "animate-spin")} />{refreshing ? "刷新中…" : "刷新列表"}</Button></div>
         </div>
 
         {loading ? (
@@ -343,7 +345,7 @@ function ManagedJobsTable({
         <caption className="sr-only">资料发布任务、类型、更新时间、状态、来源、内容块和操作</caption>
         <thead className="hidden border-b border-border bg-surface-muted text-left text-muted-foreground lg:table-header-group">
           <tr>
-            <th className="w-16 px-4 py-3 text-center font-medium"><Checkbox aria-label="全选可批量重新发布任务" checked={selectableJobs.length > 0 && selectableJobs.every((job) => selectedJobIds.includes(job.id))} onChange={onTogglePage} /></th>
+            <th className="w-16 px-4 py-3 text-center font-medium"><Checkbox aria-label="全选当前页索引任务" checked={selectableJobs.length > 0 && selectableJobs.every((job) => selectedJobIds.includes(job.id))} onChange={onTogglePage} /></th>
             <th className="w-16 px-2 py-3 text-center font-medium">类型</th>
             <th className="min-w-48 px-2 py-3 font-medium">资料</th>
             <th className="min-w-24 whitespace-nowrap px-3 py-3 font-medium">更新时间</th>
@@ -363,7 +365,7 @@ function ManagedJobsTable({
             const retrying = retryingJobId === job.id;
             return (
               <tr key={job.id} className="group grid grid-cols-[2.5rem_5rem_minmax(0,1fr)] gap-x-2 gap-y-3 px-4 py-4 transition-colors duration-normal hover:bg-surface-muted/60 sm:px-5 lg:table-row lg:p-0">
-                <td className="block px-1 lg:table-cell lg:px-4 lg:py-3"><Checkbox aria-label={`选择${job.title || job.original_filename || "任务"}`} checked={selectedJobIds.includes(job.id)} disabled={!(job.status === "failed" && job.is_latest_attempt && !job.is_archived) && !selectedJobIds.includes(job.id)} onChange={() => onToggleJob(job.id)} /></td>
+                <td className="block px-1 lg:table-cell lg:px-4 lg:py-3"><Checkbox aria-label={`选择${job.title || job.original_filename || "任务"}`} checked={selectedJobIds.includes(job.id)} disabled={!(job.is_latest_attempt && !job.is_archived) && !selectedJobIds.includes(job.id)} onChange={() => onToggleJob(job.id)} /></td>
                 <td className="block lg:table-cell lg:px-2 lg:py-3"><ManagedItemType docType={job.doc_type} /></td>
                 <td className="block min-w-0 lg:table-cell lg:px-2 lg:py-3">
                   <p className="break-words font-medium text-foreground" title={job.title || job.original_filename || undefined}>
