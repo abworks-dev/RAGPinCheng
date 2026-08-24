@@ -181,6 +181,7 @@ if [ -f "$DATA_PATH/parents.sqlite" ]; then
 fi
 # Record current Docker image hash
 docker images pincheng-rag-backend:latest --format "{{.ID}}" > "${BACKUP_PATH}/image-hash.txt" 2>/dev/null || true
+docker images pincheng-libreoffice:latest --format "{{.ID}}" > "${BACKUP_PATH}/libreoffice-image-hash.txt" 2>/dev/null || true
 
 # ── 5. Validate Docker Compose configuration ──────────────────────────────
 echo ">> Validating Compose configuration"
@@ -192,6 +193,12 @@ compose config --quiet || {
 # ── 6. Build new backend image ────────────────────────────────────────────
 echo ">> Building backend image"
 compose build backend 2>&1 | tail -5
+
+# LibreOffice is a source-built service. Rebuild it on every application
+# deployment so production cannot reuse an image with stale conversion limits
+# or conversion code after a source commit changes.
+echo ">> Building LibreOffice image"
+compose build libreoffice 2>&1 | tail -5
 
 # ── 7. Apply and verify application schema migrations ─────────────────────
 if [ "${SCHEMA_MIGRATION_ACTION}" = "APPLY_PENDING" ]; then
@@ -207,6 +214,32 @@ compose run --rm --no-deps backend python -m scripts.migrate_app_schema \
 # ── 8. Deploy (rolling update) ────────────────────────────────────────────
 echo ">> Deploying services"
 compose up -d --no-deps --force-recreate backend 2>&1
+compose up -d --no-deps --force-recreate libreoffice 2>&1
+
+echo ">> Verifying LibreOffice runtime configuration"
+LIBREOFFICE_CONTAINER="$(compose ps -q libreoffice)"
+[ -n "${LIBREOFFICE_CONTAINER}" ] || {
+    echo "ERROR: LibreOffice container identity is missing"
+    exit 1
+}
+LIBREOFFICE_MAX_MB="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "${LIBREOFFICE_CONTAINER}" |
+    awk -F= '$1 == "LIBREOFFICE_MAX_FILE_MB" {print $2; exit}')"
+[ -n "${LIBREOFFICE_MAX_MB}" ] || {
+    echo "ERROR: LibreOffice container is missing LIBREOFFICE_MAX_FILE_MB"
+    exit 1
+}
+LIBREOFFICE_RUNTIME_MB="$(compose exec -T libreoffice python3 -c \
+    'from app import MAX_FILE_SIZE; print(MAX_FILE_SIZE / 1024 / 1024)')"
+python3 - "${LIBREOFFICE_MAX_MB}" "${LIBREOFFICE_RUNTIME_MB}" <<'PY'
+import sys
+expected = float(sys.argv[1])
+actual = float(sys.argv[2])
+if actual != expected:
+    raise SystemExit(
+        f"ERROR: LibreOffice runtime limit mismatch: env={expected:g}MB runtime={actual:g}MB"
+    )
+print(f"LibreOffice runtime limit verified: {actual:g} MB")
+PY
 
 # ── 8. Verify required backend media tools ────────────────────────────────
 echo ">> Verifying backend media tools"
