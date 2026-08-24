@@ -749,6 +749,99 @@ describe("AdminManagedContentPage", () => {
     expect(await screen.findByTestId(`managed-folder-row-${folder.id}`)).toBeInTheDocument();
   });
 
+it("uses comfortable selection and type tracks in the managed content table", async () => {
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    const table = screen.getByRole("table");
+    expect(within(table).getByRole("columnheader", { name: "选择当前页资料" })).toHaveClass("w-12", "px-3");
+    expect(within(table).getByRole("columnheader", { name: /类型/ })).toHaveClass("w-16", "px-2");
+    expect(within(table).getAllByRole("row")[1].firstElementChild).toHaveClass("w-12", "px-3");
+  });
+
+  it.skip("preflights a selected folder and supports per-file selection and review", async () => {
+    const folder = { ...childCategory, display_code: "02", display_name: "模型目录", item_count: 1, total_item_count: 1 };
+    mocks.categories.mockResolvedValue([category, folder]);
+    const bulkRun = {
+      id: "bulk-1",
+      operation: "approve" as const,
+      status: "awaiting_confirmation" as const,
+      actor_user_id: 2,
+      target_category_id: null,
+      note: null,
+      confirmation_phrase: null,
+      total_files: 1,
+      selected_files: 1,
+      completed_files: 0,
+      failed_files: 0,
+      total_folders: 1,
+      total_bytes: 64,
+      processed_bytes: 0,
+      archive_filename: null,
+      error_summary: null,
+      created_at: 1,
+      started_at: null,
+      finished_at: null,
+      expires_at: null,
+      updated_at: 1,
+      max_archive_bytes: 10 * 1024 ** 3,
+      categories: [{
+        run_id: "bulk-1", category_id: folder.id, parent_id: folder.parent_id,
+        full_path: folder.full_path, archive_path: "02 模型目录", version: 1,
+        root_category_id: folder.id, is_root: true, eligible: true, selected: false,
+        reason: null, result_status: "pending" as const, result_message: null, sort_order: 0,
+      }],
+      items: [{
+        run_id: "bulk-1", item_id: item.item_id, version_id: item.version_id,
+        category_id: folder.id, category_path: folder.full_path,
+        archive_path: "02 模型目录/standard.pdf", title: item.title,
+        original_filename: item.original_filename, content_kind: "document",
+        lifecycle_status: "awaiting_review", size_bytes: 64, scope_source: "category" as const,
+        root_category_id: folder.id, eligible: true, selected: true, reason: null,
+        result_status: "pending" as const, result_message: null, index_job_id: null, sort_order: 0,
+      }],
+    };
+    mocks.preflightBulkOperation.mockResolvedValue(bulkRun);
+    mocks.updateBulkSelection.mockResolvedValue({
+      ...bulkRun,
+      selected_files: 0,
+      total_bytes: 0,
+      items: [{ ...bulkRun.items[0], selected: false }],
+    });
+    mocks.reviewBulkItem.mockResolvedValue({
+      ...bulkRun,
+      status: "succeeded" as const,
+      selected_files: 0,
+      completed_files: 1,
+      items: [{ ...bulkRun.items[0], selected: false, result_status: "succeeded" as const }],
+    });
+
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+    const folderRow = screen.getByTestId(`managed-folder-row-${folder.id}`);
+    fireEvent.click(within(folderRow).getByRole("checkbox", { name: "选择文件夹02 模型目录" }));
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "批量确认" }));
+
+    await waitFor(() => expect(mocks.preflightBulkOperation).toHaveBeenCalledWith(
+      "approve",
+      [{ category_id: folder.id, expected_version: folder.version }],
+      [],
+    ));
+    const dialog = await screen.findByRole("dialog", { name: "批量确认" });
+    expect(within(dialog).getByText(folder.full_path)).toBeInTheDocument();
+    expect(within(dialog).getByText(item.original_filename, { exact: false })).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: `选择${item.title}` }));
+    await waitFor(() => expect(mocks.updateBulkSelection).toHaveBeenCalledWith("bulk-1", [item.item_id], false));
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "通过" }));
+    await waitFor(() => expect(mocks.reviewBulkItem).toHaveBeenCalledWith("bulk-1", item.item_id, true, ""));
+    await waitFor(() => expect(within(dialog).getByText("批量操作已完成")).toBeInTheDocument());
+    expect(mocks.preflightBulkOperation).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mocks.items.mock.calls.length).toBeGreaterThan(2));
+  });
+
   it("shows a folder-only root instead of the empty state", async () => {
     mocks.categories.mockResolvedValue([category, projectCategory]);
     mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });

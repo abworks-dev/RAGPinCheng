@@ -108,7 +108,7 @@ describe("AdminDocumentsPage", () => {
     expect(screen.getByRole("heading", { name: "发布任务" })).toBeInTheDocument();
     expect(within(row).getByText("发布失败")).toHaveClass("bg-destructive/15");
     expect(within(row).getByText(/PDF/)).toBeInTheDocument();
-    expect(within(row).getByText("PDF").parentElement).toHaveClass("flex", "w-20", "flex-col");
+    expect(within(row).getByText("PDF").parentElement).toHaveClass("flex", "w-16", "flex-col");
     expect(within(row).getByText(/分类：03 公司内部标准 \/ 01 建模标准/)).toBeInTheDocument();
     expect(within(row).getByText("managed-document.pdf · v3 · 2.0 KB")).toBeInTheDocument();
     expect(within(row).getByText(/历史迁移/)).toBeInTheDocument();
