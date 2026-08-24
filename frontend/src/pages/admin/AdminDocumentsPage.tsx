@@ -96,7 +96,7 @@ function IndexTaskSearchFilters({
   return <div ref={containerRef} className="relative min-w-0 w-full xl:w-72 xl:max-w-72 xl:justify-self-center min-[1400px]:w-96 min-[1400px]:max-w-96">
     <div className="relative">
       <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-      <Input ref={searchRef} aria-label="搜索发布任务" type="search" value={searchInput} onChange={(event) => onSearchInputChange(event.target.value)} placeholder="搜索名称、文件名或分类…" className="h-control-sm pl-9 pr-11" />
+      <Input ref={searchRef} aria-label="搜索发布任务" type="search" value={searchInput} onChange={(event) => onSearchInputChange(event.target.value)} placeholder="搜索名称、文件名或分类…" className="h-control-md pl-9 pr-11" />
       <button type="button" className="absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-ui-sm text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={open ? "收起索引任务筛选" : "展开索引任务筛选"} title="筛选" aria-haspopup="dialog" aria-expanded={open} aria-controls={filtersId} onClick={() => setOpen((current) => !current)}>
         <SlidersHorizontal className="size-4" aria-hidden="true" />
         {activeFilterCount > 0 && <span className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-primary" aria-hidden="true" />}
@@ -259,7 +259,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
       )}
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="发布任务状态概览">
-        <ManagedSummaryCard label="发布版本" value={allCount} icon={<ListChecks className="size-4" />} active={status === "all"} onClick={() => setStatus("all")} />
+        <ManagedSummaryCard label="全部任务" value={allCount} icon={<ListChecks className="size-4" />} active={status === "all"} onClick={() => setStatus("all")} />
         <ManagedSummaryCard label="处理中" value={counts.processing || 0} icon={<Clock3 className="size-4" />} tone="warning" active={status === "processing"} onClick={() => setStatus((current) => current === "processing" ? "all" : "processing")} />
         <ManagedSummaryCard label="已发布" value={counts.ready || 0} icon={<CheckCircle2 className="size-4" />} tone="success" active={status === "ready"} onClick={() => setStatus((current) => current === "ready" ? "all" : "ready")} />
         <ManagedSummaryCard label="发布失败" value={counts.failed || 0} icon={<CircleAlert className="size-4" />} tone="destructive" active={status === "failed"} onClick={() => setStatus((current) => current === "failed" ? "all" : "failed")} />
