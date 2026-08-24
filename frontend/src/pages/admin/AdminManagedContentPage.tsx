@@ -1073,28 +1073,19 @@ function UploadTasksPanel({
             >
               清除筛选
             </Button>
-            {selected.length > 0 && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setSelected([])}
-              >
-                取消选择
-              </Button>
-            )}
-            {selected.length > 1 && (
-              <BatchActionsMenu
-                disabled={loading}
-                options={[
-                  {
-                    key: "export_upload_summary",
-                    label: "导出任务摘要",
-                    icon: <Download className="size-4" />,
-                    onSelect: exportSelected,
-                  },
-                ]}
-              />
-            )}
+            <BatchActionsMenu
+              disabled={loading}
+              options={[
+                {
+                  key: "export_upload_summary",
+                  label: selected.length > 0 ? `导出所选任务摘要（${selected.length}）` : "导出所选任务摘要",
+                  icon: <Download className="size-4" />,
+                  disabled: selected.length < 2,
+                  disabledReason: "至少选择 2 个上传任务",
+                  onSelect: exportSelected,
+                },
+              ]}
+            />
           </div>
         </div>
         {error && (

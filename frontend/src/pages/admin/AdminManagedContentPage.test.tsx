@@ -1046,7 +1046,7 @@ describe("AdminManagedContentPage", () => {
     fireEvent.focus(screen.getByRole("textbox", { name: "搜索资料" }));
     expect(within(screen.getByRole("dialog", { name: "搜索筛选" })).getByRole("combobox", { name: "状态" })).toHaveValue("");
     expect(screen.getAllByRole("status").some((node) => node.textContent?.includes("未选择资料"))).toBe(true);
-    expect(screen.queryByRole("button", { name: "批量操作" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "批量操作" })).toBeInTheDocument();
   });
 
   it("places index tasks after upload tasks and keeps the selected view in the URL", async () => {
@@ -1387,7 +1387,7 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准" })[0]);
     expect(screen.getByText("已选择", { exact: false })).toHaveTextContent("已选择 1 份");
     expect(screen.getByText("已选择", { exact: false })).not.toHaveTextContent("单次最多");
-    expect(screen.queryByRole("button", { name: "批量操作" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "批量操作" })).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准2" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
     expect(screen.getByRole("menu", { name: "批量操作" })).toBeInTheDocument();
@@ -2446,7 +2446,7 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(within(rows[1]).getByRole("checkbox"));
     expect(screen.getAllByRole("status").some((status) => status.textContent?.includes("已选择 2 个"))).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "导出任务摘要" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "导出所选任务摘要（2）" }));
     expect(mocks.success).toHaveBeenCalledWith("已导出 2 个任务摘要");
 
     fireEvent.click(screen.getByRole("button", { name: "下一页" }));
