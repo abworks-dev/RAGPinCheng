@@ -2450,9 +2450,9 @@ export function AdminManagedContentPage() {
     (Boolean(currentFolderId) || hasLibrarySearchOrFilters);
 
   const load = useCallback(
-    async (refresh = false) => {
+    async (refresh = false, silent = false) => {
       const requestId = ++contentLoadRequestRef.current;
-      if (refresh) setRefreshing(true);
+      if (refresh && !silent) setRefreshing(true);
       else if (!currentFolderId) setLoading(true);
       setError(null);
       try {
@@ -2524,7 +2524,7 @@ export function AdminManagedContentPage() {
       } finally {
         if (requestId === contentLoadRequestRef.current) {
           setLoading(false);
-          setRefreshing(false);
+          if (!silent) setRefreshing(false);
         }
       }
     },
@@ -2555,7 +2555,7 @@ export function AdminManagedContentPage() {
   useManagedContentLiveRefresh({
     active: hasActiveReclassification || hasActivePublication,
     enabled: view === "library" && !uploading,
-    refresh: () => load(true),
+    refresh: () => load(true, true),
   });
 
   const loadTrash = useCallback(async () => {
