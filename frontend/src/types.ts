@@ -722,6 +722,7 @@ export type ManagedIndexJobList = {
 };
 
 export type UnifiedPublicationJob = {
+  // Latest-attempt metadata is supplied by the unified publication endpoint.
   id: string;
   task_type: "document" | "video_transcript";
   task_type_label: string;
