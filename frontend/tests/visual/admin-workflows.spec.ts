@@ -129,8 +129,8 @@ test.describe("资料管理", () => {
     const rows = page.getByTestId("upload-task-row");
     const failedRow = rows.filter({ hasText: "01 行业规范与标准 / 02 文件夹上传测试" });
     const failedActions = failedRow.getByRole("button");
-    await expect(failedActions).toHaveCount(2);
-    expect(await failedActions.allTextContents()).toEqual(["重试", "详情"]);
+    await expect(failedActions).toHaveCount(3);
+    expect(await failedActions.allTextContents()).toEqual(["重试", "详情", "删除"]);
     const retry = failedRow.getByRole("button", { name: "重试（原始文件不可用）", exact: true });
     await expect(retry).toBeDisabled();
     await expect(retry).toHaveAttribute("title", "原始文件仅保留在当前浏览器会话中，当前不可重试");
