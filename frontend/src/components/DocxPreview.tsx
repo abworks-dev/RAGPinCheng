@@ -18,6 +18,10 @@ export function DocxPreview({
   zoom?: number;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const onLoadRef = useRef(onLoad);
+  const onErrorRef = useRef(onError);
+  onLoadRef.current = onLoad;
+  onErrorRef.current = onError;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,13 +56,13 @@ export function DocxPreview({
 
         if (!cancelled) {
           setLoading(false);
-          onLoad?.();
+          onLoadRef.current?.();
         }
       } catch (e: any) {
         if (!cancelled) {
           setError("暂时无法预览此 Word 文档，请确认源文件仍然存在且格式有效。");
           setLoading(false);
-          onError?.("DOCX preview unavailable");
+          onErrorRef.current?.("DOCX preview unavailable");
         }
       }
     }
@@ -68,7 +72,7 @@ export function DocxPreview({
     return () => {
       cancelled = true;
     };
-  }, [parentId, onLoad, onError]);
+  }, [parentId]);
 
   if (error) {
     return (
