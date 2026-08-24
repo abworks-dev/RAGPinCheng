@@ -3983,7 +3983,7 @@ def list_unified_publication_jobs(
              COALESCE(v.title,i.title) AS title, v.original_filename,
              i.category_id, c.display_code || ' ' || c.display_name AS category_label,
              NULL AS category_path, v.source_origin, j.attempt_number,
-             0 AS is_archived, CASE WHEN h.current_version_id=v.id THEN 1 ELSE 0 END AS is_current_head,
+             CASE WHEN i.archived_at IS NULL THEN 0 ELSE 1 END AS is_archived, CASE WHEN h.current_version_id=v.id THEN 1 ELSE 0 END AS is_current_head,
              1 AS is_latest_attempt, v.doc_type, v.version_number, o.size_bytes AS file_size,
              NULL AS parent_count, NULL AS preview_parent_id,
              (SELECT count(*) FROM content_index_jobs x WHERE x.version_id=j.version_id) AS attempt_count,
