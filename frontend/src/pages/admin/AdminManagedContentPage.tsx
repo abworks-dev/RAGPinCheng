@@ -927,10 +927,17 @@ function UploadTasksPanel({
   return (
     <section className="space-y-4" aria-labelledby="upload-tasks-title">
       <div
-        className="grid grid-cols-2 gap-3 sm:grid-cols-4"
+        className="grid grid-cols-2 gap-3 lg:grid-cols-5"
         aria-label="上传任务状态概览"
       >
         {[
+          {
+            key: "all",
+            label: "全部任务",
+            value: Object.values(counts).reduce((sum, value) => sum + value, 0),
+            icon: <ListChecks className="size-4" />,
+            tone: "primary" as const,
+          },
           {
             key: "active",
             label: "进行中",
@@ -971,12 +978,10 @@ function UploadTasksPanel({
             value={summary.value}
             icon={summary.icon}
             tone={summary.tone}
-            active={statusFilter === summary.key}
+            active={statusFilter === summary.key || (summary.key === "all" && statusFilter === "all")}
             onClick={() =>
               setStatusFilter((current) =>
-                current === summary.key
-                  ? "all"
-                  : (summary.key as typeof statusFilter),
+                summary.key === "all" ? "all" : current === summary.key ? "all" : (summary.key as typeof statusFilter),
               )
             }
           />
@@ -1789,7 +1794,7 @@ function ManagedContentSearchFilters({
         />
         <Input
           ref={inputRef}
-          className="h-control-sm pl-9 pr-11"
+          className="h-control-md pl-9 pr-11"
           value={queryInput}
           onChange={(event) => onQueryInputChange(event.target.value)}
           onFocus={() => setOpen(true)}
@@ -6522,7 +6527,7 @@ export function AdminManagedContentPage() {
           { label: "待确认", value: counts.awaiting_review || 0, icon: <AlertTriangle className="size-4" />, tone: "warning" as const },
           { label: "已确认", value: counts.approved || 0, icon: <CheckCircle2 className="size-4" />, tone: "success" as const },
           { label: "已发布", value: counts.published || 0, icon: <Rocket className="size-4" />, tone: "success" as const },
-        ].map((summary) => <ManagedSummaryCard key={summary.label} label={summary.label} value={summary.value} icon={summary.icon} tone={summary.tone} />)}
+        ].map((summary) => { const next = summary.label === "全部资料" ? "" : summary.label === "待确认" ? "awaiting_review" : summary.label === "已确认" ? "approved" : "published"; return <ManagedSummaryCard key={summary.label} label={summary.label} value={summary.value} icon={summary.icon} tone={summary.tone} active={statusFilter === next} onClick={() => { setStatusFilter((current) => current === next ? "" : next); setPage(0); }} />; })}
       </section>
 
       {!enabled && !loading && (
@@ -6933,7 +6938,7 @@ export function AdminManagedContentPage() {
                           />
                         </th>
                         {(
-                          [
+        [
                             ["docType", "类型"],
                             ["title", "资料"],
                             ["updatedAt", "更新时间"],
