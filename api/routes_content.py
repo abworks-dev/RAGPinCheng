@@ -1919,6 +1919,7 @@ def _content_item_dto(
         retention_days_remaining=retention_days_remaining,
         media_duration_ms=row["media_duration_ms"] if "media_duration_ms" in row.keys() else None,
         media_file_size=row["media_file_size"] if "media_file_size" in row.keys() else None,
+        file_size=row["file_size"] if "file_size" in row.keys() else None,
         has_pending_revision=bool(row["has_pending_revision"])
         if "has_pending_revision" in row.keys()
         else False,

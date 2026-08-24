@@ -8134,18 +8134,22 @@ export function AdminManagedContentPage() {
                 <dd>{sourceLabel[detail.source_origin] || "其他来源"}</dd>
                 <dt className="text-muted-foreground">版本</dt>
                 <dd>v{detail.version_number}</dd>
+                <dt className="text-muted-foreground">文件大小</dt>
+                <dd>
+                  {detail.content_kind === "media_transcript"
+                    ? detail.media_file_size != null
+                      ? formatUploadSize(detail.media_file_size)
+                      : "未记录"
+                    : detail.file_size != null
+                      ? formatUploadSize(detail.file_size)
+                      : "未记录"}
+                </dd>
                 {detail.content_kind === "media_transcript" && (
                   <>
                     <dt className="text-muted-foreground">视频时长</dt>
                     <dd>
                       {formatMediaDuration(detail.media_duration_ms) ||
                         "未记录"}
-                    </dd>
-                    <dt className="text-muted-foreground">视频大小</dt>
-                    <dd>
-                      {detail.media_file_size != null
-                        ? formatUploadSize(detail.media_file_size)
-                        : "未记录"}
                     </dd>
                     <dt className="text-muted-foreground">后续版本</dt>
                     <dd>
