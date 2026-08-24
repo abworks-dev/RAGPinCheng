@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { PreviewZoomControls } from "./PreviewZoomControls";
 
 /**
  * DOCX preview component using docx-preview library.
@@ -18,6 +19,7 @@ export function DocxPreview({
   const containerRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -77,7 +79,8 @@ export function DocxPreview({
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col bg-secondary">
+      {!loading && <div className="flex shrink-0 justify-end border-b border-border bg-background px-2 py-1"><PreviewZoomControls zoom={zoom} onChange={setZoom} /></div>}
       {loading && (
         <div className="flex items-center justify-center py-8 text-sm text-muted">
           加载 DOCX…
@@ -85,8 +88,8 @@ export function DocxPreview({
       )}
       <div
         ref={containerRef}
-        className="flex-1 overflow-y-auto px-4 py-2 [&_.docx-viewer]:max-w-full"
-        style={{ display: loading ? "none" : "block" }}
+        className="flex-1 overflow-auto px-4 py-4 [&_.docx-viewer]:max-w-full"
+        style={{ display: loading ? "none" : "block", transform: `scale(${zoom})`, transformOrigin: "top left", width: `${100 / zoom}%` }}
       />
     </div>
   );
