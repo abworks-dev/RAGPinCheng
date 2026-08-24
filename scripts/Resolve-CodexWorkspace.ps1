@@ -334,6 +334,23 @@ try {
         }
     }
 
+    $lifecycleScript = Join-Path $scriptProjectRoot "scripts/Register-CodexWorktree.ps1"
+    $lifecycleAvailable = Test-Path -LiteralPath $lifecycleScript -PathType Leaf
+    $creationRequest = $null
+    if ($worktreeAction -eq "create_new") {
+        if (-not $lifecycleAvailable) {
+            $reasonCodes.Add("HARNESS_CAPABILITY_MISSING")
+            $errors.Add("The guarded worktree registration helper is unavailable.")
+        }
+        $creationRequest = [ordered]@{
+            script = $lifecycleScript
+            repository_path = [string]$initial.primary_worktree_path
+            branch = if ([string]::IsNullOrWhiteSpace($ExpectedBranch)) { $null } else { $ExpectedBranch }
+            base_ref = "origin/master"
+            intent = if ([string]::IsNullOrWhiteSpace($Intent)) { "New" } else { $Intent }
+            requires_target_path = $true
+        }
+    }
     $allowed = $errors.Count -eq 0 -and $worktreeAction -ne "blocked"
     $result = [ordered]@{
         schema_version = 1
@@ -348,6 +365,8 @@ try {
         recommended_worktree_action = $worktreeAction
         candidate_worktree = $candidatePath
         candidate_branch = $candidateBranch
+        lifecycle_capability_available = $lifecycleAvailable
+        creation_request = $creationRequest
         exception_used = [bool]$AllowNonCodexBranch
         exception_reason = if ([string]::IsNullOrWhiteSpace($ExceptionReason)) { $null } else { $ExceptionReason }
         recommended_environment = $recommendedEnvironment
@@ -380,6 +399,8 @@ try {
         recommended_worktree_action = "blocked"
         candidate_worktree = $null
         candidate_branch = $null
+        lifecycle_capability_available = $false
+        creation_request = $null
         exception_used = [bool]$AllowNonCodexBranch
         exception_reason = if ([string]::IsNullOrWhiteSpace($ExceptionReason)) { $null } else { $ExceptionReason }
         recommended_environment = "missing"
