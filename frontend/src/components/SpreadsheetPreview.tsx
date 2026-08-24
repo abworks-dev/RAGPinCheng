@@ -44,10 +44,10 @@ export function SpreadsheetPreview({ sheetName, parentId, onLoad, onError, zoom 
       </div>
     </div>
     <div className="flex-1 overflow-auto p-4">
-      {current.rows.length ? <table className="origin-top-left border-collapse bg-background text-xs shadow-sm" style={{ transform: `scale(${zoom})`, transformOrigin: "top left" }} aria-label={current.name}>
+      {current.rows.length ? <div className="relative origin-top-left" style={{ transform: `scale(${zoom})`, transformOrigin: "top left" }}><table className="border-collapse bg-background text-xs shadow-sm" aria-label={current.name}>
         <colgroup>{current.columnWidths.map((width, index) => <col key={index} style={{ width, minWidth: width }} />)}</colgroup>
         <tbody>{current.rows.map((row) => <tr key={row.key} style={{ height: row.height }}>{row.cells.map((cell) => <td key={cell.key} colSpan={cell.colSpan} rowSpan={cell.rowSpan} className="overflow-hidden border border-gray-200 px-1.5 py-1 dark:border-gray-700" style={cell.style}>{cell.text}</td>)}</tr>)}</tbody>
-      </table> : <div className="flex h-full items-center justify-center text-sm text-muted">此工作表没有数据</div>}
+      </table>{current.images.map((image) => <img key={image.key} src={image.src} alt="" className="pointer-events-none absolute object-contain" style={{ left: image.left, top: image.top, width: image.width, height: image.height }} />)}</div> : <div className="flex h-full items-center justify-center text-sm text-muted">此工作表没有数据</div>}
     </div>
   </div>;
 }

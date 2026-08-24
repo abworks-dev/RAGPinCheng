@@ -136,7 +136,7 @@ export function PdfPreview() {
   const isXMind = state.docType === "xmind";
   // PPTX files are converted to PDF by the preview endpoint and use the same page controls.
   const isPdf = !isDocx && !isXlsx && !isXMind;
-  const panEnabled = isPdf && (interactionMode === "pan" || temporaryPan);
+  const panEnabled = interactionMode === "pan" || temporaryPan;
 
   useEffect(() => {
     prefetchGenerationRef.current += 1;
@@ -351,7 +351,7 @@ export function PdfPreview() {
           ? `${state.pageNumber} / ${numPages} 页`
           : "PDF 文档";
 
-  const toolbar = isPdf ? (
+  const toolbar = (
     <div className="flex items-center gap-1">
       <button
         type="button"
@@ -362,7 +362,7 @@ export function PdfPreview() {
       >
         {interactionMode === "pan" ? <Hand className="size-4" /> : <MousePointer2 className="size-4" />}
       </button>
-      <button
+      {isPdf && <button
         type="button"
         aria-label="缩小"
         onClick={() => changeZoom(-ZOOM_STEP)}
@@ -370,8 +370,9 @@ export function PdfPreview() {
         className="inline-flex size-8 items-center justify-center rounded-ui-md hover:bg-secondary disabled:opacity-30"
       >
         <Minus className="size-4" />
-      </button>
-      <select
+      </button>}
+      {!isPdf && <PreviewZoomControls zoom={resourceZoom} onChange={setResourceZoom} />}
+      {isPdf && <select
         aria-label="缩放模式"
         value={zoomMode}
         onChange={(event) => {
@@ -384,11 +385,11 @@ export function PdfPreview() {
         <option value="fit-width">适合宽度</option>
         <option value="actual">实际大小</option>
         {zoomMode === "custom" && <option value="custom">自定义</option>}
-      </select>
-      <span className="w-10 text-center text-xs tabular-nums text-muted-foreground">
+      </select>}
+      {isPdf && <span className="w-10 text-center text-xs tabular-nums text-muted-foreground">
         {Math.round(scale * 100)}%
-      </span>
-      <button
+      </span>}
+      {isPdf && <button
         type="button"
         aria-label="放大"
         onClick={() => changeZoom(ZOOM_STEP)}
@@ -396,9 +397,9 @@ export function PdfPreview() {
         className="inline-flex size-8 items-center justify-center rounded-ui-md hover:bg-secondary disabled:opacity-30"
       >
         <Plus className="size-4" />
-      </button>
+      </button>}
     </div>
-  ) : <PreviewZoomControls zoom={resourceZoom} onChange={setResourceZoom} />;
+  );
 
   const returnLabel = state.returnTo === "managed-content-detail"
     ? "返回资料详情"
