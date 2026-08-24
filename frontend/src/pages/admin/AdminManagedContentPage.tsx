@@ -5292,7 +5292,7 @@ export function AdminManagedContentPage() {
           onClick={() => selectView("index")}
         >
           <ListChecks className="size-4" />
-          索引任务
+          发布任务
         </Button>
       )}
       {state.status === "authed" && state.user.role === "admin" && (
@@ -6526,10 +6526,10 @@ export function AdminManagedContentPage() {
       >
         {[
           { label: "全部资料", value: Object.values(counts).reduce((sum, value) => sum + value, 0), icon: <FileText className="size-4" /> },
-          { label: "发布中", value: counts.publishing || 0, icon: <LoaderCircle className="size-4" />, tone: "warning" as const },
+          { label: "发布处理中", value: counts.publishing || 0, icon: <LoaderCircle className="size-4" />, tone: "warning" as const },
           { label: "已发布", value: counts.published || 0, icon: <Rocket className="size-4" />, tone: "success" as const },
           { label: "发布失败", value: counts.publication_failed || 0, icon: <XCircle className="size-4" />, tone: "destructive" as const },
-        ].map((summary) => { const next = summary.label === "全部资料" ? "" : summary.label === "发布中" ? "publishing" : summary.label === "已发布" ? "published" : "publication_failed"; return <ManagedSummaryCard key={summary.label} label={summary.label} value={summary.value} icon={summary.icon} tone={summary.tone} active={statusFilter === next} onClick={() => { setStatusFilter((current) => current === next ? "" : next); setPage(0); }} />; })}
+        ].map((summary) => { const next = summary.label === "全部资料" ? "" : summary.label === "发布处理中" ? "publishing" : summary.label === "已发布" ? "published" : "publication_failed"; return <ManagedSummaryCard key={summary.label} label={summary.label} value={summary.value} icon={summary.icon} tone={summary.tone} active={statusFilter === next} onClick={() => { setStatusFilter((current) => current === next ? "" : next); setPage(0); }} />; })}
       </section>
 
       {!enabled && !loading && (

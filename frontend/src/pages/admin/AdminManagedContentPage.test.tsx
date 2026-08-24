@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   uploadTasks: vi.fn(),
   uploadTask: vi.fn(),
   indexJobs: vi.fn(),
+  publicationJobs: vi.fn(),
   createCategory: vi.fn(),
   renameCategory: vi.fn(),
   updateCategoryNumber: vi.fn(),
@@ -115,7 +116,8 @@ vi.mock("../../api/client", () => ({
     uploadManagedContent: mocks.upload,
     managedUploadTasks: mocks.uploadTasks,
     managedUploadTask: mocks.uploadTask,
-    managedContentIndexJobs: mocks.indexJobs,
+    managedContentIndexJobs: mocks.publicationJobs,
+    publicationJobs: mocks.publicationJobs,
     createManagedCategory: mocks.createCategory,
     renameManagedCategory: mocks.renameCategory,
     updateManagedCategoryNumber: mocks.updateCategoryNumber,
@@ -316,7 +318,7 @@ describe("AdminManagedContentPage", () => {
     mocks.auditEvents.mockResolvedValue([]);
     mocks.uploadTasks.mockResolvedValue({ tasks: [], total: 0, status_counts: {} });
     mocks.uploadTask.mockResolvedValue({});
-    mocks.indexJobs.mockResolvedValue({ jobs: [], total: 0, status_counts: {} });
+    mocks.publicationJobs.mockResolvedValue({ jobs: [], total: 0, status_counts: {} });
     mocks.reclassifyContent.mockResolvedValue({ id: "reclass-1", status: "pending" });
     mocks.renameCategory.mockResolvedValue({ ...childCategory, display_name: "新目录名称", version: 2 });
     mocks.updateCategoryNumber.mockResolvedValue([category, { ...childCategory, version: 2 }, projectCategory]);
@@ -1051,15 +1053,15 @@ describe("AdminManagedContentPage", () => {
 
     const tabs = screen.getByRole("tablist", { name: "资料视图" });
     expect(within(tabs).getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
-      "资料列表", "回收站", "上传任务", "索引任务",
+      "资料列表", "回收站", "上传任务", "发布任务",
     ]);
 
-    fireEvent.click(within(tabs).getByRole("tab", { name: "索引任务" }));
+    fireEvent.click(within(tabs).getByRole("tab", { name: "发布任务" }));
     expect(window.location.search).toBe("?view=index");
     expect(screen.getByRole("heading", { name: "资料管理", level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "索引任务", level: 2 })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "索引任务" })).toHaveAttribute("aria-selected", "true");
-    await waitFor(() => expect(mocks.indexJobs).toHaveBeenCalled());
+    expect(screen.getByRole("heading", { name: "发布任务", level: 2 })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "发布任务" })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(mocks.publicationJobs).toHaveBeenCalled());
   });
 
   it("restores a permitted index view from a direct URL", async () => {
@@ -1067,8 +1069,8 @@ describe("AdminManagedContentPage", () => {
     window.history.replaceState({}, "", "/admin/content?view=index");
     render(<AdminManagedContentPage />);
 
-    expect(await screen.findByRole("heading", { name: "索引任务", level: 2 })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "索引任务" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("heading", { name: "发布任务", level: 2 })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "发布任务" })).toHaveAttribute("aria-selected", "true");
   });
 
   it("falls back to the library when index view permission is missing", async () => {
@@ -1077,7 +1079,7 @@ describe("AdminManagedContentPage", () => {
 
     await waitFor(() => expect(window.location.search).toBe(""));
     expect(screen.getByRole("tab", { name: "资料列表" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.queryByRole("heading", { name: "索引任务" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "发布任务" })).not.toBeInTheDocument();
   });
 
   it("switches the active top-level folder and its upload target", async () => {
@@ -1186,7 +1188,7 @@ describe("AdminManagedContentPage", () => {
     expect(dialog).toHaveTextContent("视频文件1 个");
     expect(dialog).toHaveTextContent("转录版本3 个");
     expect(dialog).toHaveTextContent("转录产物2 个");
-    expect(dialog).toHaveTextContent("索引任务记录4 条");
+    expect(dialog).toHaveTextContent("发布任务记录4 条");
     expect(within(dialog).getByRole("alert")).toHaveTextContent("全部转录版本及其检索数据");
     fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "永久删除 1 份资料（含 1 个视频）" } });
     expect(within(dialog).getByRole("button", { name: "永久删除" })).toBeEnabled();

@@ -13,7 +13,7 @@ import { Select } from "../../components/ui/select";
 import { toast } from "../../components/ui/toast";
 import { useAuth } from "../../context/AuthContext";
 import { cn } from "../../lib/utils";
-import type { ManagedCategory, ManagedIndexJob, ManagedIndexJobList } from "../../types";
+import type { ManagedCategory, ManagedIndexJob, ManagedIndexJobList, UnifiedPublicationJob, UnifiedPublicationJobList } from "../../types";
 import { formatAdminDate, formatBytes } from "../../lib/admin-formatters";
 import { ManagedSummaryCard } from "../../components/admin/ManagedSummaryCard";
 import { ManagedItemType } from "../../components/admin/ManagedItemType";
@@ -72,7 +72,7 @@ function IndexTaskSearchFilters({
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
-  const filtersId = "index-task-search-filters";
+  const filtersId = "publication-task-search-filters";
   const activeFilterCount = Number(Boolean(categoryId)) + Number(Boolean(docType)) + Number(Boolean(sourceOrigin)) + Number(status !== "all") + Number(history) + Number(includeArchived);
 
   useEffect(() => {
@@ -97,13 +97,13 @@ function IndexTaskSearchFilters({
     <div className="relative">
       <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
       <Input ref={searchRef} aria-label="搜索发布任务" type="search" value={searchInput} onChange={(event) => onSearchInputChange(event.target.value)} placeholder="搜索名称、文件名或分类…" className="h-control-md pl-9 pr-11 text-ui-xs" />
-      <button type="button" className="absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-ui-sm text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={open ? "收起索引任务筛选" : "展开索引任务筛选"} title="筛选" aria-haspopup="dialog" aria-expanded={open} aria-controls={filtersId} onClick={() => setOpen((current) => !current)}>
+      <button type="button" className="absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-ui-sm text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={open ? "收起发布任务筛选" : "展开发布任务筛选"} title="筛选" aria-haspopup="dialog" aria-expanded={open} aria-controls={filtersId} onClick={() => setOpen((current) => !current)}>
         <SlidersHorizontal className="size-4" aria-hidden="true" />
         {activeFilterCount > 0 && <span className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-primary" aria-hidden="true" />}
         {activeFilterCount > 0 && <span className="sr-only">，已启用 {activeFilterCount} 项筛选</span>}
       </button>
     </div>
-    {open && <div id={filtersId} role="dialog" aria-label="索引任务搜索筛选" className="fixed inset-x-4 bottom-4 top-4 z-dropdown overflow-y-auto rounded-ui-lg border border-border bg-popover p-3 text-popover-foreground shadow-overlay sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:min-w-[36rem] sm:overflow-visible">
+    {open && <div id={filtersId} role="dialog" aria-label="发布任务搜索筛选" className="fixed inset-x-4 bottom-4 top-4 z-dropdown overflow-y-auto rounded-ui-lg border border-border bg-popover p-3 text-popover-foreground shadow-overlay sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:min-w-[36rem] sm:overflow-visible">
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="space-y-1 text-ui-xs text-muted-foreground"><span>分类</span><Select className="h-control-sm" aria-label="按数据库分类筛选" value={categoryId} onChange={(event) => onCategoryChange(event.target.value)}><option value="">全部分类</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.full_path}</option>)}</Select></label>
         <label className="space-y-1 text-ui-xs text-muted-foreground"><span>类型</span><Select className="h-control-sm" aria-label="按文件类型筛选" value={docType} onChange={(event) => onDocTypeChange(event.target.value)}><option value="">全部类型</option><option value="pdf">PDF</option><option value="markdown">Markdown</option><option value="docx">Word</option><option value="xlsx">Excel</option><option value="pptx">PPT</option><option value="transcript">视频转写</option></Select></label>
@@ -171,7 +171,20 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
     background ? setRefreshing(true) : setLoading(true);
     setError(null);
     try {
-      setListing(await adminContentApi.indexJobs(params));
+    const unified = await adminContentApi.publicationJobs(params);
+    setListing({
+      ...unified,
+      status_counts: { processing: unified.status_counts.processing || 0, ready: unified.status_counts.published || 0, failed: unified.status_counts.failed || 0 },
+      jobs: unified.jobs.map((job) => ({
+        ...job,
+        status: job.status === "published" ? "done" : job.status === "processing" ? "pending" : "failed",
+        publication_id: job.publication_id || `video:${job.id}`,
+        is_archived: false,
+        is_current_head: job.status === "published",
+        is_latest_attempt: true,
+        failure: job.error_code ? { code: job.error_code, message: job.error_summary || job.error_code, retryable: job.retryable } : null,
+      })) as unknown as ManagedIndexJob[],
+    });
     } catch (caught: any) {
       setError(caught?.message || String(caught));
     } finally {
@@ -214,7 +227,11 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
     if (!canPublish || retryingJobId || job.is_archived || job.status !== "failed" || !job.is_latest_attempt) return;
     setRetryingJobId(job.id);
     try {
-      await adminContentApi.publish(job.version_id);
+      if ((job as ManagedIndexJob & { task_type?: string }).task_type === "video_transcript") {
+        await adminContentApi.retryPublicationJob(job.id, "video_transcript");
+      } else {
+        await adminContentApi.publish(job.version_id);
+      }
       toast.success("已重新加入发布队列");
       await load(true);
     } catch (caught) {
@@ -247,8 +264,8 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
   const titleId = embedded ? "managed-index-view-title" : "admin-documents-title";
 
   return (
-    <section className="space-y-5" aria-labelledby={titleId}>
-      {!embedded && <header><p className="text-ui-xs font-medium text-primary">内容管理</p><h1 id={titleId} className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">索引任务</h1><p className="mt-1 max-w-3xl text-ui-sm text-muted-foreground">跟踪资料版本的发布处理状态，并处理可重试的失败任务。</p></header>}
+      <section className="space-y-5" aria-labelledby={titleId}>
+      {!embedded && <header><p className="text-ui-xs font-medium text-primary">内容管理</p><h1 id={titleId} className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">发布任务</h1><p className="mt-1 max-w-3xl text-ui-sm text-muted-foreground">统一跟踪普通资料和视频转录稿的发布处理状态，并处理可重试的失败任务。</p></header>}
 
       {error && (
         <ErrorState
@@ -269,7 +286,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
         <div className="grid gap-3 border-b border-border px-4 py-4 sm:px-5 xl:grid-cols-[minmax(13rem,1fr)_18rem_auto] xl:items-end min-[1400px]:grid-cols-[minmax(13rem,1fr)_24rem_auto]">
           <div>
             {embedded
-              ? <h2 id={titleId} className="text-ui-base font-semibold text-foreground">索引任务</h2>
+              ? <h2 id={titleId} className="text-ui-base font-semibold text-foreground">发布任务</h2>
               : <h2 id="managed-index-title" className="text-ui-base font-semibold text-foreground">资料发布任务</h2>}
             <p className="mt-1 text-ui-xs text-muted-foreground">
               {embedded ? "跟踪资料版本的发布处理状态，并处理可重试的失败任务。" : listingScopeDescription}
@@ -305,9 +322,9 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
           <div className="flex flex-col gap-2 border-t border-border px-4 py-3 text-ui-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-5">
             <span>共 {listing.total} 条任务，第 {page + 1} / {pageCount} 页</span>
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <label className="flex items-center gap-2 text-ui-xs text-muted-foreground">每页<Select aria-label="每页索引任务条数" className="h-control-sm w-20" value={String(pageSize)} onChange={(event) => setPageSize(Number(event.target.value))}>{PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size} 条</option>)}</Select></label>
+              <label className="flex items-center gap-2 text-ui-xs text-muted-foreground">每页<Select aria-label="每页发布任务条数" className="h-control-sm w-20" value={String(pageSize)} onChange={(event) => setPageSize(Number(event.target.value))}>{PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size} 条</option>)}</Select></label>
               <Button size="sm" variant="outline" disabled={page === 0 || loading} onClick={() => setPage((value) => value - 1)}>上一页</Button>
-              <Select aria-label="跳转索引任务页码" className="h-control-sm w-24" value={String(page + 1)} onChange={(event) => setPage(Number(event.target.value) - 1)} disabled={loading}>{Array.from({ length: pageCount }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 页</option>)}</Select>
+              <Select aria-label="跳转发布任务页码" className="h-control-sm w-24" value={String(page + 1)} onChange={(event) => setPage(Number(event.target.value) - 1)} disabled={loading}>{Array.from({ length: pageCount }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 页</option>)}</Select>
               <Button size="sm" variant="outline" disabled={page + 1 >= pageCount || loading} onClick={() => setPage((value) => value + 1)}>下一页</Button>
             </div>
           </div>
@@ -431,3 +448,4 @@ function ManagedJobsTable({
     </div>
   );
 }
+
