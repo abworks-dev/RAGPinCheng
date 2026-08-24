@@ -16,7 +16,7 @@ vi.mock("../api/admin/content", () => ({
 
 vi.mock("simple-mind-map", () => ({
   default: class {
-    view = { fit: mocks.fit, narrow: mocks.narrow, enlarge: mocks.enlarge };
+    view = { fit: mocks.fit, narrow: mocks.narrow, enlarge: mocks.enlarge, setScale: vi.fn() };
     resize() {}
     destroy() { mocks.destroy(); }
   },
@@ -40,12 +40,11 @@ describe("XMindPreview", () => {
       ],
     });
 
-    render(<XMindPreview versionId="version-1" />);
+    render(<XMindPreview versionId="version-1" zoom={1.2} />);
 
     expect(await screen.findByTestId("xmind-map-canvas")).toBeInTheDocument();
     await waitFor(() => expect(mocks.fit).toHaveBeenCalled());
-    fireEvent.click(screen.getByRole("button", { name: "放大思维导图" }));
-    expect(mocks.enlarge).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "放大思维导图" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "风险" }));
     expect(screen.getByRole("tabpanel", { name: "风险" })).toBeInTheDocument();
     await waitFor(() => expect(mocks.destroy).toHaveBeenCalled());
