@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { parseSpreadsheetPreview, type PreviewSheet } from "../lib/xlsx-preview";
 
 export function SpreadsheetPreview({ sheetName, parentId, onLoad, onError, zoom = 1 }: {
@@ -9,6 +9,10 @@ export function SpreadsheetPreview({ sheetName, parentId, onLoad, onError, zoom 
   const [activeSheet, setActiveSheet] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const onLoadRef = useRef(onLoad);
+  const onErrorRef = useRef(onError);
+  onLoadRef.current = onLoad;
+  onErrorRef.current = onError;
 
   useEffect(() => {
     let cancelled = false;
@@ -24,13 +28,13 @@ export function SpreadsheetPreview({ sheetName, parentId, onLoad, onError, zoom 
           const target = parsed.findIndex((sheet) => sheet.name === sheetName);
           if (target >= 0) setActiveSheet(target);
         }
-        setLoading(false); onLoad?.();
+        setLoading(false); onLoadRef.current?.();
       } catch {
-        if (!cancelled) { setError(true); setLoading(false); onError?.("XLSX preview unavailable"); }
+        if (!cancelled) { setError(true); setLoading(false); onErrorRef.current?.("XLSX preview unavailable"); }
       }
     })();
     return () => { cancelled = true; };
-  }, [parentId, sheetName, onLoad, onError]);
+  }, [parentId, sheetName]);
 
   if (error) return <div className="flex h-full items-center justify-center p-4 text-sm text-red-600">暂时无法预览此 Excel 表格，请确认源文件仍然存在且格式有效。</div>;
   if (loading) return <div className="flex min-h-full items-center justify-center bg-secondary text-sm text-muted">加载 XLSX…</div>;
