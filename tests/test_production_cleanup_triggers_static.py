@@ -50,6 +50,13 @@ def test_cleanup_workflow_uses_named_parameter_splatting():
     assert "actions/download-artifact@v4" in workflow
     assert "ExpectedAsrBatchManifestSha256" in workflow
     assert "asr_manifest_run_id" in workflow
+    assert "asr_manifest_sha256:" in workflow
+    assert "value: ${{ jobs.cleanup.outputs.asr_manifest_sha256 }}" in workflow
+    assert "id: cleanup" in workflow
+    assert "asr_manifest_sha256=$manifestSha256" in workflow
+    assert "if: ${{ always() && inputs.apply == false }}" in workflow
+    assert "if: ${{ always() && inputs.apply == true }}" in workflow
+    assert "name: production-cleanup-${{ github.run_id }}-apply" in workflow
 
 
 def test_cleanup_orchestrator_keeps_runtime_audit_inside_managed_root():
@@ -78,6 +85,12 @@ def test_cleanup_operations_owns_manual_and_scheduled_triggers():
     assert "${{ github.workspace }}" in workflow
     assert "PRODUCTION_REPO_PATH" not in workflow
     assert "backup-apply" in workflow
+    assert "auto-clean-asr:" in workflow
+    assert "needs: [disk-pressure, pressure-dryrun]" in workflow
+    assert "asr_manifest_run_id: ${{ github.run_id }}" in workflow
+    assert "asr_manifest_sha256: ${{ needs.pressure-dryrun.outputs.asr_manifest_sha256 }}" in workflow
+    assert "target: asr" in workflow
+    assert "apply: true" in workflow
     assert "actions/upload-artifact@v4" in workflow
     assert "actions: read" in workflow
 

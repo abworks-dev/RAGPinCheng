@@ -135,6 +135,25 @@ jobs:
       reason: disk-pressure-dryrun
     secrets: inherit
 
+  auto-clean-asr:
+    needs: [disk-pressure, pressure-dryrun]
+    if: >-
+      ${{
+        needs.disk-pressure.outputs.tier == 'backup-apply' &&
+        needs.pressure-dryrun.outputs.asr_manifest_sha256 != '' &&
+        vars.PRODUCTION_AUTO_CLEANUP_ENABLED == 'true'
+      }}
+    uses: ./.github/workflows/cleanup-production.yml
+    with:
+      target: asr
+      apply: true
+      confirm_production_cleanup: true
+      allow_unconfirmed_dry_run: false
+      reason: disk-pressure-auto-cleanup
+      asr_manifest_run_id: ${{ github.run_id }}
+      asr_manifest_sha256: ${{ needs.pressure-dryrun.outputs.asr_manifest_sha256 }}
+    secrets: inherit
+
   auto-clean-backups:
     needs: [disk-pressure]
     if: ${{ needs.disk-pressure.outputs.tier == 'backup-apply' && vars.PRODUCTION_AUTO_CLEANUP_ENABLED == 'true' }}

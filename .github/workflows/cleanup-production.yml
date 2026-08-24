@@ -35,6 +35,10 @@ on:
         required: false
         default: ''
         type: string
+    outputs:
+      asr_manifest_sha256:
+        description: SHA-256 of the ASR batch manifest generated or applied by this run
+        value: ${{ jobs.cleanup.outputs.asr_manifest_sha256 }}
 
 permissions:
   contents: read
@@ -61,6 +65,8 @@ jobs:
     runs-on: [self-hosted, windows, production, gpu]
     environment: production-asr
     timeout-minutes: 30
+    outputs:
+      asr_manifest_sha256: ${{ steps.cleanup.outputs.asr_manifest_sha256 }}
     env:
       INPUT_TARGET: ${{ inputs.target }}
       INPUT_APPLY: ${{ inputs.apply }}
@@ -92,6 +98,7 @@ jobs:
           run-id: ${{ inputs.asr_manifest_run_id }}
 
       - name: Run production cleanup
+        id: cleanup
         shell: powershell
         env:
           REPORT_ROOT: ${{ runner.temp }}\ragpincheng-production-cleanup
@@ -126,11 +133,32 @@ jobs:
             $arguments.ExpectedAsrBatchManifestSha256 = $env:INPUT_ASR_MANIFEST_SHA256
           }
           & (Join-Path "${{ github.workspace }}" 'scripts\cleanup-production.ps1') @arguments
+          if ($target -eq 'all' -or $target -eq 'asr') {
+            $manifestSha256 = if ($apply) {
+              $env:INPUT_ASR_MANIFEST_SHA256.ToLowerInvariant()
+            } else {
+              $manifests = @(Get-ChildItem -LiteralPath $env:REPORT_ROOT `
+                -Filter 'asr-batch-manifest.json' -File -Recurse)
+              if ($manifests.Count -ne 1) {
+                throw "Expected exactly one generated ASR batch manifest, found $($manifests.Count)"
+              }
+              (Get-FileHash -LiteralPath $manifests[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "asr_manifest_sha256=$manifestSha256"
+          }
 
-      - name: Upload cleanup report
-        if: always()
+      - name: Upload cleanup preview report
+        if: ${{ always() && inputs.apply == false }}
         uses: actions/upload-artifact@v4
         with:
           name: production-cleanup-${{ github.run_id }}
+          path: ${{ runner.temp }}/ragpincheng-production-cleanup
+          if-no-files-found: warn
+
+      - name: Upload cleanup apply report
+        if: ${{ always() && inputs.apply == true }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-cleanup-${{ github.run_id }}-apply
           path: ${{ runner.temp }}/ragpincheng-production-cleanup
           if-no-files-found: warn

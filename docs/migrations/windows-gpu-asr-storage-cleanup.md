@@ -53,7 +53,7 @@ SHA-256 的 `inventory.json`。如果目标备份目录已存在，脚本失败�
 compaction artifact 中的根目录、候选路径和字节数；确认无误后再将变量设为 `true`，并
 再次运行一项 qualification 验证磁盘差值。不要用该开关处理历史目录。
 
-## 周期 DryRun
+## 周期清理
 
 统一入口 `scripts\cleanup-production.ps1` 会调用 `scripts\cleanup-asr-storage.ps1`。手工
 预览示例：
@@ -71,13 +71,31 @@ compaction artifact 中的根目录、候选路径和字节数；确认无误后
 DryRun 后必须复核：每个候选是否位于上述固定根目录、是否匹配 run ID/commit 命名、
 `Kind` 是否属于策略、总量是否低于删除上限、`Skipped` 是否包含正在使用的目录。
 
-周期 ASR Apply 在首轮上线中保持关闭。以后如需启用，必须基于稳定的 DryRun 记录单独
-批准，并使用 `-Apply -Confirm:$false`；默认 20 GB 上限会在候选总量超限时整体失败。
+`.github/workflows/cleanup-production-operations.yml` 每天执行一次完整 DryRun，并每小时
+两次检查 `D:` 盘压力。只有同时满足以下条件时，压力检查才会自动执行 ASR Apply：
+
+- 使用率处于 `backup-apply` 档位（默认 90% 至 95%，`critical` 档位失败关闭）；
+- 仓库变量 `PRODUCTION_AUTO_CLEANUP_ENABLED=true`；
+- 同一次 workflow run 的 DryRun 成功生成 ASR batch manifest；
+- Apply 下载该 preview artifact，并使用 workflow 输出的精确 SHA-256；
+- 候选在 Apply 前重新测量且与 manifest 完全一致。
+
+Preview artifact 保持 `production-cleanup-<run_id>`，Apply 审计使用独立的
+`production-cleanup-<run_id>-apply`，避免覆盖审批证据。默认单候选 20 GB、单批 18 GB
+上限继续生效；超限时整体失败，不扩大清理范围。
+
+该流程只清理明确配置的 qualification、dependency 和 failed staging 受管根目录。
+它不会递归删除 GitHub runner 通用 `_work`/`_temp`、正式模型、共享 `wheel-cache`、
+active candidate 或 rollback backup，因为这些目录无法仅凭年龄可靠判断是否被其他任务使用。
+qualification 中可重建的 `venv`、`wheelhouse`、`model-staging`、`spool` 和 `temp`
+已覆盖本次磁盘不足的主要来源，并继续接受进程和 active marker 检查。
 
 ## 回滚与验证
 
-停止后续收缩：将 `PRODUCTION_ASR_RUN_COMPACTION_ENABLED` 设为 `false`，并保持周期任务
-为 DryRun。仓库回滚可恢复旧 workflow 和脚本，但不能恢复已经删除的可重建目录。
+停止后续收缩：将 `PRODUCTION_AUTO_CLEANUP_ENABLED` 和
+`PRODUCTION_ASR_RUN_COMPACTION_ENABLED` 设为 `false`。前者关闭磁盘压力自动 Apply，
+但保留周期 DryRun；后者关闭单次 qualification 成功后的收缩。仓库回滚可恢复旧
+workflow 和脚本，但不能恢复已经删除的可重建目录。
 
 删除的 venv、wheelhouse、spool 和 temp 需通过重新运行 qualification/部署重建；删除的
 完整历史 run 只能从 `cleanup-evidence-backup`、workflow artifact 或外部备份恢复证据。
