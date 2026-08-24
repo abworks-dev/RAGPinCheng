@@ -174,6 +174,19 @@ def test_pptx_preview_surfaces_http_and_timeout_failures(tmp_path: Path):
     assert not source.with_suffix(".preview.pdf").exists()
 
 
+def test_pptx_preview_classifies_oversized_input(tmp_path: Path):
+    source = _synthetic_ooxml(tmp_path / "sample.pptx", "presentation")
+    response = Mock(status_code=413, content=b"", text="File too large")
+    client = Mock()
+    client.__enter__ = Mock(return_value=client)
+    client.__exit__ = Mock(return_value=False)
+    client.post.return_value = response
+
+    with patch("httpx.Client", return_value=client):
+        with pytest.raises(RuntimeError, match="oversized input"):
+            convert_pptx_to_pdf(source)
+
+
 def test_pptx_preview_failure_preserves_existing_valid_artifact(tmp_path: Path):
     source = _synthetic_ooxml(tmp_path / "sample.pptx", "presentation")
     preview = source.with_suffix(".preview.pdf")

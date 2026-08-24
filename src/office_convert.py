@@ -32,6 +32,10 @@ from .config import OFFICE_MIN_FREE_DISK_MB, OFFICE_PARSE_TIMEOUT_SECONDS
 class OfficeConversionError(RuntimeError):
     """Recoverable Office conversion failure with a stable reason."""
 
+
+class PptxPreviewFileTooLargeError(RuntimeError):
+    """The conversion service rejected a PPTX because it exceeded its limit."""
+
 class _ParseTimeout(Exception):
     pass
 
@@ -594,6 +598,10 @@ def convert_pptx_to_pdf(path: Path) -> Path:
                 files={"file": (path.name, fh, "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
             )
         if resp.status_code != 200:
+            if resp.status_code == 413:
+                raise PptxPreviewFileTooLargeError(
+                    f"PPTX to PDF conversion rejected oversized input (HTTP 413): {resp.text[:200]}"
+                )
             raise RuntimeError(
                 f"PPTX to PDF conversion failed (HTTP {resp.status_code}): {resp.text[:200]}"
             )
