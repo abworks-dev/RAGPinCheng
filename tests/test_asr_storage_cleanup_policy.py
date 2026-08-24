@@ -192,6 +192,37 @@ def test_periodic_cleanup_reports_zero_candidates_on_powershell_51(tmp_path: Pat
     assert report["candidate_bytes"] == 0
 
 
+def test_periodic_cleanup_never_selects_active_qualification_run(tmp_path: Path):
+    data_root = tmp_path / "data" / "RAGPinCheng-ASR"
+    program_root = tmp_path / "program" / "RAGPinCheng-ASR"
+    qualification_root = tmp_path / "qualification" / "faster-whisper"
+    run_root = qualification_root / "runs" / "101"
+    data_root.mkdir(parents=True)
+    program_root.mkdir(parents=True)
+    _write_tree(run_root, ("venv", "wheelhouse", "models", "wheel-cache"))
+    (run_root / ".active").write_text("active", encoding="ascii")
+    os.utime(run_root, (1_600_000_000, 1_600_000_000))
+    audit_path = tmp_path / "active-cleanup.json"
+
+    result = _run(
+        CLEANUP_SCRIPT,
+        "-DataRoot", str(data_root),
+        "-ProgramRoot", str(program_root),
+        "-FasterWhisperQualificationRoot", str(qualification_root),
+        "-RunCompactionHours", "1",
+        "-AuditPath", str(audit_path),
+    )
+
+    assert result.returncode == 0, result.stderr
+    report = _read_json(audit_path)
+    assert not report["candidates"]
+    assert any(
+        item["Reason"].startswith("active marker:") and item["Reason"].endswith(".active")
+        for item in report["skipped"]
+    )
+    assert all((run_root / name).exists() for name in ("venv", "wheelhouse", "models", "wheel-cache"))
+
+
 def test_candidate_dependency_runs_remain_excluded_from_cleanup(tmp_path: Path):
     data_root = tmp_path / "data" / "RAGPinCheng-ASR"
     program_root = tmp_path / "program" / "RAGPinCheng-ASR"
