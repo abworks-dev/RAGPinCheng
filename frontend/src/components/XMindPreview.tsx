@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Maximize2, Minus, Plus } from "lucide-react";
 import { adminContentApi } from "../api/admin/content";
 import type { XMindPreview as XMindPreviewData, XMindTopic } from "../types";
 import { Button } from "./ui/button";
@@ -14,7 +13,7 @@ type MindMapNode = {
 type SimpleMindMapInstance = {
   resize(): void;
   destroy(): void;
-  view: { fit(): void; narrow(): void; enlarge(): void };
+  view: { fit(): void; setScale(scale: number): void };
 };
 
 function toMindMapNode(topic: XMindTopic, depth = 0): MindMapNode {
@@ -37,7 +36,7 @@ function toMindMapNode(topic: XMindTopic, depth = 0): MindMapNode {
   };
 }
 
-function MindMapCanvas({ rootTopic }: { rootTopic: XMindTopic }) {
+function MindMapCanvas({ rootTopic, zoom }: { rootTopic: XMindTopic; zoom: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<SimpleMindMapInstance | null>(null);
   const [ready, setReady] = useState(false);
@@ -68,7 +67,7 @@ function MindMapCanvas({ rootTopic }: { rootTopic: XMindTopic }) {
             secondLineColor: "#8b95a5",
             nodeUseLineStyle: false,
           },
-        });
+        }) as unknown as SimpleMindMapInstance;
         instanceRef.current = instance;
         if (typeof ResizeObserver !== "undefined") {
           resizeObserver = new ResizeObserver(() => instance.resize());
@@ -77,6 +76,7 @@ function MindMapCanvas({ rootTopic }: { rootTopic: XMindTopic }) {
         window.requestAnimationFrame(() => {
           if (disposed) return;
           instance.view.fit();
+          instance.view.setScale(zoom);
           setReady(true);
         });
       })
@@ -92,6 +92,8 @@ function MindMapCanvas({ rootTopic }: { rootTopic: XMindTopic }) {
     };
   }, [rootTopic]);
 
+  useEffect(() => { instanceRef.current?.view.setScale(zoom); }, [zoom]);
+
   if (renderError) {
     return <div className="flex h-full items-center justify-center p-6"><ErrorState title="无法渲染思维导图" description={renderError} /></div>;
   }
@@ -100,16 +102,11 @@ function MindMapCanvas({ rootTopic }: { rootTopic: XMindTopic }) {
     <div className="relative h-full min-h-[320px] overflow-hidden bg-[#fbfaf7]" data-testid="xmind-map-canvas">
       {!ready && <div className="absolute inset-0 z-10 bg-background"><LoadingState label="正在绘制思维导图…" /></div>}
       <div ref={containerRef} className="h-full w-full touch-none" />
-      <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1 rounded-ui-md border border-border bg-background/95 p-1 shadow-panel">
-        <Button size="icon" variant="ghost" aria-label="缩小思维导图" title="缩小" onClick={() => instanceRef.current?.view.narrow()}><Minus className="size-4" /></Button>
-        <Button size="icon" variant="ghost" aria-label="适配思维导图" title="适配画布" onClick={() => instanceRef.current?.view.fit()}><Maximize2 className="size-4" /></Button>
-        <Button size="icon" variant="ghost" aria-label="放大思维导图" title="放大" onClick={() => instanceRef.current?.view.enlarge()}><Plus className="size-4" /></Button>
-      </div>
     </div>
   );
 }
 
-export function XMindPreview({ versionId }: { versionId: string }) {
+export function XMindPreview({ versionId, zoom = 1 }: { versionId: string; zoom?: number }) {
   const [data, setData] = useState<XMindPreviewData | null>(null);
   const [selectedSheetId, setSelectedSheetId] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -152,7 +149,7 @@ export function XMindPreview({ versionId }: { versionId: string }) {
         </div>
       )}
       <div className="min-h-0 flex-1" role="tabpanel" aria-label={selectedSheet.title}>
-        <MindMapCanvas key={selectedSheet.id} rootTopic={selectedSheet.root_topic} />
+        <MindMapCanvas key={selectedSheet.id} rootTopic={selectedSheet.root_topic} zoom={zoom} />
       </div>
     </div>
   );

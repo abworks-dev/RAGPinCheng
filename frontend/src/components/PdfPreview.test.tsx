@@ -65,6 +65,11 @@ function OpenPreview() {
   );
 }
 
+function OpenDocxPreview() {
+  const { open } = usePdfPreview();
+  return <button type="button" onClick={() => open("docx-1", "测试 Word", "docx")}>打开 Word</button>;
+}
+
 function ReturnTargetProbe() {
   const { state, open, close } = usePdfPreview();
   return (
@@ -158,6 +163,13 @@ describe("PdfPreview interactions", () => {
     fireEvent.click(screen.getByRole("button", { name: "放大" }));
     expect(screen.getByRole("combobox", { name: "缩放模式" })).toHaveValue("custom");
     expect(screen.getByText("110%")).toBeInTheDocument();
+  });
+
+  it("shows document zoom in the shared preview header", () => {
+    render(<PdfPreviewProvider><OpenDocxPreview /><PdfPreview /></PdfPreviewProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "打开 Word" }));
+    expect(screen.getByLabelText("预览缩放")).toBeInTheDocument();
+    expect(screen.getByText("100%")).toBeInTheDocument();
   });
 
   it("applies fit-page, fit-width, and actual-size presets to the rendered page", () => {

@@ -17,6 +17,7 @@ import { ResourcePreviewShell } from "./ResourcePreviewShell";
 import { SpreadsheetPreview } from "./SpreadsheetPreview";
 import { XMindPreview } from "./XMindPreview";
 import { IconButton } from "./ui/icon-button";
+import { PreviewZoomControls } from "./PreviewZoomControls";
 
 // PDF.js worker — use the CDN build so we don't need to bundle it.
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -126,6 +127,7 @@ export function PdfPreview() {
   const [dragging, setDragging] = useState(false);
   const [viewportSize, setViewportSize] = useState<Size>({ width: 0, height: 0 });
   const [pageSize, setPageSize] = useState<Size>({ width: 0, height: 0 });
+  const [resourceZoom, setResourceZoom] = useState(1);
 
   const open = state.parentId !== null || state.versionId !== null;
   const isDocx = state.docType === "docx" || state.docType === "doc";
@@ -149,6 +151,7 @@ export function PdfPreview() {
     setTemporaryPan(false);
     setDragging(false);
     setPageSize({ width: 0, height: 0 });
+    setResourceZoom(1);
   }, [state.parentId]);
 
   useEffect(() => {
@@ -395,7 +398,7 @@ export function PdfPreview() {
         <Plus className="size-4" />
       </button>
     </div>
-  ) : null;
+  ) : <PreviewZoomControls zoom={resourceZoom} onChange={setResourceZoom} />;
 
   const returnLabel = state.returnTo === "managed-content-detail"
     ? "返回资料详情"
@@ -461,11 +464,12 @@ export function PdfPreview() {
           }`}
         >
           {isXMind && state.versionId ? (
-            <XMindPreview versionId={state.versionId} />
+            <XMindPreview versionId={state.versionId} zoom={resourceZoom} />
           ) : isDocx ? (
             <DocxPreview
               parentId={state.parentId!}
               paragraphAnchor={state.location.paragraphAnchor}
+              zoom={resourceZoom}
               onLoad={() => setLoading(false)}
               onError={() => setLoading(false)}
             />
@@ -474,6 +478,7 @@ export function PdfPreview() {
               parentId={state.parentId!}
               sheetName={state.location.sheetName}
               cellRange={state.location.cellRange}
+              zoom={resourceZoom}
               onLoad={() => setLoading(false)}
               onError={() => setLoading(false)}
             />
