@@ -83,8 +83,8 @@ export function DocxPreview({
       {loading && <div className="absolute inset-0 z-10 flex items-center justify-center bg-secondary text-sm text-muted">加载 DOCX…</div>}
       <div
         ref={containerRef}
-        className="min-h-full px-4 py-4"
-        style={{ visibility: loading ? "hidden" : "visible", zoom }}
+        className="min-h-full origin-top-left px-4 py-4"
+        style={{ visibility: loading ? "hidden" : "visible", transform: `scale(${zoom})`, transformOrigin: "top left", width: `${100 / zoom}%` }}
       />
     </div>
   );

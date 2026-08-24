@@ -283,6 +283,7 @@ export function PdfPreview() {
   }
 
   function handleWheel(event: ReactWheelEvent<HTMLDivElement>) {
+    if (!isPdf) return;
     const viewport = viewportRef.current;
     if (!viewport || !shouldZoomPdfWheel(panEnabled, event.nativeEvent)) return;
 
