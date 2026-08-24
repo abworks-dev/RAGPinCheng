@@ -61,6 +61,7 @@ import {
   CardTitle,
 } from "../../components/ui/card";
 import { Checkbox } from "../../components/ui/checkbox";
+import { IconButton } from "../../components/ui/icon-button";
 import {
   Dialog,
   DialogContent,
@@ -72,7 +73,6 @@ import {
 import { EmptyState } from "../../components/ui/empty-state";
 import { ErrorState } from "../../components/ui/error-state";
 import { Input } from "../../components/ui/input";
-import { IconButton } from "../../components/ui/icon-button";
 import { LoadingState } from "../../components/ui/loading-state";
 import { Select } from "../../components/ui/select";
 import {
@@ -1224,34 +1224,29 @@ function UploadTasksPanel({
                   </div>
                   <div className="col-span-2 flex flex-wrap gap-2 xl:col-span-1 xl:justify-end">
                     <>
-                      {canTranscribe && task.video_count > 0 && <Button size="sm" variant="outline" disabled={task.transcribable_video_count === 0} title={task.transcribable_video_count === 0 ? "此批次视频均已转录或正在转录" : undefined} onClick={() => void openBatchTranscription(task)}><Rocket className="size-4" />转录此批次视频</Button>}
+                      {canTranscribe && task.video_count > 0 && <IconButton label="转录此批次视频" tooltip={task.transcribable_video_count === 0 ? "此批次视频均已转录或正在转录" : "开始转录此批次中的可用视频"} className="border border-border" disabled={task.transcribable_video_count === 0} onClick={() => void openBatchTranscription(task)}><Rocket className="size-4" /></IconButton>}
                       {task.status === "failed" && (
-                        <Button
-                          size="sm"
-                          variant="outline"
+                        <IconButton
                           disabled={!canRetry(task)}
-                          aria-label={
-                            canRetry(task) ? "重试" : "重试（原始文件不可用）"
-                          }
-                          title={
+                          label="重试上传"
+                          tooltip={
                             !canRetry(task)
                               ? "原始文件仅保留在当前浏览器会话中，当前不可重试"
-                              : undefined
+                              : "重新上传此失败任务"
                           }
                           onClick={() => onRetry(task)}
                         >
                           <RotateCcw className="size-4" />
-                          重试
-                        </Button>
+                        </IconButton>
                       )}
-                      <Button
-                        size="sm"
-                        variant="outline"
+                      <IconButton
+                        label="查看上传任务详情"
+                        tooltip="查看文件明细、处理结果和失败原因"
+                        className="border border-border"
                         onClick={() => void openDetail(task)}
                       >
                         <ListChecks className="size-4" />
-                        详情
-                      </Button>
+                      </IconButton>
                     </>
                   </div>
                 </li>
