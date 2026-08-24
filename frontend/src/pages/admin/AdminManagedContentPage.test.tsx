@@ -1190,7 +1190,7 @@ describe("AdminManagedContentPage", () => {
     expect(dialog).toHaveTextContent("视频文件1 个");
     expect(dialog).toHaveTextContent("转录版本3 个");
     expect(dialog).toHaveTextContent("转录产物2 个");
-    expect(dialog).toHaveTextContent("发布任务记录4 条");
+    expect(dialog).toHaveTextContent("索引任务记录4 条");
     expect(within(dialog).getByRole("alert")).toHaveTextContent("全部转录版本及其检索数据");
     fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "永久删除 1 份资料（含 1 个视频）" } });
     expect(within(dialog).getByRole("button", { name: "永久删除" })).toBeEnabled();
@@ -1387,7 +1387,7 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准" })[0]);
     expect(screen.getByText("已选择", { exact: false })).toHaveTextContent("已选择 1 份");
     expect(screen.getByText("已选择", { exact: false })).not.toHaveTextContent("单次最多");
-    expect(screen.queryByRole("button", { name: "批量操作" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "批量操作" })).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("checkbox", { name: "选择建模标准2" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
     expect(screen.getByRole("menu", { name: "批量操作" })).toBeInTheDocument();
