@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Archive, ArrowLeft, Ban, CheckCircle2, ChevronDown, ClipboardCheck, FileUp, Film, FolderInput, LoaderCircle, RefreshCw, Repeat2, RotateCcw, Rocket, Settings2, Trash2, Upload, XCircle } from "lucide-react";
+import { Archive, ArrowLeft, Ban, CheckCircle2, ChevronDown, ClipboardCheck, FileUp, Film, FolderInput, LoaderCircle, RefreshCw, Repeat2, RotateCcw, Rocket, Search, Settings2, Trash2, Upload, XCircle } from "lucide-react";
 import { adminMediaApi } from "../../api/admin/media";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
@@ -209,6 +209,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const [conflictReview, setConflictReview] = useState<MediaUploadPreflightEntry[] | null>(null);
   const [conflictChoices, setConflictChoices] = useState<Record<string, MediaConflictChoice>>({});
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
+  const [mediaQuery, setMediaQuery] = useState("");
   const [mediaPage, setMediaPage] = useState(0);
   const [mediaPageSize, setMediaPageSize] = useState(10);
   const [selectedMediaIds, setSelectedMediaIds] = useState<string[]>([]);
@@ -347,7 +348,8 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
     Boolean(asset.transcription_job_id) || jobsByMediaId.has(asset.media_id) || asset.status === "failed",
   );
   const visibleMediaAssets = transcriptionTaskAssets.filter((asset) => {
-    return matchesMediaFilter(asset, mediaFilter);
+    const query = mediaQuery.trim().toLocaleLowerCase("zh-CN");
+    return matchesMediaFilter(asset, mediaFilter) && (!query || `${asset.title} ${asset.original_filename}`.toLocaleLowerCase("zh-CN").includes(query));
   });
   const mediaPageCount = Math.max(1, Math.ceil(visibleMediaAssets.length / mediaPageSize));
   const pagedMediaAssets = visibleMediaAssets.slice(mediaPage * mediaPageSize, (mediaPage + 1) * mediaPageSize);
@@ -358,7 +360,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const cancellableSelectedJobs = selectedJobs.filter((job) => job.status === "pending" || job.status === "running");
   const runBatchRetry = async () => { for (const job of retryableSelectedJobs) await retryJob(job); setSelectedMediaIds([]); setBatchMenuOpen(false); };
   const runBatchCancel = async () => { for (const job of cancellableSelectedJobs) await cancelJob(job); setSelectedMediaIds([]); setBatchMenuOpen(false); };
-  useEffect(() => { setMediaPage(0); setSelectedMediaIds([]); }, [mediaFilter, mediaPageSize]);
+  useEffect(() => { setMediaPage(0); setSelectedMediaIds([]); }, [mediaFilter, mediaPageSize, mediaQuery]);
   useEffect(() => { if (mediaPage >= mediaPageCount) setMediaPage(Math.max(0, mediaPageCount - 1)); }, [mediaPage, mediaPageCount]);
   const filterCounts = mediaFilterOptions.reduce<Record<MediaFilter, number>>((counts, [value]) => {
     counts[value] = transcriptionTaskAssets.filter((asset) => matchesMediaFilter(asset, value)).length;
@@ -959,8 +961,9 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
           {mediaFilterOptions.map(([value, label]) => { const icons = { all: <Film className="size-4" />, processing: <LoaderCircle className="size-4" />, review: <ClipboardCheck className="size-4" />, publishing: <Rocket className="size-4" />, failed: <XCircle className="size-4" /> }; return <ManagedSummaryCard key={value} label={label} value={filterCounts[value]} icon={icons[value]} tone={value === "failed" ? "destructive" : value === "review" || value === "publishing" ? "warning" : "primary"} active={mediaFilter === value} onClick={() => setMediaFilter(value)} />; })}
         </div>
         <Card className="overflow-hidden shadow-surface">
-          <div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="grid gap-3 border-b border-border px-4 py-4 sm:px-5 lg:grid-cols-[minmax(13rem,1fr)_18rem_auto] lg:items-end">
             <div className="min-w-0"><h2 id="media-assets-title" className="text-ui-base font-semibold">视频资源</h2><p className="mt-1 text-ui-xs text-muted-foreground">视频由资料列表上传，在这里跟踪转录、审核、发布、专属索引和恢复操作。</p></div>
+            <div className="relative min-w-0"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /><Input type="search" aria-label="搜索转录任务" placeholder="搜索标题或文件名…" className="h-control-md pl-9" value={mediaQuery} onChange={(event) => setMediaQuery(event.target.value)} /></div>
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
               <Button size="sm" variant="outline" aria-label="刷新媒体资源" title="刷新媒体资源" disabled={loading} onClick={() => void refreshMediaState()}><RefreshCw className="size-4" aria-hidden="true" />刷新列表</Button>
               <div className="relative"><Button size="sm" variant="outline" disabled={!selectedMediaIds.length} aria-haspopup="menu" aria-expanded={batchMenuOpen} onClick={() => setBatchMenuOpen((open) => !open)}>批量操作<ChevronDown className="size-4" /></Button>{batchMenuOpen && <div role="menu" aria-label="批量操作" className="absolute right-0 top-full z-dropdown mt-1 w-48 rounded-ui-md border border-border bg-popover p-1 shadow-overlay"><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" disabled={!retryableSelectedJobs.length} onClick={() => void runBatchRetry()}><RotateCcw className="size-4" />重试所选（{retryableSelectedJobs.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" disabled={!cancellableSelectedJobs.length} onClick={() => void runBatchCancel()}><Ban className="size-4" />取消所选（{cancellableSelectedJobs.length}）</button></div>}</div>
