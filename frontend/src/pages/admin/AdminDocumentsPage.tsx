@@ -96,7 +96,7 @@ function IndexTaskSearchFilters({
   return <div ref={containerRef} className="relative min-w-0 w-full xl:w-72 xl:max-w-72 xl:justify-self-center min-[1400px]:w-96 min-[1400px]:max-w-96">
     <div className="relative">
       <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-      <Input ref={searchRef} aria-label="搜索发布任务" type="search" value={searchInput} onChange={(event) => onSearchInputChange(event.target.value)} placeholder="搜索名称、文件名或分类…" className="h-control-md pl-9 pr-11" />
+      <Input ref={searchRef} aria-label="搜索发布任务" type="search" value={searchInput} onChange={(event) => onSearchInputChange(event.target.value)} placeholder="搜索名称、文件名或分类…" className="h-control-md pl-9 pr-11 text-ui-xs" />
       <button type="button" className="absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-ui-sm text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={open ? "收起索引任务筛选" : "展开索引任务筛选"} title="筛选" aria-haspopup="dialog" aria-expanded={open} aria-controls={filtersId} onClick={() => setOpen((current) => !current)}>
         <SlidersHorizontal className="size-4" aria-hidden="true" />
         {activeFilterCount > 0 && <span className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-primary" aria-hidden="true" />}
@@ -276,7 +276,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
             </p>
           </div>
           <IndexTaskSearchFilters searchInput={searchInput} categoryId={categoryId} docType={docType} sourceOrigin={sourceOrigin} status={status} history={history} includeArchived={includeArchived} categories={categories} onSearchInputChange={setSearchInput} onCategoryChange={setCategoryId} onDocTypeChange={setDocType} onSourceChange={setSourceOrigin} onStatusChange={setStatus} onHistoryChange={setHistory} onIncludeArchivedChange={setIncludeArchived} onClear={clearFilters} />
-          <div className="flex shrink-0 flex-wrap items-center gap-2">{selectedJobIds.length > 0 && <Button size="sm" className="max-sm:h-control-md" disabled={bulkBusy} onClick={() => void bulkRepublish()}><Rocket className={cn("size-4", bulkBusy && "animate-pulse")} />批量重新发布（{selectedJobIds.length}）</Button>}<Button variant="outline" size="sm" className="max-sm:h-control-md" disabled={loading || refreshing} onClick={() => void load(true)}><RefreshCw className={cn("size-4", refreshing && "animate-spin")} />{refreshing ? "刷新中…" : "刷新列表"}</Button></div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">{selectedJobIds.length > 0 && <Button size="sm" className="h-control-md" disabled={bulkBusy} onClick={() => void bulkRepublish()}><Rocket className={cn("size-4", bulkBusy && "animate-pulse")} />批量重新发布（{selectedJobIds.length}）</Button>}<Button variant="outline" size="sm" className="h-control-md" disabled={loading || refreshing} onClick={() => void load(true)}><RefreshCw className={cn("size-4", refreshing && "animate-spin")} />{refreshing ? "刷新中…" : "刷新列表"}</Button></div>
         </div>
 
         {loading ? (

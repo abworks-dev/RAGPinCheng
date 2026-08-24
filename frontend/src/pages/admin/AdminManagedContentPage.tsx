@@ -1047,7 +1047,7 @@ function UploadTasksPanel({
                 <Input
                   type="search"
                   aria-label="搜索上传任务"
-                  className="h-control-md pl-9 pr-10"
+                  className="h-control-md pl-9 pr-10 text-ui-xs"
                   value={queryInput}
                   onChange={(event) => setQueryInput(event.target.value)}
                   placeholder="搜索目标目录或文件名..."
@@ -1057,7 +1057,7 @@ function UploadTasksPanel({
             </label>
           </form>
           <div className="flex shrink-0 flex-wrap items-center gap-2 xl:justify-end">
-            <Button size="sm" variant="outline" onClick={() => void loadTasks()} disabled={loading}>
+            <Button size="sm" variant="outline" className="h-control-md" onClick={() => void loadTasks()} disabled={loading}>
               <RefreshCw
                 className={loading ? "size-4 animate-spin" : "size-4"}
               />
@@ -1066,6 +1066,7 @@ function UploadTasksPanel({
             <Button
               size="sm"
               variant="outline"
+              className="h-control-md"
               onClick={clearFilters}
               disabled={!queryInput && !hasFilters}
             >
@@ -1794,7 +1795,7 @@ function ManagedContentSearchFilters({
         />
         <Input
           ref={inputRef}
-          className="h-control-md pl-9 pr-11"
+          className="h-control-md pl-9 pr-11 text-ui-xs"
           value={queryInput}
           onChange={(event) => onQueryInputChange(event.target.value)}
           onFocus={() => setOpen(true)}
@@ -2002,7 +2003,7 @@ function TrashSearchFilters({
         />
         <Input
           ref={inputRef}
-          className="h-control-sm pl-9 pr-11"
+          className="h-control-md pl-9 pr-11 text-ui-xs"
           value={queryInput}
           onChange={(event) => onQueryInputChange(event.target.value)}
           onFocus={() => setOpen(true)}
