@@ -825,7 +825,13 @@ function UploadTasksPanel({
     try {
       const full = deleteTask.entries ? deleteTask : await adminContentApi.uploadTask(deleteTask.batch_id);
       const items = (full.entries || []).filter((entry) => entry.item_id && entry.version_id).map((entry) => ({ item_id: entry.item_id!, expected_version_id: entry.version_id! }));
-      if (!items.length) throw new Error("此任务没有可移入回收站的资料");
+      if (!items.length) {
+        await adminContentApi.deleteOrphanUploadTask(deleteTask.batch_id);
+        toast.success("已清理无关联资料的上传任务记录");
+        setDeleteTask(null);
+        await loadTasks(true);
+        return;
+      }
       const result = await adminContentApi.bulkArchive(items);
       if (result.failed) throw new Error(`有 ${result.failed} 份资料未能移入回收站`);
       toast.success(`已将 ${result.succeeded} 份资料移入回收站`);

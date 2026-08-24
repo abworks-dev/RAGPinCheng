@@ -1832,6 +1832,30 @@ def get_managed_upload_task(
     return _managed_upload_task_dto(row, entries)
 
 
+@router.delete("/upload-tasks/{batch_id}/orphan", status_code=204)
+def delete_orphan_upload_task(
+    batch_id: str,
+    user: CurrentUser = Depends(require_csrf),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> None:
+    """Remove an upload task whose accepted entries no longer reference content."""
+    _require_feature()
+    if not has_content_permission(conn, user, "item.archive_draft") and not has_content_permission(conn, user, "item.archive_published"):
+        raise HTTPException(status_code=403, detail="当前账号没有删除任务的权限")
+    row = conn.execute("SELECT * FROM upload_batches WHERE id=?", (batch_id,)).fetchone()
+    if row is None or (row["created_by"] is not None and row["created_by"] != user.id and user.role != "admin"):
+        raise HTTPException(status_code=404, detail="上传任务不存在")
+    if row["status"] in {"staging", "validating", "awaiting_mapping"}:
+        raise HTTPException(status_code=409, detail="处理中任务请先取消")
+    entries = conn.execute("SELECT item_id,version_id FROM upload_batch_entries WHERE batch_id=?", (batch_id,)).fetchall()
+    if any(entry["item_id"] or entry["version_id"] for entry in entries):
+        raise HTTPException(status_code=409, detail="任务仍有关联资料，请使用移入回收站操作")
+    from .content_trash_cleanup import delete_upload_batch_storage
+    delete_upload_batch_storage(row["storage_rel_path"], row["manifest_rel_path"])
+    conn.execute("DELETE FROM upload_batches WHERE id=?", (batch_id,))
+    conn.commit()
+
+
 def _content_item_dto(
     row: sqlite3.Row,
     summary: ManagedVersionIndexSummary | None = None,
