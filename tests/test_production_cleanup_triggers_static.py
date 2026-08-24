@@ -1,11 +1,17 @@
 from pathlib import Path
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_text(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
+
+
+def read_workflow(path: str) -> dict:
+    return yaml.safe_load(read_text(path))
 
 
 def test_disk_pressure_checker_is_read_only():
@@ -50,6 +56,16 @@ def test_cleanup_workflow_uses_named_parameter_splatting():
     assert "actions/download-artifact@v4" in workflow
     assert "ExpectedAsrBatchManifestSha256" in workflow
     assert "asr_manifest_run_id" in workflow
+    assert "asr_manifest_sha256:" in workflow
+    assert "value: ${{ jobs.cleanup.outputs.asr_manifest_sha256 }}" in workflow
+    assert "id: cleanup" in workflow
+    assert "asr_manifest_sha256=$manifestSha256" in workflow
+    assert "if: ${{ always() && inputs.apply == false }}" in workflow
+    assert "if: ${{ always() && inputs.apply == true }}" in workflow
+    assert "name: production-cleanup-${{ github.run_id }}-${{ github.run_attempt }}-apply" in workflow
+    assert "asr_manifest_artifact_name:" in workflow
+    assert "asr_manifest_artifact_name=$previewArtifactName" in workflow
+    assert "github.run_attempt" in workflow
 
 
 def test_cleanup_orchestrator_keeps_runtime_audit_inside_managed_root():
@@ -78,8 +94,30 @@ def test_cleanup_operations_owns_manual_and_scheduled_triggers():
     assert "${{ github.workspace }}" in workflow
     assert "PRODUCTION_REPO_PATH" not in workflow
     assert "backup-apply" in workflow
+    assert "auto-clean-asr:" in workflow
+    assert "needs: [disk-pressure, pressure-dryrun]" in workflow
+    assert "asr_manifest_run_id: ${{ github.run_id }}" in workflow
+    assert "asr_manifest_sha256: ${{ needs.pressure-dryrun.outputs.asr_manifest_sha256 }}" in workflow
+    assert "target: asr" in workflow
+    assert "apply: true" in workflow
     assert "actions/upload-artifact@v4" in workflow
     assert "actions: read" in workflow
+
+
+def test_disk_pressure_cleanup_jobs_are_sequenced_and_identity_locked():
+    jobs = read_workflow(".github/workflows/cleanup-production-operations.yml")["jobs"]
+    asr = jobs["auto-clean-asr"]
+    backups = jobs["auto-clean-backups"]
+
+    assert asr["needs"] == ["disk-pressure", "pressure-dryrun"]
+    assert "needs.disk-pressure.outputs.tier == 'backup-apply'" in asr["if"]
+    assert "vars.PRODUCTION_AUTO_CLEANUP_ENABLED == 'true'" in asr["if"]
+    assert asr["with"]["asr_manifest_artifact_name"] == (
+        "${{ needs.pressure-dryrun.outputs.asr_manifest_artifact_name }}"
+    )
+    assert backups["needs"] == ["disk-pressure", "pressure-dryrun", "auto-clean-asr"]
+    assert "always()" in backups["if"]
+    assert "needs.auto-clean-asr.result" in backups["if"]
 
 
 def test_storage_inventory_is_aggregate_and_read_only():
