@@ -748,6 +748,14 @@ export type UnifiedPublicationJob = {
   started_at: number | null;
   finished_at: number | null;
   updated_at: number;
+  is_archived: boolean;
+  is_current_head: boolean;
+  is_latest_attempt: boolean;
+  doc_type: string | null;
+  version_number: number | null;
+  file_size: number | null;
+  parent_count: number | null;
+  preview_parent_id: string | null;
 };
 
 export type UnifiedPublicationJobList = {

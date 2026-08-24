@@ -61,6 +61,7 @@ import {
   CardTitle,
 } from "../../components/ui/card";
 import { Checkbox } from "../../components/ui/checkbox";
+import { IconButton } from "../../components/ui/icon-button";
 import {
   Dialog,
   DialogContent,
@@ -72,7 +73,6 @@ import {
 import { EmptyState } from "../../components/ui/empty-state";
 import { ErrorState } from "../../components/ui/error-state";
 import { Input } from "../../components/ui/input";
-import { IconButton } from "../../components/ui/icon-button";
 import { LoadingState } from "../../components/ui/loading-state";
 import { Select } from "../../components/ui/select";
 import {
@@ -723,11 +723,13 @@ function UploadTasksPanel({
   canRetry,
   onRetry,
   canTranscribe,
+  canDelete,
 }: {
   activeUpload: ActiveUploadState | null;
   canRetry: (task: ManagedUploadTask) => boolean;
   onRetry: (task: ManagedUploadTask) => void;
   canTranscribe: boolean;
+  canDelete: boolean;
 }) {
   const [tasks, setTasks] = useState<ManagedUploadTask[]>([]);
   const [total, setTotal] = useState(0);
@@ -744,6 +746,8 @@ function UploadTasksPanel({
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<ManagedUploadTask | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [deleteTask, setDeleteTask] = useState<ManagedUploadTask | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [transcriptionTask, setTranscriptionTask] = useState<ManagedUploadTask | null>(null);
   const [schemeId, setSchemeId] = useState("");
   const [schemes, setSchemes] = useState<TranscriptionSchemeOption[]>([]);
@@ -755,8 +759,8 @@ function UploadTasksPanel({
     setSelected([]);
   }, [query, statusFilter, pageSize]);
 
-  const loadTasks = useCallback(async () => {
-    setLoading(true);
+  const loadTasks = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const result = await adminContentApi.uploadTasks({
@@ -784,7 +788,7 @@ function UploadTasksPanel({
 
   useManagedContentLiveRefresh({
     active: tasks.some((task) => task.status === "processing"),
-    refresh: loadTasks,
+    refresh: () => loadTasks(true),
     enabled: true,
   });
   useEffect(() => {
@@ -814,6 +818,21 @@ function UploadTasksPanel({
     } finally {
       setDetailLoading(false);
     }
+  };
+  const deleteUploadTask = async () => {
+    if (!deleteTask || deleteBusy) return;
+    setDeleteBusy(true);
+    try {
+      const full = deleteTask.entries ? deleteTask : await adminContentApi.uploadTask(deleteTask.batch_id);
+      const items = (full.entries || []).filter((entry) => entry.item_id && entry.version_id).map((entry) => ({ item_id: entry.item_id!, expected_version_id: entry.version_id! }));
+      if (!items.length) throw new Error("此任务没有可移入回收站的资料");
+      const result = await adminContentApi.bulkArchive(items);
+      if (result.failed) throw new Error(`有 ${result.failed} 份资料未能移入回收站`);
+      toast.success(`已将 ${result.succeeded} 份资料移入回收站`);
+      setDeleteTask(null);
+      await loadTasks(true);
+    } catch (caught) { toast.error(caught instanceof Error ? caught.message : "删除任务及资料失败"); }
+    finally { setDeleteBusy(false); }
   };
   const openBatchTranscription = async (task: ManagedUploadTask) => {
     setTranscriptionTask(task);
@@ -1073,28 +1092,19 @@ function UploadTasksPanel({
             >
               清除筛选
             </Button>
-            {selected.length > 0 && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setSelected([])}
-              >
-                取消选择
-              </Button>
-            )}
-            {selected.length > 1 && (
-              <BatchActionsMenu
-                disabled={loading}
-                options={[
-                  {
-                    key: "export_upload_summary",
-                    label: "导出任务摘要",
-                    icon: <Download className="size-4" />,
-                    onSelect: exportSelected,
-                  },
-                ]}
-              />
-            )}
+            <BatchActionsMenu
+              disabled={loading}
+              options={[
+                {
+                  key: "export_upload_summary",
+                  label: selected.length > 0 ? `导出所选任务摘要（${selected.length}）` : "导出所选任务摘要",
+                  icon: <Download className="size-4" />,
+                  disabled: selected.length < 2,
+                  disabledReason: "至少选择 2 个上传任务",
+                  onSelect: exportSelected,
+                },
+              ]}
+            />
           </div>
         </div>
         {error && (
@@ -1224,34 +1234,30 @@ function UploadTasksPanel({
                   </div>
                   <div className="col-span-2 flex flex-wrap gap-2 xl:col-span-1 xl:justify-end">
                     <>
-                      {canTranscribe && task.video_count > 0 && <Button size="sm" variant="outline" disabled={task.transcribable_video_count === 0} title={task.transcribable_video_count === 0 ? "此批次视频均已转录或正在转录" : undefined} onClick={() => void openBatchTranscription(task)}><Rocket className="size-4" />转录此批次视频</Button>}
+                      {canTranscribe && task.video_count > 0 && <IconButton label="转录此批次视频" tooltip={task.transcribable_video_count === 0 ? "此批次视频均已转录或正在转录" : "开始转录此批次中的可用视频"} className="border border-border" disabled={task.transcribable_video_count === 0} onClick={() => void openBatchTranscription(task)}><Rocket className="size-4" /></IconButton>}
                       {task.status === "failed" && (
-                        <Button
-                          size="sm"
-                          variant="outline"
+                        <IconButton
                           disabled={!canRetry(task)}
-                          aria-label={
-                            canRetry(task) ? "重试" : "重试（原始文件不可用）"
-                          }
-                          title={
+                          label="重试上传"
+                          tooltip={
                             !canRetry(task)
                               ? "原始文件仅保留在当前浏览器会话中，当前不可重试"
-                              : undefined
+                              : "重新上传此失败任务"
                           }
                           onClick={() => onRetry(task)}
                         >
                           <RotateCcw className="size-4" />
-                          重试
-                        </Button>
+                        </IconButton>
                       )}
-                      <Button
-                        size="sm"
-                        variant="outline"
+                      <IconButton
+                        label="查看上传任务详情"
+                        tooltip="查看文件明细、处理结果和失败原因"
+                        className="border border-border"
                         onClick={() => void openDetail(task)}
                       >
                         <ListChecks className="size-4" />
-                        详情
-                      </Button>
+                      </IconButton>
+                      {canDelete && task.status !== "processing" && <IconButton label="删除任务及资料" tooltip="将任务及已生成资料移入回收站" className="border border-destructive/40 text-destructive hover:bg-destructive/10" onClick={() => setDeleteTask(task)}><Trash2 className="size-4" /></IconButton>}
                     </>
                   </div>
                 </li>
@@ -1318,6 +1324,13 @@ function UploadTasksPanel({
         onRetry={onRetry}
         onClose={() => setDetail(null)}
       />
+      <Dialog open={Boolean(deleteTask)} onOpenChange={(open) => { if (!open && !deleteBusy) setDeleteTask(null); }}>
+        <DialogContent aria-describedby="upload-delete-description">
+          <DialogHeader><DialogTitle>删除任务及资料</DialogTitle><DialogDescription id="upload-delete-description">任务记录和已生成资料将一起移入回收站，不会立即永久删除。</DialogDescription></DialogHeader>
+          <div className="max-h-64 overflow-y-auto rounded-ui-md border border-border p-3 text-ui-sm">{(deleteTask?.entries || []).filter((entry) => entry.item_id).map((entry) => <div key={entry.sequence} className="flex items-center justify-between gap-3 border-b border-border py-2 last:border-0"><span className="min-w-0 break-all">{entry.relative_path || entry.filename}</span><span className="shrink-0 text-ui-xs text-muted-foreground">移入回收站</span></div>)}</div>
+          <DialogFooter><Button variant="outline" disabled={deleteBusy} onClick={() => setDeleteTask(null)}>取消</Button><Button variant="destructive" disabled={deleteBusy} onClick={() => void deleteUploadTask()}><Trash2 className="size-4" />{deleteBusy ? "处理中…" : "确认移入回收站"}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={Boolean(transcriptionTask)} onOpenChange={(open) => { if (!open && !transcriptionBusy) setTranscriptionTask(null); }}>
         <DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>转录上传批次视频</DialogTitle><DialogDescription>视频仍保留在资料库；确认方案后才会创建转录任务。</DialogDescription></DialogHeader>
           <div className="space-y-4"><label className="block space-y-1.5 text-ui-sm font-medium"><span>转录方案</span><Select aria-label="选择转录方案" value={schemeId} onChange={(event) => { setSchemeId(event.target.value); setPreflight(null); }}><option value="">请选择可用方案</option>{schemes.map((scheme) => <option key={scheme.scheme_id} value={scheme.scheme_id} disabled={!scheme.enabled || scheme.archived || scheme.availability !== "available"}>{scheme.name}{scheme.availability !== "available" ? "（不可用）" : ""}</option>)}</Select></label><p className="rounded-ui-md border border-border bg-surface-muted/40 px-3 py-2 text-ui-sm">范围：此上传批次，服务端会汇总各子目录中的待转录视频。</p>{preflight && <p className="text-ui-sm">可启动 <strong>{preflight.ready_count}</strong> 个，已跳过/不可用 <strong>{preflight.blocked_count}</strong> 个。</p>}</div>
@@ -5463,6 +5476,7 @@ export function AdminManagedContentPage() {
         <UploadTasksPanel
           activeUpload={activeUpload}
           canTranscribe={isSystemAdmin}
+          canDelete={can("item.archive_draft") || can("item.archive_published")}
           canRetry={(task) =>
             Boolean(lastUploadAttempt?.batchId === task.batch_id)
           }
@@ -6526,10 +6540,10 @@ export function AdminManagedContentPage() {
       >
         {[
           { label: "全部资料", value: Object.values(counts).reduce((sum, value) => sum + value, 0), icon: <FileText className="size-4" /> },
-          { label: "发布处理中", value: counts.publishing || 0, icon: <LoaderCircle className="size-4" />, tone: "warning" as const },
+          { label: "处理中", value: counts.publishing || 0, icon: <LoaderCircle className="size-4" />, tone: "warning" as const },
           { label: "已发布", value: counts.published || 0, icon: <Rocket className="size-4" />, tone: "success" as const },
           { label: "发布失败", value: counts.publication_failed || 0, icon: <XCircle className="size-4" />, tone: "destructive" as const },
-        ].map((summary) => { const next = summary.label === "全部资料" ? "" : summary.label === "发布处理中" ? "publishing" : summary.label === "已发布" ? "published" : "publication_failed"; return <ManagedSummaryCard key={summary.label} label={summary.label} value={summary.value} icon={summary.icon} tone={summary.tone} active={statusFilter === next} onClick={() => { setStatusFilter((current) => current === next ? "" : next); setPage(0); }} />; })}
+        ].map((summary) => { const next = summary.label === "全部资料" ? "" : summary.label === "处理中" ? "publishing" : summary.label === "已发布" ? "published" : "publication_failed"; return <ManagedSummaryCard key={summary.label} label={summary.label} value={summary.value} icon={summary.icon} tone={summary.tone} active={statusFilter === next} onClick={() => { setStatusFilter((current) => current === next ? "" : next); setPage(0); }} />; })}
       </section>
 
       {!enabled && !loading && (
@@ -10023,3 +10037,4 @@ export function AdminManagedContentPage() {
     </section>
   );
 }
+

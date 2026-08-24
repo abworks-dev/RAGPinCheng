@@ -1046,7 +1046,7 @@ describe("AdminManagedContentPage", () => {
     fireEvent.focus(screen.getByRole("textbox", { name: "搜索资料" }));
     expect(within(screen.getByRole("dialog", { name: "搜索筛选" })).getByRole("combobox", { name: "状态" })).toHaveValue("");
     expect(screen.getAllByRole("status").some((node) => node.textContent?.includes("未选择资料"))).toBe(true);
-    expect(screen.queryByRole("button", { name: "批量操作" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "批量操作" })).toBeInTheDocument();
   });
 
   it("places index tasks after upload tasks and keeps the selected view in the URL", async () => {
@@ -2327,7 +2327,7 @@ describe("AdminManagedContentPage", () => {
     expect(await screen.findByText("03 公司内部标准 / 01 建模标准")).toBeInTheDocument();
     expect(screen.getByText("已接收 1 个 · 跳过 1 个")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "处理结果：已接收 1 个 · 跳过 1 个" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "详情" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看上传任务详情" }));
     expect(await screen.findByText("文件明细")).toBeInTheDocument();
     const detailDialog = screen.getByRole("dialog", { name: "上传任务详情" });
     expect(within(detailDialog).getByRole("progressbar", { name: "任务处理进度 100%" })).toBeInTheDocument();
@@ -2377,9 +2377,9 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getByText("未完成 1 个")).toBeInTheDocument();
     const failedRow = screen.getByTestId("upload-task-row");
     const failedActions = within(failedRow).getAllByRole("button");
-    expect(failedActions.map((button) => button.textContent)).toEqual(["重试", "详情"]);
+    expect(failedActions.map((button) => button.getAttribute("aria-label"))).toEqual(["重试上传", "查看上传任务详情"]);
     expect(failedActions[0]).toBeDisabled();
-    expect(failedActions[0]).toHaveAttribute("title", "原始文件仅保留在当前浏览器会话中，当前不可重试");
+    expect(failedActions[0]).toHaveAttribute("aria-label", "重试上传");
 
     const search = screen.getByRole("searchbox", { name: "搜索上传任务" });
     fireEvent.change(search, { target: { value: " guide.md " } });
@@ -2446,7 +2446,7 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(within(rows[1]).getByRole("checkbox"));
     expect(screen.getAllByRole("status").some((status) => status.textContent?.includes("已选择 2 个"))).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "导出任务摘要" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "导出所选任务摘要（2）" }));
     expect(mocks.success).toHaveBeenCalledWith("已导出 2 个任务摘要");
 
     fireEvent.click(screen.getByRole("button", { name: "下一页" }));
