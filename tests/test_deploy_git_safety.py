@@ -519,6 +519,7 @@ class TestDeployGitSafety(unittest.TestCase):
             'assert "/app/docs" in tmpfs', self.app_only_workflow
         )
         self.assertIn('ORIGINAL_COMPOSE_OVERRIDE="${COMPOSE_OVERRIDE}"', self.app_only_workflow)
+        self.assertIn('build -t pincheng-libreoffice:latest "${REPO_PATH}/services/libreoffice"', self.linux)
         self.assertIn('COMPOSE=("${DEPLOY_COMPOSE[@]}")', self.app_only_workflow)
         self.assertIn("export COMPOSE_OVERRIDE", self.app_only_workflow)
         self.assertIn(

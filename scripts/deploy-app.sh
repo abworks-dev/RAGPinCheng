@@ -202,7 +202,8 @@ echo ">> Building LibreOffice image"
 docker compose -p "${COMPOSE_PROJECT}" \
     -f "${COMPOSE_BASE}" -f "${ORIGINAL_COMPOSE_OVERRIDE}" \
     --env-file "${COMPOSE_ENV_FILE}" \
-    build libreoffice 2>&1 | tail -5
+    config --quiet
+docker build -t pincheng-libreoffice:latest "${REPO_PATH}/services/libreoffice" 2>&1 | tail -5
 
 # ── 7. Apply and verify application schema migrations ─────────────────────
 if [ "${SCHEMA_MIGRATION_ACTION}" = "APPLY_PENDING" ]; then
