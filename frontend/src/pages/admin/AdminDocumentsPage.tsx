@@ -295,6 +295,10 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
             </p>
           </div>
           <IndexTaskSearchFilters searchInput={searchInput} categoryId={categoryId} docType={docType} sourceOrigin={sourceOrigin} status={status} history={history} includeArchived={includeArchived} categories={categories} onSearchInputChange={setSearchInput} onCategoryChange={setCategoryId} onDocTypeChange={setDocType} onSourceChange={setSourceOrigin} onStatusChange={setStatus} onHistoryChange={setHistory} onIncludeArchivedChange={setIncludeArchived} onClear={clearFilters} />
+          <Button variant="outline" size="sm" className="h-control-md" disabled={loading || refreshing} onClick={() => void load(true)}>
+            <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
+            {refreshing ? "刷新中…" : "刷新列表"}
+          </Button>
         </div>
 
         {loading ? (

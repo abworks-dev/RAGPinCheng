@@ -1371,7 +1371,6 @@ async def upload_managed_documents(
     relative_paths: list[str] | None = Form(None),
     upload_mode: str = Form("files"),
     allow_folder_merge: bool = Form(False),
-    video_scheme_id: str | None = Form(None),
     video_idempotency_keys: list[str] | None = Form(None),
     publish: list[str] | None = Form(None),
     conflict_actions: list[str] | None = Form(None),
@@ -1482,7 +1481,9 @@ async def upload_managed_documents(
                     video=upload,
                     title=Path(final_filename).stem,
                     transcript=None,
-                    profile_id=video_scheme_id,
+                    # Scheme selection belongs to the transcription task. The
+                    # upload endpoint only persists the media catalog shell.
+                    profile_id=None,
                     request_idempotency_key=(
                         video_idempotency_keys[index]
                         if video_idempotency_keys and video_idempotency_keys[index]
@@ -1491,7 +1492,7 @@ async def upload_managed_documents(
                     admin=user,
                     conn=conn,
                     replacement_source_media_id=None,
-                    scheme_id=video_scheme_id,
+                    scheme_id=None,
                     category_id=upload_category_id,
                     original_filename=final_filename,
                     defer_transcription=True,
@@ -4013,7 +4014,17 @@ def list_unified_publication_jobs(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> UnifiedPublicationJobListResponse:
     term = query.strip().lower()
-    document_sql = """
+    document_latest_filter = "" if history else """
+       WHERE j.id=(SELECT x.id FROM content_index_jobs x
+                   WHERE x.version_id=j.version_id
+                   ORDER BY x.attempt_number DESC,x.created_at DESC,x.id DESC LIMIT 1)
+    """
+    video_latest_filter = "" if history else """
+       WHERE j.attempt_number=(SELECT max(x.attempt_number)
+                               FROM transcript_publication_index_jobs x
+                               WHERE x.transcript_version_id=j.transcript_version_id)
+    """
+    document_sql = f"""
       SELECT j.id, 'document' AS task_type, '普通资料' AS task_type_label,
              CASE WHEN j.status IN ('pending','uploading','queued_mineru','parsing','chunking','summarizing','embedding') THEN 'processing'
                   WHEN j.status='done' THEN 'published' ELSE 'failed' END AS unified_status,
@@ -4022,7 +4033,8 @@ def list_unified_publication_jobs(
              i.category_id, c.display_code || ' ' || c.display_name AS category_label,
              NULL AS category_path, v.source_origin, j.attempt_number,
              CASE WHEN i.archived_at IS NULL THEN 0 ELSE 1 END AS is_archived, CASE WHEN h.current_version_id=v.id THEN 1 ELSE 0 END AS is_current_head,
-             1 AS is_latest_attempt, v.doc_type, v.version_number, o.size_bytes AS file_size,
+             CASE WHEN j.id=(SELECT x.id FROM content_index_jobs x WHERE x.version_id=j.version_id ORDER BY x.attempt_number DESC,x.created_at DESC,x.id DESC LIMIT 1) THEN 1 ELSE 0 END AS is_latest_attempt,
+             v.doc_type, v.version_number, o.size_bytes AS file_size,
              NULL AS parent_count, NULL AS preview_parent_id,
              (SELECT count(*) FROM content_index_jobs x WHERE x.version_id=j.version_id) AS attempt_count,
              j.error_code, j.error_summary, j.created_at, j.started_at, j.finished_at, j.updated_at
@@ -4032,16 +4044,18 @@ def list_unified_publication_jobs(
         JOIN category_nodes c ON c.id=i.category_id
         LEFT JOIN content_objects o ON o.sha256=v.object_sha256
         LEFT JOIN content_item_heads h ON h.item_id=i.id
-       WHERE j.id=(SELECT x.id FROM content_index_jobs x WHERE x.version_id=j.version_id ORDER BY x.attempt_number DESC,x.created_at DESC,x.id DESC LIMIT 1)
+       {document_latest_filter}
     """
-    video_sql = """
+    video_sql = f"""
       SELECT j.id, 'video_transcript' AS task_type, '视频转录稿' AS task_type_label,
              CASE WHEN j.status IN ('pending','parsing','chunking','embedding') THEN 'processing'
                   WHEN j.status='done' THEN 'published' ELSE 'failed' END AS unified_status,
              v.id AS version_id, NULL AS publication_id, v.media_id,
-             m.title, m.original_filename, NULL AS category_id, NULL AS category_label,
-             NULL AS category_path, 'transcription' AS source_origin, j.attempt_number,
-             0 AS is_archived, 0 AS is_current_head, 1 AS is_latest_attempt,
+             m.title, m.original_filename, i.category_id, c.display_code || ' ' || c.display_name AS category_label,
+             c.display_code || ' ' || c.display_name AS category_path, 'transcription' AS source_origin, j.attempt_number,
+             CASE WHEN i.archived_at IS NULL THEN 0 ELSE 1 END AS is_archived,
+             CASE WHEN h.current_version_id=v.id THEN 1 ELSE 0 END AS is_current_head,
+             CASE WHEN j.attempt_number=(SELECT max(x.attempt_number) FROM transcript_publication_index_jobs x WHERE x.transcript_version_id=j.transcript_version_id) THEN 1 ELSE 0 END AS is_latest_attempt,
              'transcript' AS doc_type, NULL AS version_number, m.file_size AS file_size,
              NULL AS parent_count, NULL AS preview_parent_id,
              (SELECT count(*) FROM transcript_publication_index_jobs x WHERE x.transcript_version_id=j.transcript_version_id) AS attempt_count,
@@ -4049,7 +4063,10 @@ def list_unified_publication_jobs(
         FROM transcript_publication_index_jobs j
         JOIN transcript_versions v ON v.id=j.transcript_version_id
         JOIN media_assets m ON m.media_id=v.media_id
-       WHERE j.attempt_number=(SELECT max(x.attempt_number) FROM transcript_publication_index_jobs x WHERE x.transcript_version_id=j.transcript_version_id)
+        JOIN content_items i ON i.media_id=v.media_id AND i.content_kind='media_transcript'
+        JOIN category_nodes c ON c.id=i.category_id
+        LEFT JOIN media_transcript_heads h ON h.media_id=v.media_id
+       {video_latest_filter}
     """
     parts = []
     params: list[object] = []
@@ -4062,8 +4079,6 @@ def list_unified_publication_jobs(
         if doc_type: clauses.append("doc_type=?"); params.append(doc_type)
         if source_origin: clauses.append("source_origin=?"); params.append(source_origin)
         if not include_archived: clauses.append("is_archived=0")
-        if history:
-            sql = sql.replace("j.id=(SELECT x.id", "1=1 /* history */ AND j.id=(SELECT x.id") if kind == "document" else sql.replace("j.attempt_number=(SELECT max(x.attempt_number)", "1=1 /* history */ AND j.attempt_number=(SELECT max(x.attempt_number)")
         parts.append(f"SELECT * FROM ({sql}) q WHERE {' AND '.join(clauses) if clauses else '1=1'}")
     union = " UNION ALL ".join(parts) or "SELECT * FROM (SELECT NULL AS id) WHERE 1=0"
     rows = conn.execute(f"SELECT * FROM ({union}) all_jobs ORDER BY updated_at DESC,id DESC LIMIT ? OFFSET ?", [*params, limit, offset]).fetchall()

@@ -10,8 +10,8 @@ async function openTab(page: Parameters<typeof installAdminRoutes>[0], label: st
     await expect(mobileNavigation).toBeVisible();
     await mobileNavigation.click();
   }
-  await page.getByRole("link", { name: label === "索引任务" ? "资料管理" : label, exact: true }).click();
-  if (label === "索引任务") await page.getByRole("tab", { name: "索引任务", exact: true }).click();
+  await page.getByRole("link", { name: label === "发布任务" ? "资料管理" : label, exact: true }).click();
+  if (label === "发布任务") await page.getByRole("tab", { name: "发布任务", exact: true }).click();
 }
 
 async function openRootFolder(page: Parameters<typeof installAdminRoutes>[0], folderId = "cat-company") {
@@ -129,11 +129,11 @@ test.describe("资料管理", () => {
     const rows = page.getByTestId("upload-task-row");
     const failedRow = rows.filter({ hasText: "01 行业规范与标准 / 02 文件夹上传测试" });
     const failedActions = failedRow.getByRole("button");
-    await expect(failedActions).toHaveCount(2);
-    expect(await failedActions.allTextContents()).toEqual(["重试", "详情"]);
-    const retry = failedRow.getByRole("button", { name: "重试（原始文件不可用）", exact: true });
+    await expect(failedActions).toHaveCount(3);
+    await expect(failedRow.getByRole("button", { name: "删除任务及资料" })).toBeVisible();
+    const retry = failedRow.getByRole("button", { name: "重试上传", exact: true });
     await expect(retry).toBeDisabled();
-    await expect(retry).toHaveAttribute("title", "原始文件仅保留在当前浏览器会话中，当前不可重试");
+    await expect(retry.locator("xpath=..")).toHaveAttribute("aria-label", "重试上传：原始文件仅保留在当前浏览器会话中，当前不可重试");
 
     const partialRow = rows.filter({ hasText: "合成长目录名称用于响应式检查" });
     await partialRow.getByRole("button", { name: "详情" }).click();
@@ -154,7 +154,7 @@ test.describe("资料管理", () => {
     const batchButton = page.getByRole("button", { name: "批量操作" });
     await expect(batchButton).toBeVisible();
     await batchButton.click();
-    await expect(page.getByRole("menuitem", { name: "导出任务摘要" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: /导出所选任务摘要/ })).toBeVisible();
     await page.keyboard.press("Escape");
 
     const search = page.getByRole("searchbox", { name: "搜索上传任务" });
@@ -162,7 +162,7 @@ test.describe("资料管理", () => {
     const searchRequest = page.waitForRequest((request) => new URL(request.url()).searchParams.get("query") === "竣工交付");
     await search.press("Enter");
     await searchRequest;
-    await expect(batchButton).toHaveCount(0);
+    await expect(batchButton).toBeVisible();
     await expect(page.getByText("04 项目资料 / 02 竣工交付")).toBeVisible();
     await expect(page.getByText("01 行业规范与标准 / 02 文件夹上传测试")).toHaveCount(0);
 
@@ -813,7 +813,7 @@ test.describe("转录任务", () => {
     await page.getByRole("tab", { name: "转录任务", exact: true }).click();
     await expect(page.getByRole("heading", { name: "转录任务" })).toBeVisible();
     await expect(page.getByText("同名记录 2 条").first()).toBeVisible();
-    await expect(page.getByRole("button", { name: "全部 3" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "全部任务 3" })).toBeVisible();
     await expect(page.getByRole("button", { name: "失败 2" })).toBeVisible();
     await expect(page.getByRole("button", { name: "刷新媒体资源" })).toBeVisible();
     await expect(page.getByText("转录服务当前暂停接收任务，请稍后重试。")).toBeVisible();
@@ -853,33 +853,33 @@ test.describe("转录任务", () => {
 
 });
 
-test.describe("索引任务", () => {
+test.describe("发布任务", () => {
   test("normal layout keeps publication identity, filters, and failures discoverable", async ({ page }) => {
-    await openTab(page, "索引任务");
-    await expect(page.getByRole("heading", { name: "索引任务" })).toBeVisible();
+    await openTab(page, "发布任务");
+    await expect(page.getByRole("heading", { name: "发布任务" })).toBeVisible();
     await expect(page.getByText("资料管理发布失败的合成长文件名资料", { exact: true })).toBeVisible();
     await expectNoBodyOverflow(page);
     await expect(page.getByRole("button", { name: "上传资料" })).toHaveCount(0);
     await expect(page.getByText("旧索引资料", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("searchbox", { name: "搜索发布任务" })).toBeVisible();
-    await page.getByRole("button", { name: "展开索引任务筛选" }).click();
+    await page.getByRole("button", { name: "展开发布任务筛选" }).click();
     await expect(page.getByRole("combobox", { name: "按数据库分类筛选" })).toBeVisible();
     await expect(page.getByRole("combobox", { name: "按资料来源筛选" })).toBeVisible();
     await expect(page.getByRole("checkbox", { name: "查看历史尝试" })).toBeVisible();
     await expect(page.getByRole("link", { name: "查看文件" })).toBeVisible();
     await expect(page.getByRole("button", { name: "重新发布" })).toBeVisible();
 
-    const publicationFailure = page.getByText("文档解析服务请求失败。", { exact: true });
+    const publicationFailure = page.getByText("文档解析服务请求失败，请稍后重试。", { exact: true });
     await publicationFailure.scrollIntoViewIfNeeded();
     await expectInViewport(publicationFailure);
     await expectNoBodyOverflow(page);
   });
 
   test("archived publication history is opt-in and clearly withdrawn", async ({ page }) => {
-    await openTab(page, "索引任务");
+    await openTab(page, "发布任务");
     await expect(page.getByText("已移入回收站的合成资料", { exact: true })).toHaveCount(0);
 
-    await page.getByRole("button", { name: "展开索引任务筛选" }).click();
+    await page.getByRole("button", { name: "展开发布任务筛选" }).click();
     const includeArchived = page.getByRole("checkbox", { name: "包含回收站资料" });
     await includeArchived.click();
     const archivedTitle = page.getByText("已移入回收站的合成资料", { exact: true });
@@ -894,7 +894,7 @@ test.describe("索引任务", () => {
 
   for (const scenario of ["loading", "empty", "error"] as const) {
     test(`${scenario} state is explicit and contained`, async ({ page }) => {
-      await openTab(page, "索引任务", scenario);
+      await openTab(page, "发布任务", scenario);
       await expectNoBodyOverflow(page);
       if (scenario === "loading") await expect(page.getByText("正在加载发布任务…")).toBeVisible();
       if (scenario === "empty") await expect(page.getByText("暂无发布任务")).toBeVisible();
