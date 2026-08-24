@@ -723,11 +723,13 @@ function UploadTasksPanel({
   canRetry,
   onRetry,
   canTranscribe,
+  canDelete,
 }: {
   activeUpload: ActiveUploadState | null;
   canRetry: (task: ManagedUploadTask) => boolean;
   onRetry: (task: ManagedUploadTask) => void;
   canTranscribe: boolean;
+  canDelete: boolean;
 }) {
   const [tasks, setTasks] = useState<ManagedUploadTask[]>([]);
   const [total, setTotal] = useState(0);
@@ -744,6 +746,8 @@ function UploadTasksPanel({
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<ManagedUploadTask | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [deleteTask, setDeleteTask] = useState<ManagedUploadTask | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [transcriptionTask, setTranscriptionTask] = useState<ManagedUploadTask | null>(null);
   const [schemeId, setSchemeId] = useState("");
   const [schemes, setSchemes] = useState<TranscriptionSchemeOption[]>([]);
@@ -814,6 +818,21 @@ function UploadTasksPanel({
     } finally {
       setDetailLoading(false);
     }
+  };
+  const deleteUploadTask = async () => {
+    if (!deleteTask || deleteBusy) return;
+    setDeleteBusy(true);
+    try {
+      const full = deleteTask.entries ? deleteTask : await adminContentApi.uploadTask(deleteTask.batch_id);
+      const items = (full.entries || []).filter((entry) => entry.item_id && entry.version_id).map((entry) => ({ item_id: entry.item_id!, expected_version_id: entry.version_id! }));
+      if (!items.length) throw new Error("此任务没有可移入回收站的资料");
+      const result = await adminContentApi.bulkArchive(items);
+      if (result.failed) throw new Error(`有 ${result.failed} 份资料未能移入回收站`);
+      toast.success(`已将 ${result.succeeded} 份资料移入回收站`);
+      setDeleteTask(null);
+      await loadTasks(true);
+    } catch (caught) { toast.error(caught instanceof Error ? caught.message : "删除任务及资料失败"); }
+    finally { setDeleteBusy(false); }
   };
   const openBatchTranscription = async (task: ManagedUploadTask) => {
     setTranscriptionTask(task);
@@ -1238,6 +1257,7 @@ function UploadTasksPanel({
                       >
                         <ListChecks className="size-4" />
                       </IconButton>
+                      {canDelete && task.status !== "processing" && <IconButton label="删除任务及资料" tooltip="将任务及已生成资料移入回收站" className="border border-destructive/40 text-destructive hover:bg-destructive/10" onClick={() => setDeleteTask(task)}><Trash2 className="size-4" /></IconButton>}
                     </>
                   </div>
                 </li>
@@ -1304,6 +1324,13 @@ function UploadTasksPanel({
         onRetry={onRetry}
         onClose={() => setDetail(null)}
       />
+      <Dialog open={Boolean(deleteTask)} onOpenChange={(open) => { if (!open && !deleteBusy) setDeleteTask(null); }}>
+        <DialogContent aria-describedby="upload-delete-description">
+          <DialogHeader><DialogTitle>删除任务及资料</DialogTitle><DialogDescription id="upload-delete-description">任务记录和已生成资料将一起移入回收站，不会立即永久删除。</DialogDescription></DialogHeader>
+          <div className="max-h-64 overflow-y-auto rounded-ui-md border border-border p-3 text-ui-sm">{(deleteTask?.entries || []).filter((entry) => entry.item_id).map((entry) => <div key={entry.sequence} className="flex items-center justify-between gap-3 border-b border-border py-2 last:border-0"><span className="min-w-0 break-all">{entry.relative_path || entry.filename}</span><span className="shrink-0 text-ui-xs text-muted-foreground">移入回收站</span></div>)}</div>
+          <DialogFooter><Button variant="outline" disabled={deleteBusy} onClick={() => setDeleteTask(null)}>取消</Button><Button variant="destructive" disabled={deleteBusy} onClick={() => void deleteUploadTask()}><Trash2 className="size-4" />{deleteBusy ? "处理中…" : "确认移入回收站"}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={Boolean(transcriptionTask)} onOpenChange={(open) => { if (!open && !transcriptionBusy) setTranscriptionTask(null); }}>
         <DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>转录上传批次视频</DialogTitle><DialogDescription>视频仍保留在资料库；确认方案后才会创建转录任务。</DialogDescription></DialogHeader>
           <div className="space-y-4"><label className="block space-y-1.5 text-ui-sm font-medium"><span>转录方案</span><Select aria-label="选择转录方案" value={schemeId} onChange={(event) => { setSchemeId(event.target.value); setPreflight(null); }}><option value="">请选择可用方案</option>{schemes.map((scheme) => <option key={scheme.scheme_id} value={scheme.scheme_id} disabled={!scheme.enabled || scheme.archived || scheme.availability !== "available"}>{scheme.name}{scheme.availability !== "available" ? "（不可用）" : ""}</option>)}</Select></label><p className="rounded-ui-md border border-border bg-surface-muted/40 px-3 py-2 text-ui-sm">范围：此上传批次，服务端会汇总各子目录中的待转录视频。</p>{preflight && <p className="text-ui-sm">可启动 <strong>{preflight.ready_count}</strong> 个，已跳过/不可用 <strong>{preflight.blocked_count}</strong> 个。</p>}</div>
@@ -5449,6 +5476,7 @@ export function AdminManagedContentPage() {
         <UploadTasksPanel
           activeUpload={activeUpload}
           canTranscribe={isSystemAdmin}
+          canDelete={can("item.archive_draft") || can("item.archive_published")}
           canRetry={(task) =>
             Boolean(lastUploadAttempt?.batchId === task.batch_id)
           }
