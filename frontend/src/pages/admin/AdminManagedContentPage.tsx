@@ -755,8 +755,8 @@ function UploadTasksPanel({
     setSelected([]);
   }, [query, statusFilter, pageSize]);
 
-  const loadTasks = useCallback(async () => {
-    setLoading(true);
+  const loadTasks = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const result = await adminContentApi.uploadTasks({
@@ -784,7 +784,7 @@ function UploadTasksPanel({
 
   useManagedContentLiveRefresh({
     active: tasks.some((task) => task.status === "processing"),
-    refresh: loadTasks,
+    refresh: () => loadTasks(true),
     enabled: true,
   });
   useEffect(() => {
