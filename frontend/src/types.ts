@@ -740,6 +740,9 @@ export type UnifiedPublicationJob = {
   error_code: string | null;
   error_summary: string | null;
   retryable: boolean;
+  is_archived: boolean;
+  is_current_head: boolean;
+  is_latest_attempt: boolean;
   created_at: number;
   started_at: number | null;
   finished_at: number | null;

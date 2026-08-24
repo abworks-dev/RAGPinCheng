@@ -145,7 +145,6 @@ def test_unified_upload_routes_documents_and_videos_to_independent_pipelines(
     client, sessions, _queued, db_path = content_api
     video_bytes = b"synthetic-mp4"
     media_id = "123e4567-e89b-42d3-a456-426614174301"
-    job_id = "123e4567-e89b-42d3-a456-426614174302"
     request_key = "123e4567-e89b-42d3-a456-426614174303"
     calls: list[dict[str, object]] = []
 
@@ -178,33 +177,7 @@ def test_unified_upload_routes_documents_and_videos_to_independent_pipelines(
                 kwargs["category_id"],
             ),
         )
-        conn.execute(
-            """INSERT INTO transcription_jobs(
-                   id,media_id,created_by,attempt_number,request_idempotency_key,execution_identity,
-                   profile_id,provider_key,profile_definition_version,config_hash,profile_snapshot_json,
-                   execution_config_json,execution_fingerprint,audio_sha256,input_kind,input_size_bytes,
-                   total_ms,status,created_at,updated_at,scheme_id
-               ) VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,'media',?,1000,'pending',?,?,?)""",
-            (
-                job_id,
-                media_id,
-                admin.id,
-                kwargs["request_idempotency_key"],
-                "synthetic-execution",
-                "synthetic-profile",
-                "synthetic-provider",
-                "1",
-                "a" * 64,
-                "{}",
-                "{}",
-                "b" * 64,
-                "c" * 64,
-                len(video_bytes),
-                now,
-                now,
-                kwargs["scheme_id"],
-            ),
-        )
+        ensure_media_transcript_catalog_item(conn, media_id=media_id, now=now)
         conn.commit()
         return MediaAssetDTO(
             media_id=media_id,
@@ -216,7 +189,7 @@ def test_unified_upload_routes_documents_and_videos_to_independent_pipelines(
             status="uploaded",
             created_at=now,
             updated_at=now,
-            transcription_job_id=job_id,
+            transcription_job_id=None,
             category_id=kwargs["category_id"],
         )
 
@@ -248,7 +221,7 @@ def test_unified_upload_routes_documents_and_videos_to_independent_pipelines(
         "item_id": None,
         "version_id": None,
         "media_id": media_id,
-        "transcription_job_id": job_id,
+        "transcription_job_id": None,
         "sha256": None,
         "status": "accepted",
         "reason": None,
@@ -256,14 +229,20 @@ def test_unified_upload_routes_documents_and_videos_to_independent_pipelines(
         "resolution": "created",
     }
     assert calls[0]["request_idempotency_key"] == request_key
-    assert calls[0]["scheme_id"] == "scheme-synthetic"
+    assert calls[0]["profile_id"] is None
+    assert calls[0]["scheme_id"] is None
+    assert calls[0]["defer_transcription"] is True
 
     conn = connect(db_path)
     try:
         assert conn.execute("SELECT count(*) FROM content_versions").fetchone()[0] == 1
         assert conn.execute("SELECT count(*) FROM content_index_jobs").fetchone()[0] == 0
         assert conn.execute("SELECT count(*) FROM media_assets").fetchone()[0] == 1
-        assert conn.execute("SELECT count(*) FROM transcription_jobs").fetchone()[0] == 1
+        assert conn.execute("SELECT count(*) FROM transcription_jobs").fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT count(*) FROM content_items WHERE content_kind='media_transcript' AND media_id=?",
+            (media_id,),
+        ).fetchone()[0] == 1
         batch_entries = conn.execute(
             """SELECT entry_kind,item_id,version_id,media_id,transcription_job_id
                FROM upload_batch_entries WHERE batch_id=? ORDER BY sequence""",
@@ -271,7 +250,7 @@ def test_unified_upload_routes_documents_and_videos_to_independent_pipelines(
         ).fetchall()
         assert tuple(batch_entries[0])[:1] == ("document",)
         assert batch_entries[0]["item_id"] and batch_entries[0]["version_id"]
-        assert tuple(batch_entries[1]) == ("video", None, None, media_id, job_id)
+        assert tuple(batch_entries[1]) == ("video", None, None, media_id, None)
     finally:
         conn.close()
 
@@ -470,7 +449,7 @@ def _insert_catalogued_media(
         ),
     )
     if job_status:
-        job_id = f"{media_id[:-1]}job"
+        job_id = f"{media_id}-job"
         conn.execute(
             """INSERT INTO transcription_jobs(
                    id,media_id,attempt_number,request_idempotency_key,execution_identity,
@@ -479,7 +458,7 @@ def _insert_catalogued_media(
                    input_kind,input_size_bytes,total_ms,status,failure_classification,created_at,updated_at
                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'media',?,1000,?,?,?,?)""",
             (
-                job_id, media_id, 1, f"{media_id[:-1]}key", "synthetic-execution",
+                job_id, media_id, 1, f"{media_id}-key", "synthetic-execution",
                 "synthetic-profile", "synthetic-provider", "1", "a" * 64,
                 "{}", "{}", "b" * 64, "c" * 64, 1024, job_status,
                 failure_classification, now, now,
@@ -495,11 +474,112 @@ def _insert_catalogued_media(
             (
                 batch_id, sequence, filename, f"folder-{sequence}/{filename}", 1024, "accepted", None,
                 item_id, None, "video", media_id,
-                f"{media_id[:-1]}job" if job_status else None, None, now,
+                f"{media_id}-job" if job_status else None, None, now,
             ),
         )
     conn.commit()
     return item_id, f"media-pending-{media_id}"
+
+
+def _insert_unpublished_transcript_version(
+    conn: sqlite3.Connection,
+    *,
+    media_id: str,
+    version_id: str,
+    review_status: str,
+    publication_status: str,
+    now: int,
+) -> None:
+    digest = hashlib.sha256(version_id.encode()).hexdigest()
+    conn.execute(
+        """INSERT INTO transcript_versions(
+               id,media_id,source,markdown_storage_kind,markdown_rel_path,markdown_sha256,
+               markdown_size_bytes,review_status,publication_status,created_at,updated_at
+           ) VALUES (?,?,'automatic','managed_artifact',?,?,10,?,?,?,?)""",
+        (
+            version_id,
+            media_id,
+            f"markdown/{version_id}.md",
+            digest,
+            review_status,
+            publication_status,
+            now,
+            now,
+        ),
+    )
+    if publication_status in {"publishing", "publication_failed"}:
+        conn.execute(
+            """INSERT INTO transcript_publication_index_jobs(
+                   id,transcript_version_id,candidate_version_id,attempt_number,markdown_sha256,
+                   target_index_id,status,error_code,error_summary,created_at,updated_at
+               ) VALUES (?,?,?,1,?,?,?,?,?,?,?)""",
+            (
+                f"{version_id}-publication",
+                version_id,
+                version_id,
+                digest,
+                f"candidate-{version_id}",
+                "pending" if publication_status == "publishing" else "failed",
+                None if publication_status == "publishing" else "synthetic_failure",
+                None if publication_status == "publishing" else "synthetic publication failure",
+                now,
+                now,
+            ),
+        )
+    conn.commit()
+
+
+def test_video_library_projects_review_and_publication_lifecycle(content_api):
+    client, sessions, _queued, db_path = content_api
+    cases = [
+        ("1", "awaiting_review", "not_published", "transcribing"),
+        ("2", "review_rejected", "not_published", "transcribing"),
+        ("3", "review_approved", "not_published", "awaiting_publication"),
+        ("4", "review_approved", "publishing", "publishing"),
+        ("5", "review_approved", "publication_failed", "publication_failed"),
+    ]
+    conn = connect(db_path)
+    now = int(time.time())
+    expected_by_media_id: dict[str, str] = {}
+    for suffix, review_status, publication_status, expected in cases:
+        media_id = f"123e4567-e89b-42d3-a456-42661417427{suffix}"
+        version_id = f"123e4567-e89b-42d3-a456-42661417428{suffix}"
+        _insert_catalogued_media(
+            conn,
+            media_id=media_id,
+            title=f"lifecycle-{suffix}",
+            filename=f"lifecycle-{suffix}.mp4",
+            now=now + int(suffix),
+            status="transcript_ready",
+            job_status="succeeded",
+        )
+        _insert_unpublished_transcript_version(
+            conn,
+            media_id=media_id,
+            version_id=version_id,
+            review_status=review_status,
+            publication_status=publication_status,
+            now=now + int(suffix),
+        )
+        expected_by_media_id[media_id] = expected
+    conn.close()
+
+    response = client.get(
+        "/api/admin/content/items-page?category_id=cat-03&content_kind=media_transcript",
+        **_auth(sessions, "admin"),
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    actual_by_media_id = {
+        item["media_id"]: item["lifecycle_status"] for item in body["items"]
+    }
+    assert actual_by_media_id == expected_by_media_id
+    assert body["status_counts"] == {
+        "awaiting_publication": 1,
+        "publication_failed": 1,
+        "publishing": 1,
+        "transcribing": 2,
+    }
 
 
 def test_untranscribed_video_can_move_to_trash_and_restore(content_api):
@@ -3385,6 +3465,26 @@ def test_published_media_transcripts_share_library_listing_without_document_mirr
         "/api/admin/content/items-page?content_kind=document",
         **_auth(sessions, "publisher"),
     ).json()["total"] == 0
+
+    publication_jobs = client.get(
+        "/api/admin/content/publication-jobs?task_type=video_transcript&category_id=cat-05&status=published",
+        **_auth(sessions, "publisher"),
+    )
+    assert publication_jobs.status_code == 200, publication_jobs.text
+    publication_body = publication_jobs.json()
+    assert publication_body["total"] == 2
+    assert publication_body["status_counts"] == {
+        "processing": 0,
+        "published": 2,
+        "failed": 0,
+    }
+    assert {
+        (job["media_id"], job["category_id"], job["is_current_head"], job["status"])
+        for job in publication_body["jobs"]
+    } == {
+        (first_media_id, "cat-05", True, "published"),
+        (second_media_id, "cat-05", True, "published"),
+    }
 
     move_url = f"/api/admin/content/items/{first_item_id}/move"
     body = {"target_category_id": "cat-04", "expected_version_id": first_version_id}

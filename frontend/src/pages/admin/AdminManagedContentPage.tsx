@@ -724,12 +724,14 @@ function UploadTasksPanel({
   onRetry,
   canTranscribe,
   canDelete,
+  onStarted,
 }: {
   activeUpload: ActiveUploadState | null;
   canRetry: (task: ManagedUploadTask) => boolean;
   onRetry: (task: ManagedUploadTask) => void;
   canTranscribe: boolean;
   canDelete: boolean;
+  onStarted: () => void;
 }) {
   const [tasks, setTasks] = useState<ManagedUploadTask[]>([]);
   const [total, setTotal] = useState(0);
@@ -868,6 +870,7 @@ function UploadTasksPanel({
       result.failed ? toast.error(`已启动 ${result.started} 个，${result.failed} 个未启动`) : toast.success(`已启动 ${result.started} 个视频转录任务`);
       setTranscriptionTask(null);
       await loadTasks();
+      if (result.started > 0) onStarted();
     } catch (startError) {
       toast.error(startError instanceof Error ? startError.message : "启动转录失败");
     } finally { setTranscriptionBusy(false); }
@@ -1359,7 +1362,8 @@ const statusLabel: Record<string, string> = {
   awaiting_transcription: "待转录",
   transcribing: "转录中",
   transcription_failed: "转录失败",
-  transcript_ready: "转录稿待审核",
+  transcript_ready: "转录中",
+  awaiting_publication: "待发布",
 };
 const sourceLabel: Record<string, string> = {
   web: "网页上传",
@@ -1383,7 +1387,7 @@ function statusVariant(status: string) {
   if (status === "published") return "success" as const;
   if (status.includes("failed") || status === "rejected")
     return "destructive" as const;
-  if (status === "awaiting_review" || status === "publishing")
+  if (status === "awaiting_review" || status === "awaiting_publication" || status === "publishing")
     return "warning" as const;
   return "secondary" as const;
 }
@@ -2573,8 +2577,9 @@ export function AdminManagedContentPage() {
     item.lifecycle_status === "publishing"
     || ACTIVE_RECLASSIFICATION_STATUSES.has(item.latest_publication_status || ""),
   );
+  const hasActiveTranscription = items.some((item) => item.lifecycle_status === "transcribing");
   useManagedContentLiveRefresh({
-    active: hasActiveReclassification || hasActivePublication,
+    active: hasActiveReclassification || hasActivePublication || hasActiveTranscription,
     enabled: view === "library" && !uploading,
     refresh: () => load(true, true),
   });
@@ -4818,6 +4823,7 @@ export function AdminManagedContentPage() {
       setTranscriptionRequestKey(null);
       setTranscriptionDialogOpen(false);
       await load(true);
+      if (result.started > 0) selectView("transcription");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "启动转录失败");
     } finally {
@@ -5483,6 +5489,7 @@ export function AdminManagedContentPage() {
           activeUpload={activeUpload}
           canTranscribe={isSystemAdmin}
           canDelete={can("item.archive_draft") || can("item.archive_published")}
+           onStarted={() => selectView("transcription")}
           canRetry={(task) =>
             Boolean(lastUploadAttempt?.batchId === task.batch_id)
           }
@@ -6310,7 +6317,7 @@ export function AdminManagedContentPage() {
                   <dd>{trashPurgePreflight.transcript_version_count} 个</dd>
                   <dt className="text-muted-foreground">转录产物</dt>
                   <dd>{trashPurgePreflight.artifact_count} 个</dd>
-                  <dt className="text-muted-foreground">索引任务记录</dt>
+                  <dt className="text-muted-foreground">发布任务记录</dt>
                   <dd>{trashPurgePreflight.index_job_count} 条</dd>
                   <dt className="text-muted-foreground">已阻止</dt>
                   <dd>{trashPurgePreflight.blocked_count} 份</dd>
