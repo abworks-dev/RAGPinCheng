@@ -6290,7 +6290,7 @@ export function AdminManagedContentPage() {
                   <dd>{trashPurgePreflight.transcript_version_count} 个</dd>
                   <dt className="text-muted-foreground">转录产物</dt>
                   <dd>{trashPurgePreflight.artifact_count} 个</dd>
-                  <dt className="text-muted-foreground">索引任务记录</dt>
+                  <dt className="text-muted-foreground">发布任务记录</dt>
                   <dd>{trashPurgePreflight.index_job_count} 条</dd>
                   <dt className="text-muted-foreground">已阻止</dt>
                   <dd>{trashPurgePreflight.blocked_count} 份</dd>
