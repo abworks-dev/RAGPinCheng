@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminDocumentsPage } from "./AdminDocumentsPage";
 
 const mocks = vi.hoisted(() => ({
-  managedContentIndexJobs: vi.fn(),
+  publicationJobs: vi.fn(),
+  retryPublicationJob: vi.fn(),
   managedCategories: vi.fn(),
   publishManagedContent: vi.fn(),
   managedContentFileUrl: vi.fn((versionId: string) => `/managed-files/${versionId}`),
@@ -42,6 +43,9 @@ const failedJob = {
   status: "failed",
   error_code: "parser_request_failed",
   error_summary: "文档解析服务请求失败。",
+  retryable: true,
+  task_type: "document",
+  task_type_label: "普通资料",
   failure: {
     code: "parser_request_failed",
     message: "文档解析服务请求失败。",
@@ -78,8 +82,12 @@ const listing = {
 describe("AdminDocumentsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.publicationJobs.mockResolvedValue({
+      jobs: [{ ...failedJob, task_type: "document", task_type_label: "普通资料", status: "failed" }],
+      total: 1,
+      status_counts: { processing: 2, published: 5, failed: 1 },
+    });
     mocks.managedCategories.mockResolvedValue(categories);
-    mocks.managedContentIndexJobs.mockResolvedValue(listing);
     mocks.publishManagedContent.mockResolvedValue({ publication_id: "publication-2", index_job_id: "job-2", status: "pending" });
     mocks.useAuth.mockReturnValue({
       state: { status: "authed", user: { role: "admin", content_permissions: [] } },
@@ -94,7 +102,7 @@ describe("AdminDocumentsPage", () => {
     const row = title.closest("tr") as HTMLElement;
     expect(screen.queryByText("旧索引资料")).not.toBeInTheDocument();
     expect(screen.queryByText("索引活动")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "索引任务" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "发布任务" })).toBeInTheDocument();
     expect(within(row).getByText("发布失败")).toHaveClass("bg-destructive/15");
     expect(within(row).getByText(/PDF/)).toBeInTheDocument();
     expect(within(row).getByText("PDF").parentElement).toHaveClass("flex", "w-20", "flex-col");
@@ -113,7 +121,7 @@ describe("AdminDocumentsPage", () => {
   it("uses section headings when embedded in content management", async () => {
     render(<AdminDocumentsPage embedded />);
 
-    expect(await screen.findByRole("heading", { name: "索引任务", level: 2 })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "发布任务", level: 2 })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "资料发布任务" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
   });
@@ -123,13 +131,13 @@ describe("AdminDocumentsPage", () => {
     await screen.findByText(failedJob.title);
 
     fireEvent.change(screen.getByRole("searchbox", { name: "搜索发布任务" }), { target: { value: "管综" } });
-    fireEvent.click(screen.getByRole("button", { name: "展开索引任务筛选" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开发布任务筛选" }));
     fireEvent.change(screen.getByRole("combobox", { name: "按数据库分类筛选" }), { target: { value: "cat-03" } });
     fireEvent.change(screen.getByRole("combobox", { name: "按文件类型筛选" }), { target: { value: "pdf" } });
     fireEvent.change(screen.getByRole("combobox", { name: "按资料来源筛选" }), { target: { value: "legacy" } });
     fireEvent.change(screen.getByRole("combobox", { name: "按发布状态筛选" }), { target: { value: "processing" } });
 
-    await waitFor(() => expect(mocks.managedContentIndexJobs).toHaveBeenLastCalledWith(expect.objectContaining({
+    await waitFor(() => expect(mocks.publicationJobs).toHaveBeenLastCalledWith(expect.objectContaining({
       query: "管综",
       category_id: "cat-03",
       doc_type: "pdf",
@@ -146,16 +154,16 @@ describe("AdminDocumentsPage", () => {
     render(<AdminDocumentsPage />);
     await screen.findByText(failedJob.title);
 
-    fireEvent.click(screen.getByRole("button", { name: "展开索引任务筛选" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开发布任务筛选" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "查看历史尝试" }));
 
-    await waitFor(() => expect(mocks.managedContentIndexJobs).toHaveBeenLastCalledWith(expect.objectContaining({ history: true })));
+    await waitFor(() => expect(mocks.publicationJobs).toHaveBeenLastCalledWith(expect.objectContaining({ history: true })));
     expect(screen.getByText("正在显示全部历史尝试。 默认不显示回收站资料。")).toBeInTheDocument();
     expect(screen.getByText("共尝试 4 次 · 当前第 4 次")).toBeInTheDocument();
   });
 
   it("includes archived jobs on demand and marks them as withdrawn", async () => {
-    mocks.managedContentIndexJobs.mockImplementation((params) => Promise.resolve(
+    mocks.publicationJobs.mockImplementation((params) => Promise.resolve(
       params?.include_archived
         ? { ...listing, jobs: [{ ...failedJob, is_archived: true }] }
         : { jobs: [], total: 0, status_counts: { processing: 0, ready: 0, failed: 0 } },
@@ -163,7 +171,7 @@ describe("AdminDocumentsPage", () => {
     render(<AdminDocumentsPage />);
 
     expect(await screen.findByText("暂无发布任务")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "展开索引任务筛选" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开发布任务筛选" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "包含回收站资料" }));
 
     const row = (await screen.findByText(failedJob.title)).closest("tr") as HTMLElement;
@@ -171,7 +179,7 @@ describe("AdminDocumentsPage", () => {
     expect(within(row).getByText("资料已移入回收站，不参与知识库检索")).toBeInTheDocument();
     expect(within(row).getByRole("button", { name: "重新发布" })).toBeDisabled();
     expect(screen.getByText(/已包含回收站资料/)).toBeInTheDocument();
-    expect(mocks.managedContentIndexJobs).toHaveBeenLastCalledWith(expect.objectContaining({ include_archived: true }));
+    expect(mocks.publicationJobs).toHaveBeenLastCalledWith(expect.objectContaining({ include_archived: true }));
   });
 
   it("clears the visible publication filters together", async () => {
@@ -179,7 +187,7 @@ describe("AdminDocumentsPage", () => {
     await screen.findByText(failedJob.title);
 
     const search = screen.getByRole("searchbox", { name: "搜索发布任务" });
-    fireEvent.click(screen.getByRole("button", { name: "展开索引任务筛选" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开发布任务筛选" }));
     const category = screen.getByRole("combobox", { name: "按数据库分类筛选" });
     const type = screen.getByRole("combobox", { name: "按文件类型筛选" });
     const source = screen.getByRole("combobox", { name: "按资料来源筛选" });
@@ -194,7 +202,7 @@ describe("AdminDocumentsPage", () => {
     expect(category).toHaveValue("");
     expect(type).toHaveValue("");
     expect(source).toHaveValue("");
-    await waitFor(() => expect(mocks.managedContentIndexJobs).toHaveBeenLastCalledWith(expect.objectContaining({
+    await waitFor(() => expect(mocks.publicationJobs).toHaveBeenLastCalledWith(expect.objectContaining({
       query: undefined,
       category_id: undefined,
       doc_type: undefined,
@@ -209,21 +217,21 @@ describe("AdminDocumentsPage", () => {
     await screen.findByText(failedJob.title);
 
     const search = screen.getByRole("searchbox", { name: "搜索发布任务" });
-    fireEvent.click(screen.getByRole("button", { name: "展开索引任务筛选" }));
-    expect(screen.getByRole("dialog", { name: "索引任务搜索筛选" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "展开发布任务筛选" }));
+    expect(screen.getByRole("dialog", { name: "发布任务搜索筛选" })).toBeInTheDocument();
     fireEvent.keyDown(document, { key: "Escape" });
 
-    expect(screen.queryByRole("dialog", { name: "索引任务搜索筛选" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "发布任务搜索筛选" })).not.toBeInTheDocument();
     expect(search).toHaveFocus();
   });
 
   it("shows current-head indexing state and Parent count", async () => {
-    mocks.managedContentIndexJobs.mockResolvedValue({
+    mocks.publicationJobs.mockResolvedValue({
       ...listing,
       jobs: [{
         ...failedJob,
         id: "job-ready",
-        status: "done",
+        status: "published",
         failure: null,
         error_code: null,
         error_summary: null,
@@ -264,7 +272,7 @@ describe("AdminDocumentsPage", () => {
     await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("资料状态已变化"));
     expect(screen.getByRole("button", { name: "重新发布" })).toBeEnabled();
 
-    mocks.managedContentIndexJobs.mockResolvedValue({
+    mocks.publicationJobs.mockResolvedValue({
       ...listing,
       jobs: [{ ...failedJob, is_latest_attempt: false }],
     });
@@ -285,21 +293,21 @@ describe("AdminDocumentsPage", () => {
   });
 
   it("supports server-side pagination", async () => {
-    mocks.managedContentIndexJobs.mockResolvedValue({ ...listing, total: 26 });
+    mocks.publicationJobs.mockResolvedValue({ ...listing, total: 26 });
     render(<AdminDocumentsPage />);
     await screen.findByText(failedJob.title);
 
     fireEvent.click(screen.getByRole("button", { name: "下一页" }));
 
-    await waitFor(() => expect(mocks.managedContentIndexJobs).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 25 })));
-    expect(screen.getByRole("combobox", { name: "跳转索引任务页码" })).toHaveValue("2");
+    await waitFor(() => expect(mocks.publicationJobs).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 25 })));
+    expect(screen.getByRole("combobox", { name: "跳转发布任务页码" })).toHaveValue("2");
 
-    fireEvent.change(screen.getByRole("combobox", { name: "每页索引任务条数" }), { target: { value: "50" } });
-    await waitFor(() => expect(mocks.managedContentIndexJobs).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 50, offset: 0 })));
+    fireEvent.change(screen.getByRole("combobox", { name: "每页发布任务条数" }), { target: { value: "50" } });
+    await waitFor(() => expect(mocks.publicationJobs).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 50, offset: 0 })));
   });
 
   it("keeps an explicit recoverable error state", async () => {
-    mocks.managedContentIndexJobs.mockRejectedValueOnce(new Error("服务暂不可用"));
+    mocks.publicationJobs.mockRejectedValueOnce(new Error("服务暂不可用"));
     render(<AdminDocumentsPage />);
 
     expect(await screen.findByText("发布任务加载失败")).toBeInTheDocument();
@@ -307,3 +315,4 @@ describe("AdminDocumentsPage", () => {
     expect(screen.getByRole("button", { name: "重新加载" })).toBeInTheDocument();
   });
 });
+

@@ -721,6 +721,37 @@ export type ManagedIndexJobList = {
   status_counts: Record<string, number>;
 };
 
+export type UnifiedPublicationJob = {
+  id: string;
+  task_type: "document" | "video_transcript";
+  task_type_label: string;
+  status: "processing" | "published" | "failed";
+  version_id: string;
+  publication_id: string | null;
+  media_id: string | null;
+  title: string | null;
+  original_filename: string | null;
+  category_id: string | null;
+  category_label: string | null;
+  category_path: string | null;
+  source_origin: string | null;
+  attempt_number: number;
+  attempt_count: number;
+  error_code: string | null;
+  error_summary: string | null;
+  retryable: boolean;
+  created_at: number;
+  started_at: number | null;
+  finished_at: number | null;
+  updated_at: number;
+};
+
+export type UnifiedPublicationJobList = {
+  jobs: UnifiedPublicationJob[];
+  total: number;
+  status_counts: Record<string, number>;
+};
+
 export type ManagedUploadFilenameConflict = {
   item_id: string;
   version_id: string;

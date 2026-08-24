@@ -240,7 +240,7 @@ describe("AdminMediaPage wizard", () => {
     render(<AdminMediaPage />);
     await screen.findByText("项目交付培训");
 
-    expect(screen.getByRole("button", { name: "全部 1" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "全部任务 1" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "待审核 1" })).toBeInTheDocument();
     const mediaLoads = mocks.listMediaAssets.mock.calls.length;
     const jobLoads = mocks.listTranscriptionJobs.mock.calls.length;

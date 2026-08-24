@@ -182,6 +182,9 @@ from .schemas import (
     RenameManagedCategoryRequest,
     ManagedIndexJobDTO,
     ManagedIndexJobListResponse,
+    UnifiedPublicationJobDTO,
+    UnifiedPublicationJobListResponse,
+    UnifiedPublicationJobRetryRequest,
     ManagedPublicationDTO,
     ManagedPreviewDTO,
     XMindPreviewDTO,
@@ -3968,6 +3971,120 @@ def list_content_index_jobs(
         total=total,
         status_counts=counts,
     )
+
+
+@router.get("/publication-jobs", response_model=UnifiedPublicationJobListResponse)
+def list_unified_publication_jobs(
+    query: str = Query("", max_length=200),
+    category_id: str | None = Query(None, max_length=100),
+    doc_type: str | None = Query(None, max_length=50),
+    source_origin: str | None = Query(None, max_length=50),
+    status: str | None = Query(None, pattern="^(processing|published|failed)$"),
+    task_type: str | None = Query(None, pattern="^(document|video_transcript)$"),
+    history: bool = False,
+    include_archived: bool = False,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    _user: CurrentUser = Depends(require_content_permission("index.view")),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> UnifiedPublicationJobListResponse:
+    term = query.strip().lower()
+    document_sql = """
+      SELECT j.id, 'document' AS task_type, '普通资料' AS task_type_label,
+             CASE WHEN j.status IN ('pending','uploading','queued_mineru','parsing','chunking','summarizing','embedding') THEN 'processing'
+                  WHEN j.status='done' THEN 'published' ELSE 'failed' END AS unified_status,
+             j.version_id, j.publication_id, NULL AS media_id,
+             COALESCE(v.title,i.title) AS title, v.original_filename,
+             i.category_id, c.display_code || ' ' || c.display_name AS category_label,
+             NULL AS category_path, v.source_origin, j.attempt_number,
+             CASE WHEN i.archived_at IS NULL THEN 0 ELSE 1 END AS is_archived, CASE WHEN h.current_version_id=v.id THEN 1 ELSE 0 END AS is_current_head,
+             1 AS is_latest_attempt, v.doc_type, v.version_number, o.size_bytes AS file_size,
+             NULL AS parent_count, NULL AS preview_parent_id,
+             (SELECT count(*) FROM content_index_jobs x WHERE x.version_id=j.version_id) AS attempt_count,
+             j.error_code, j.error_summary, j.created_at, j.started_at, j.finished_at, j.updated_at
+        FROM content_index_jobs j
+        JOIN content_versions v ON v.id=j.version_id
+        JOIN content_items i ON i.id=v.item_id
+        JOIN category_nodes c ON c.id=i.category_id
+        LEFT JOIN content_objects o ON o.sha256=v.object_sha256
+        LEFT JOIN content_item_heads h ON h.item_id=i.id
+       WHERE j.id=(SELECT x.id FROM content_index_jobs x WHERE x.version_id=j.version_id ORDER BY x.attempt_number DESC,x.created_at DESC,x.id DESC LIMIT 1)
+    """
+    video_sql = """
+      SELECT j.id, 'video_transcript' AS task_type, '视频转录稿' AS task_type_label,
+             CASE WHEN j.status IN ('pending','parsing','chunking','embedding') THEN 'processing'
+                  WHEN j.status='done' THEN 'published' ELSE 'failed' END AS unified_status,
+             v.id AS version_id, NULL AS publication_id, v.media_id,
+             m.title, m.original_filename, NULL AS category_id, NULL AS category_label,
+             NULL AS category_path, 'transcription' AS source_origin, j.attempt_number,
+             0 AS is_archived, 0 AS is_current_head, 1 AS is_latest_attempt,
+             'transcript' AS doc_type, NULL AS version_number, m.file_size AS file_size,
+             NULL AS parent_count, NULL AS preview_parent_id,
+             (SELECT count(*) FROM transcript_publication_index_jobs x WHERE x.transcript_version_id=j.transcript_version_id) AS attempt_count,
+             j.error_code, j.error_summary, j.created_at, j.started_at, j.finished_at, j.updated_at
+        FROM transcript_publication_index_jobs j
+        JOIN transcript_versions v ON v.id=j.transcript_version_id
+        JOIN media_assets m ON m.media_id=v.media_id
+       WHERE j.attempt_number=(SELECT max(x.attempt_number) FROM transcript_publication_index_jobs x WHERE x.transcript_version_id=j.transcript_version_id)
+    """
+    parts = []
+    params: list[object] = []
+    for sql, kind in ((document_sql, "document"), (video_sql, "video_transcript")):
+        if task_type and task_type != kind: continue
+        clauses = []
+        if term: clauses.append("lower(title || ' ' || COALESCE(original_filename,'')) LIKE ?"); params.append(f"%{term}%")
+        if status: clauses.append("unified_status=?"); params.append(status)
+        if category_id: clauses.append("category_id=?"); params.append(category_id)
+        if doc_type: clauses.append("doc_type=?"); params.append(doc_type)
+        if source_origin: clauses.append("source_origin=?"); params.append(source_origin)
+        if not include_archived: clauses.append("is_archived=0")
+        if history:
+            sql = sql.replace("j.id=(SELECT x.id", "1=1 /* history */ AND j.id=(SELECT x.id") if kind == "document" else sql.replace("j.attempt_number=(SELECT max(x.attempt_number)", "1=1 /* history */ AND j.attempt_number=(SELECT max(x.attempt_number)")
+        parts.append(f"SELECT * FROM ({sql}) q WHERE {' AND '.join(clauses) if clauses else '1=1'}")
+    union = " UNION ALL ".join(parts) or "SELECT * FROM (SELECT NULL AS id) WHERE 1=0"
+    rows = conn.execute(f"SELECT * FROM ({union}) all_jobs ORDER BY updated_at DESC,id DESC LIMIT ? OFFSET ?", [*params, limit, offset]).fetchall()
+    total = int(conn.execute(f"SELECT count(*) FROM ({union}) all_jobs", params).fetchone()[0])
+    count_rows = conn.execute(f"SELECT unified_status,count(*) FROM ({union}) all_jobs GROUP BY unified_status", params).fetchall()
+    counts = {"processing": 0, "published": 0, "failed": 0}
+    for row in count_rows: counts[str(row[0])] = int(row[1])
+    jobs = []
+    for row in rows:
+        payload = dict(row)
+        payload["status"] = payload.pop("unified_status")
+        payload["retryable"] = payload["status"] == "failed"
+        jobs.append(UnifiedPublicationJobDTO(**payload))
+    return UnifiedPublicationJobListResponse(
+        jobs=jobs,
+        total=total,
+        status_counts=counts,
+    )
+
+
+@router.post("/publication-jobs/{job_id}/retry", response_model=UnifiedPublicationJobDTO, status_code=202)
+def retry_unified_publication_job(
+    job_id: str,
+    body: UnifiedPublicationJobRetryRequest,
+    _admin: CurrentUser = Depends(require_csrf_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> UnifiedPublicationJobDTO:
+    if body.task_type != "video_transcript":
+        raise HTTPException(status_code=400, detail="普通资料请使用原发布接口重试")
+    row = conn.execute("SELECT transcript_version_id FROM transcript_publication_index_jobs WHERE id=? AND status='failed'", (job_id,)).fetchone()
+    if row is None: raise HTTPException(status_code=404, detail="视频发布任务不存在或不可重试")
+    from .routes_transcription import _build_publication_service
+    from .indexing import enqueue_publication
+    try:
+        result = _build_publication_service(conn).publish(str(row["transcript_version_id"]))
+        conn.commit()
+        if not result["reused"] and result["job"] is not None: enqueue_publication(str(result["job"]["id"]))
+        new_id = str(result["job"]["id"])
+        new_row = conn.execute("SELECT j.*,v.media_id,m.title,m.original_filename FROM transcript_publication_index_jobs j JOIN transcript_versions v ON v.id=j.transcript_version_id JOIN media_assets m ON m.media_id=v.media_id WHERE j.id=?", (new_id,)).fetchone()
+        payload = dict(new_row); payload.update(task_type="video_transcript", task_type_label="视频转录稿", status="processing", version_id=payload["transcript_version_id"], publication_id=None, category_id=None, category_label=None, category_path=None, source_origin="transcription", attempt_count=1, retryable=False, is_archived=False, is_current_head=False, is_latest_attempt=True, doc_type="transcript", version_number=None, file_size=None, parent_count=None, preview_parent_id=None)
+        payload.pop("transcript_version_id", None)
+        return UnifiedPublicationJobDTO(**payload)
+    except Exception as exc:
+        conn.rollback()
+        raise HTTPException(status_code=409, detail="视频发布任务重试失败") from exc
 
 
 @router.get("/permission-catalog", response_model=ContentPermissionCatalogResponse)

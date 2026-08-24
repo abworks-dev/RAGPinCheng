@@ -48,6 +48,8 @@ import type {
   TrashPurgeRun,
   TrashSettings,
   ManagedIndexJobList,
+  UnifiedPublicationJobList,
+  UnifiedPublicationJob,
   ManagedUploadConflictAction,
   ManagedUploadPreflightResponse,
   ManagedUploadResponse,
@@ -994,6 +996,24 @@ export const api = {
     if (params?.offset != null) search.set("offset", String(params.offset));
     return jsonFetch<ManagedIndexJobList>(`/api/admin/content/index-jobs?${search}`);
   },
+  publicationJobs: (params?: { query?: string; category_id?: string; doc_type?: string; source_origin?: string; status?: string; task_type?: string; history?: boolean; include_archived?: boolean; limit?: number; offset?: number }) => {
+    const search = new URLSearchParams();
+    if (params?.query) search.set("query", params.query);
+    if (params?.category_id) search.set("category_id", params.category_id);
+    if (params?.doc_type) search.set("doc_type", params.doc_type);
+    if (params?.source_origin) search.set("source_origin", params.source_origin);
+    if (params?.status) search.set("status", params.status);
+    if (params?.task_type) search.set("task_type", params.task_type);
+    if (params?.history) search.set("history", "true");
+    if (params?.include_archived) search.set("include_archived", "true");
+    if (params?.limit != null) search.set("limit", String(params.limit));
+    if (params?.offset != null) search.set("offset", String(params.offset));
+    return jsonFetch<UnifiedPublicationJobList>(`/api/admin/content/publication-jobs?${search}`);
+  },
+  retryPublicationJob: (jobId: string, taskType: "document" | "video_transcript") =>
+    jsonFetch<UnifiedPublicationJob>(`/api/admin/content/publication-jobs/${encodeURIComponent(jobId)}/retry`, {
+      method: "POST", body: JSON.stringify({ task_type: taskType }),
+    }),
 
   // admin: media
   uploadMediaVideo: async (
