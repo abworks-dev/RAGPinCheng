@@ -1,0 +1,29 @@
+name: Audit ASR Runtime Releases
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_read_only_audit:
+        required: true
+        default: false
+        type: boolean
+permissions: { contents: read }
+jobs:
+  audit:
+    if: ${{ inputs.confirm_read_only_audit == true }}
+    runs-on: [self-hosted, windows, production, gpu]
+    environment: production-asr
+    steps:
+      - uses: actions/checkout@v4
+      - shell: powershell
+        env:
+          DATA: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+          PROGRAM: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
+          BACKUP: ${{ vars.PRODUCTION_ASR_BACKUP_ROOT }}
+          RUNTIME: ${{ vars.PRODUCTION_RUNTIME_ROOT }}
+          REPORT: ${{ runner.temp }}\asr-runtime-release-audit\audit.json
+        run: .\scripts\audit-asr-runtime-releases.ps1 -AsrDataRoot $env:DATA -AsrProgramRoot $env:PROGRAM -AsrBackupRoot $env:BACKUP -RuntimeRoot $env:RUNTIME -ReportPath $env:REPORT
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asr-runtime-release-audit-${{ github.run_id }}
+          path: ${{ runner.temp }}/asr-runtime-release-audit
