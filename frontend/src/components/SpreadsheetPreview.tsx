@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { parseSpreadsheetPreview, type PreviewSheet } from "../lib/xlsx-preview";
+import { PreviewZoomControls } from "./PreviewZoomControls";
 
 export function SpreadsheetPreview({ sheetName, parentId, onLoad, onError }: {
   parentId: string; sheetName?: string | null; cellRange?: string | null;
@@ -9,6 +10,7 @@ export function SpreadsheetPreview({ sheetName, parentId, onLoad, onError }: {
   const [activeSheet, setActiveSheet] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [zoom, setZoom] = useState(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -36,13 +38,16 @@ export function SpreadsheetPreview({ sheetName, parentId, onLoad, onError }: {
   if (loading) return <div className="flex h-full items-center justify-center text-sm text-muted">加载 XLSX…</div>;
   if (!sheets.length) return <div className="flex h-full items-center justify-center text-sm text-muted">此文件没有工作表</div>;
   const current = sheets[activeSheet];
+  const zoomControls = <div className="flex justify-end border-b border-border bg-background px-2 py-1"><PreviewZoomControls zoom={zoom} onChange={setZoom} /></div>;
 
-  return <div className="flex h-full flex-col">
-    <div className="flex shrink-0 items-center overflow-x-auto border-b border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800">
+  return <div className="flex h-full flex-col bg-secondary">
+    <div className="flex shrink-0 items-center justify-between gap-2 overflow-x-auto border-b border-border bg-background px-2">
+      <div className="flex items-center overflow-x-auto">
       {sheets.map((sheet, index) => <button key={sheet.name} type="button" onClick={() => setActiveSheet(index)} className={`border-r border-gray-200 px-3 py-2 text-xs whitespace-nowrap dark:border-gray-700 ${index === activeSheet ? "bg-white font-semibold text-accent dark:bg-gray-900" : "text-muted hover:bg-gray-100 dark:hover:bg-gray-700"}`}>{sheet.name}</button>)}
+      </div><PreviewZoomControls zoom={zoom} onChange={setZoom} />
     </div>
-    <div className="flex-1 overflow-auto bg-white dark:bg-gray-950">
-      {current.rows.length ? <table className="border-collapse text-xs" aria-label={current.name}>
+    <div className="flex-1 overflow-auto p-4">
+      {current.rows.length ? <table className="origin-top-left border-collapse bg-background text-xs shadow-sm" style={{ transform: `scale(${zoom})`, transformOrigin: "top left" }} aria-label={current.name}>
         <colgroup>{current.columnWidths.map((width, index) => <col key={index} style={{ width, minWidth: width }} />)}</colgroup>
         <tbody>{current.rows.map((row) => <tr key={row.key} style={{ height: row.height }}>{row.cells.map((cell) => <td key={cell.key} colSpan={cell.colSpan} rowSpan={cell.rowSpan} className="overflow-hidden border border-gray-200 px-1.5 py-1 dark:border-gray-700" style={cell.style}>{cell.text}</td>)}</tr>)}</tbody>
       </table> : <div className="flex h-full items-center justify-center text-sm text-muted">此工作表没有数据</div>}
