@@ -18,6 +18,10 @@ export function DocxPreview({
   zoom?: number;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const onLoadRef = useRef(onLoad);
+  const onErrorRef = useRef(onError);
+  onLoadRef.current = onLoad;
+  onErrorRef.current = onError;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,13 +56,13 @@ export function DocxPreview({
 
         if (!cancelled) {
           setLoading(false);
-          onLoad?.();
+          onLoadRef.current?.();
         }
       } catch (e: any) {
         if (!cancelled) {
           setError("暂时无法预览此 Word 文档，请确认源文件仍然存在且格式有效。");
           setLoading(false);
-          onError?.("DOCX preview unavailable");
+          onErrorRef.current?.("DOCX preview unavailable");
         }
       }
     }
@@ -68,7 +72,7 @@ export function DocxPreview({
     return () => {
       cancelled = true;
     };
-  }, [parentId, onLoad, onError]);
+  }, [parentId]);
 
   if (error) {
     return (
@@ -79,16 +83,12 @@ export function DocxPreview({
   }
 
   return (
-    <div className="h-full flex flex-col bg-secondary">
-      {loading && (
-        <div className="flex items-center justify-center py-8 text-sm text-muted">
-          加载 DOCX…
-        </div>
-      )}
+    <div className="relative min-h-full bg-secondary">
+      {loading && <div className="absolute inset-0 z-10 flex items-center justify-center bg-secondary text-sm text-muted">加载 DOCX…</div>}
       <div
         ref={containerRef}
-        className="flex-1 overflow-auto px-4 py-4"
-        style={{ display: loading ? "none" : "block", zoom }}
+        className="min-h-full origin-top-left px-4 py-4"
+        style={{ visibility: loading ? "hidden" : "visible", transform: `scale(${zoom})`, transformOrigin: "top left", width: `${100 / zoom}%` }}
       />
     </div>
   );

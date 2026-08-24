@@ -23,6 +23,7 @@ Windows 上的 Docker Desktop 不承载生产 `backend`、`qdrant` 或 `libreoff
 | 仓库基础 Compose | `${PRODUCTION_APP_REPO_PATH}/docker/docker-compose.yml` |
 | 私有生产 override | `/data/services/docker/compose/ragpincheng/prod/compose.prod.yaml` |
 | Compose env 文件 | `/data/secrets/ragpincheng/prod.env` |
+| LibreOffice 文件上限（本次批准目标） | `LIBREOFFICE_MAX_FILE_MB=8192`（8 GiB） |
 | Source 解耦 overlay | `${PRODUCTION_APP_REPO_PATH}/docker/compose.source-decoupled.yml` |
 
 `PRODUCTION_APP_REPO_PATH`、`PRODUCTION_APP_COMPOSE_OVERRIDE` 和 `PRODUCTION_APP_ENV_FILE` 由 GitHub Environment `production-asr` 提供。不要输出或提交 `prod.env` 的内容。

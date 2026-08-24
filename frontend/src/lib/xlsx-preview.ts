@@ -4,7 +4,8 @@ import { format as formatExcelValue } from "ssf";
 
 export interface PreviewCell { key: string; text: string; colSpan?: number; rowSpan?: number; style: CSSProperties; }
 export interface PreviewRow { key: string; height?: number; cells: PreviewCell[]; }
-export interface PreviewSheet { name: string; rows: PreviewRow[]; columnWidths: number[]; }
+export interface PreviewImage { key: string; src: string; left: number; top: number; width: number; height: number; }
+export interface PreviewSheet { name: string; rows: PreviewRow[]; columnWidths: number[]; images: PreviewImage[]; }
 
 const MAX_ROWS = 5000;
 const MAX_COLS = 100;
@@ -82,6 +83,23 @@ export async function parseSpreadsheetPreview(buffer: ArrayBuffer): Promise<Prev
       }
       rows.push({ key: String(r), height: row.height ? row.height * 4 / 3 : undefined, cells });
     }
-    return { name: sheet.name, rows, columnWidths: Array.from({ length: maxCol }, (_, i) => (sheet.getColumn(i + 1).width || 10) * 7) };
+    const columnWidths = Array.from({ length: maxCol }, (_, i) => (sheet.getColumn(i + 1).width || 10) * 7);
+    const rowTop = (row: number) => Array.from({ length: Math.max(0, row - 1) }, (_, i) => rows[i]?.height || 20).reduce((sum, value) => sum + value, 0);
+    const colLeft = (col: number) => columnWidths.slice(0, Math.max(0, col)).reduce((sum, value) => sum + value, 0);
+    const images: PreviewImage[] = [];
+    for (const drawing of (sheet.getImages?.() || []) as any[]) {
+      try {
+        const media = (workbook as any).getImage(drawing.imageId);
+        const range = drawing.range;
+        const tl = range.tl; const br = range.br;
+        const buffer = media?.buffer;
+        if (!buffer || !tl || !br) continue;
+        const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+        let binary = ""; bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+        const extension = String(media.extension || "png").toLowerCase();
+        images.push({ key: `${sheet.name}-${drawing.imageId}-${tl.col}-${tl.row}`, src: `data:image/${extension === "jpg" ? "jpeg" : extension};base64,${btoa(binary)}`, left: colLeft(tl.col), top: rowTop(tl.row), width: Math.max(1, colLeft(br.col) - colLeft(tl.col)), height: Math.max(1, rowTop(br.row) - rowTop(tl.row)) });
+      } catch { /* Unsupported image objects do not block table rendering. */ }
+    }
+    return { name: sheet.name, rows, columnWidths, images };
   });
 }

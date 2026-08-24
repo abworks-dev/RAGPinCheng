@@ -44,7 +44,11 @@ from src.indexing_pipeline import (
     ManagedVersionIndexSummary,
     list_managed_version_index_summaries,
 )
-from src.office_convert import convert_pptx_to_pdf, is_valid_pdf_file
+from src.office_convert import (
+    PptxPreviewFileTooLargeError,
+    convert_pptx_to_pdf,
+    is_valid_pdf_file,
+)
 from src.xmind_parser import XMindParseError, XMindTopic, parse_xmind
 
 from .auth import CurrentUser, require_admin, require_csrf, require_csrf_admin, require_user
@@ -1918,6 +1922,7 @@ def _content_item_dto(
         retention_days_remaining=retention_days_remaining,
         media_duration_ms=row["media_duration_ms"] if "media_duration_ms" in row.keys() else None,
         media_file_size=row["media_file_size"] if "media_file_size" in row.keys() else None,
+        file_size=row["file_size"] if "file_size" in row.keys() else None,
         has_pending_revision=bool(row["has_pending_revision"])
         if "has_pending_revision" in row.keys()
         else False,
@@ -2799,6 +2804,15 @@ def regenerate_pptx_preview(
         raise HTTPException(
             status_code=503,
             detail={"code": "preview_service_unavailable", "message": "PPTX 预览服务暂不可用，请稍后重试"},
+        ) from exc
+    except PptxPreviewFileTooLargeError as exc:
+        logger.warning("PPTX preview input too large for version %s: %s", version_id, exc)
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "preview_file_too_large",
+                "message": "PPTX 文件过大，超过当前转换上限，请压缩文件后重试",
+            },
         ) from exc
     except (OSError, RuntimeError) as exc:
         logger.warning("PPTX preview conversion failed for version %s: %s", version_id, exc)

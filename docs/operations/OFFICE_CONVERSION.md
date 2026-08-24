@@ -16,7 +16,7 @@ LIBREOFFICE_URL=http://libreoffice:8101
 
 请求超时由 `LIBREOFFICE_TIMEOUT` 控制，默认 120 秒。新环境从仓库根目录构建并启动：
 
-转换服务的单文件上限由 `LIBREOFFICE_MAX_FILE_MB` 控制，默认 2000 MB，与管理后台默认单文件上传上限一致。大文件转换会增加临时磁盘和内存压力，生产环境调整前必须检查资源余量。
+转换服务的单文件上限由 `LIBREOFFICE_MAX_FILE_MB` 控制，代码默认 2000 MB；本次批准的生产目标值为 8192 MB（8 GiB），需在生产 env 更新并重新部署后生效。大文件转换会增加临时磁盘和内存压力，生产环境调整前必须检查资源余量。
 
 ```powershell
 docker compose -f docker/docker-compose.yml build libreoffice
@@ -46,7 +46,7 @@ docker compose -f docker/docker-compose.yml exec libreoffice curl -fsS http://lo
 | backend 超时 | 文档复杂、CPU/内存不足或进程阻塞 | 核对 `LIBREOFFICE_TIMEOUT`、`docker stats` 和同时间转换数量；不要仅通过无限增大超时掩盖问题 |
 | HTTP 500 且无输出 | LibreOffice 未生成目标文件 | 检查输入格式、LibreOffice stderr 和 `/data` 可写性 |
 | HTTP 500 且提示 invalid PDF | 输出为空、损坏或格式不符 | 保留原始文件，丢弃派生预览，检查字体、磁盘和 LibreOffice 日志后重试 |
-| HTTP 413 | 上传超过转换服务 100 MB 上限 | 不在服务端绕过限制；缩小合成测试样本或按变更流程评估上限 |
+| HTTP 413 | 上传超过 `LIBREOFFICE_MAX_FILE_MB` 上限 | 页面应提示“PPTX 文件过大”；先压缩或拆分文件，确需提高上限时按生产变更流程评估资源 |
 | 磁盘空间不足 | `/data` 临时文件、容器日志或 Docker 存储增长 | 先停止新转换并确认正在运行的请求；检查磁盘和 volume 使用，清理前按生产删除流程单独审批 |
 
 服务会限制为最多两个并发 LibreOffice 进程。超时、HTTP 失败、缺失输出和损坏 PDF 均应受控失败，不得把无效内容发布为预览文件。

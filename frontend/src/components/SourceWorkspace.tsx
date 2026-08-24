@@ -45,9 +45,10 @@ import {
 const citationFeedbackReasons = ["引用内容不符", "来源定位错误", "资料已过时", "其他"] as const;
 
 function SourceTypeIcon({ source }: { source: Source }) {
-  if (source.doc_type === "transcript") return <Video className="size-4" />;
-  if (source.doc_type === "xlsx") return <FileSpreadsheet className="size-4" />;
-  if (source.doc_type === "pptx") return <Presentation className="size-4" />;
+  const type = ({ doc: "docx", docx: "docx", xls: "xlsx", xlsx: "xlsx", ppt: "pptx", pptx: "pptx" } as Record<string, string>)[source.doc_type?.toLowerCase() || ""] || source.doc_type;
+  if (type === "transcript") return <Video className="size-4" />;
+  if (type === "xlsx") return <FileSpreadsheet className="size-4" />;
+  if (type === "pptx") return <Presentation className="size-4" />;
   return <FileText className="size-4" />;
 }
 

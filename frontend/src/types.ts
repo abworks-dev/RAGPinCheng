@@ -523,6 +523,7 @@ export type ManagedContentItem = {
   retention_days_remaining?: number | null;
   media_duration_ms?: number | null;
   media_file_size?: number | null;
+  file_size?: number | null;
   has_pending_revision: boolean;
   reclassification_job_id: string | null;
   reclassification_status: string | null;

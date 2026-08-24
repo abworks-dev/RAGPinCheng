@@ -1776,7 +1776,8 @@ _CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
                  AS publication_attempt_count,
                i.archived_at,archive_user.real_name AS archived_by_name,
                archive_event.metadata_json AS archive_metadata_json,
-                NULL AS media_duration_ms,NULL AS media_file_size,0 AS has_pending_revision,
+               o.size_bytes AS file_size,
+               NULL AS media_duration_ms,NULL AS media_file_size,0 AS has_pending_revision,
                 (SELECT r.id FROM content_reclassification_jobs r
                  WHERE r.item_id=i.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1)
                   AS reclassification_job_id,
@@ -1792,6 +1793,7 @@ _CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
         JOIN paths ON paths.id=i.category_id
         JOIN latest_documents v ON v.item_id=i.id
         LEFT JOIN content_item_heads h ON h.item_id=i.id
+        LEFT JOIN content_objects o ON o.sha256=v.object_sha256
         LEFT JOIN content_index_jobs j ON j.id=(
             SELECT j2.id FROM content_index_jobs j2 WHERE j2.version_id=v.id
             ORDER BY j2.attempt_number DESC,j2.created_at DESC,j2.id DESC LIMIT 1
@@ -1860,6 +1862,7 @@ _CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
                 WHERE attempts.transcript_version_id=tv.id) AS publication_attempt_count,
                i.archived_at,archive_user.real_name AS archived_by_name,
                archive_event.metadata_json AS archive_metadata_json,
+               NULL AS file_size,
                (SELECT succeeded.total_ms FROM transcription_jobs succeeded
                 WHERE succeeded.media_id=m.media_id AND succeeded.status='succeeded'
                 ORDER BY succeeded.finished_at DESC,succeeded.updated_at DESC,succeeded.id DESC LIMIT 1)
