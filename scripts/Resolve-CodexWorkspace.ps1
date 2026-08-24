@@ -334,6 +334,11 @@ try {
         }
     }
 
+    $scriptProjectRoot = if ($null -ne $initial.primary_worktree_path) {
+        [string]$initial.primary_worktree_path
+    } else {
+        [string]$initial.repository_path
+    }
     $lifecycleScript = Join-Path $scriptProjectRoot "scripts/Register-CodexWorktree.ps1"
     $lifecycleAvailable = Test-Path -LiteralPath $lifecycleScript -PathType Leaf
     $creationRequest = $null

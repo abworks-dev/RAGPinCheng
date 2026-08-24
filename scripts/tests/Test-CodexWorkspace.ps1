@@ -3,6 +3,7 @@ $ErrorActionPreference = "Stop"
 
 $sourceScript = (Resolve-Path (Join-Path $PSScriptRoot "..\Test-CodexWorkspace.ps1")).Path
 $sourceResolver = (Resolve-Path (Join-Path $PSScriptRoot "..\Resolve-CodexWorkspace.ps1")).Path
+$sourceRegister = (Resolve-Path (Join-Path $PSScriptRoot "..\Register-CodexWorktree.ps1")).Path
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ragpincheng-workspace-test-" + [guid]::NewGuid().ToString("N"))
 $repository = Join-Path $testRoot "project repo"
 $scriptsDirectory = Join-Path $repository "scripts"
@@ -75,6 +76,7 @@ try {
     New-Item -ItemType Directory -Path $scriptsDirectory -Force | Out-Null
     Copy-Item -LiteralPath $sourceScript -Destination $testScript
     Copy-Item -LiteralPath $sourceResolver -Destination $resolverScript
+    Copy-Item -LiteralPath $sourceRegister -Destination (Join-Path $scriptsDirectory "Register-CodexWorktree.ps1")
 
     Invoke-GitChecked @("init", "-b", "master", $repository)
     Invoke-GitChecked @("-C", $repository, "config", "user.name", "Workspace Test")
