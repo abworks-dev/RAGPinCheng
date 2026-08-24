@@ -1133,6 +1133,50 @@ class ManagedIndexJobListResponse(BaseModel):
     status_counts: dict[str, int]
 
 
+class UnifiedPublicationJobDTO(BaseModel):
+    id: str
+    task_type: Literal["document", "video_transcript"]
+    task_type_label: str
+    status: Literal["processing", "published", "failed"]
+    version_id: str
+    publication_id: str | None = None
+    media_id: str | None = None
+    title: str | None = None
+    original_filename: str | None = None
+    category_id: str | None = None
+    category_label: str | None = None
+    category_path: str | None = None
+    source_origin: str | None = None
+    attempt_number: int
+    attempt_count: int
+    error_code: str | None = None
+    error_summary: str | None = None
+    retryable: bool = False
+    created_at: int
+    started_at: int | None = None
+    finished_at: int | None = None
+    updated_at: int
+    is_archived: bool = False
+    is_current_head: bool = False
+    is_latest_attempt: bool = True
+    doc_type: str | None = None
+    version_number: int | None = None
+    file_size: int | None = None
+    parent_count: int | None = None
+    preview_parent_id: str | None = None
+
+
+class UnifiedPublicationJobListResponse(BaseModel):
+    jobs: list[UnifiedPublicationJobDTO]
+    total: int
+    status_counts: dict[str, int]
+
+
+class UnifiedPublicationJobRetryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    task_type: Literal["document", "video_transcript"]
+
+
 class ContentPermissionUserDTO(BaseModel):
     user_id: int
     employee_id: str

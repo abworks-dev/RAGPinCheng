@@ -34,6 +34,7 @@ import {
   Info,
   ListChecks,
   ListOrdered,
+  LoaderCircle,
   MoreHorizontal,
   Pencil,
   RefreshCw,
@@ -1047,7 +1048,7 @@ function UploadTasksPanel({
                 <Input
                   type="search"
                   aria-label="搜索上传任务"
-                  className="h-control-md pl-9 pr-10"
+                  className="h-control-md pl-9 pr-10 text-ui-xs"
                   value={queryInput}
                   onChange={(event) => setQueryInput(event.target.value)}
                   placeholder="搜索目标目录或文件名..."
@@ -1057,7 +1058,7 @@ function UploadTasksPanel({
             </label>
           </form>
           <div className="flex shrink-0 flex-wrap items-center gap-2 xl:justify-end">
-            <Button size="sm" variant="outline" onClick={() => void loadTasks()} disabled={loading}>
+            <Button size="sm" variant="outline" className="h-control-md" onClick={() => void loadTasks()} disabled={loading}>
               <RefreshCw
                 className={loading ? "size-4 animate-spin" : "size-4"}
               />
@@ -1066,6 +1067,7 @@ function UploadTasksPanel({
             <Button
               size="sm"
               variant="outline"
+              className="h-control-md"
               onClick={clearFilters}
               disabled={!queryInput && !hasFilters}
             >
@@ -1794,7 +1796,7 @@ function ManagedContentSearchFilters({
         />
         <Input
           ref={inputRef}
-          className="h-control-md pl-9 pr-11"
+          className="h-control-md pl-9 pr-11 text-ui-xs"
           value={queryInput}
           onChange={(event) => onQueryInputChange(event.target.value)}
           onFocus={() => setOpen(true)}
@@ -2002,7 +2004,7 @@ function TrashSearchFilters({
         />
         <Input
           ref={inputRef}
-          className="h-control-sm pl-9 pr-11"
+          className="h-control-md pl-9 pr-11 text-ui-xs"
           value={queryInput}
           onChange={(event) => onQueryInputChange(event.target.value)}
           onFocus={() => setOpen(true)}
@@ -5290,7 +5292,7 @@ export function AdminManagedContentPage() {
           onClick={() => selectView("index")}
         >
           <ListChecks className="size-4" />
-          索引任务
+          发布任务
         </Button>
       )}
       {state.status === "authed" && state.user.role === "admin" && (
@@ -6524,10 +6526,10 @@ export function AdminManagedContentPage() {
       >
         {[
           { label: "全部资料", value: Object.values(counts).reduce((sum, value) => sum + value, 0), icon: <FileText className="size-4" /> },
-          { label: "待确认", value: counts.awaiting_review || 0, icon: <AlertTriangle className="size-4" />, tone: "warning" as const },
-          { label: "已确认", value: counts.approved || 0, icon: <CheckCircle2 className="size-4" />, tone: "success" as const },
+          { label: "发布处理中", value: counts.publishing || 0, icon: <LoaderCircle className="size-4" />, tone: "warning" as const },
           { label: "已发布", value: counts.published || 0, icon: <Rocket className="size-4" />, tone: "success" as const },
-        ].map((summary) => { const next = summary.label === "全部资料" ? "" : summary.label === "待确认" ? "awaiting_review" : summary.label === "已确认" ? "approved" : "published"; return <ManagedSummaryCard key={summary.label} label={summary.label} value={summary.value} icon={summary.icon} tone={summary.tone} active={statusFilter === next} onClick={() => { setStatusFilter((current) => current === next ? "" : next); setPage(0); }} />; })}
+          { label: "发布失败", value: counts.publication_failed || 0, icon: <XCircle className="size-4" />, tone: "destructive" as const },
+        ].map((summary) => { const next = summary.label === "全部资料" ? "" : summary.label === "发布处理中" ? "publishing" : summary.label === "已发布" ? "published" : "publication_failed"; return <ManagedSummaryCard key={summary.label} label={summary.label} value={summary.value} icon={summary.icon} tone={summary.tone} active={statusFilter === next} onClick={() => { setStatusFilter((current) => current === next ? "" : next); setPage(0); }} />; })}
       </section>
 
       {!enabled && !loading && (

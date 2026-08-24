@@ -74,4 +74,6 @@ export const adminContentApi = {
   createMediaMetadataRevision: (...args: Parameters<typeof api.createMediaMetadataRevision>) => api.createMediaMetadataRevision(...args),
   fileUrl: (...args: Parameters<typeof api.managedContentFileUrl>) => api.managedContentFileUrl(...args),
   indexJobs: (...args: Parameters<typeof api.managedContentIndexJobs>) => api.managedContentIndexJobs(...args),
+  publicationJobs: (...args: Parameters<typeof api.publicationJobs>) => api.publicationJobs(...args),
+  retryPublicationJob: (...args: Parameters<typeof api.retryPublicationJob>) => api.retryPublicationJob(...args),
 };
