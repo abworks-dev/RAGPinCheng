@@ -35,10 +35,18 @@ on:
         required: false
         default: ''
         type: string
+      asr_manifest_artifact_name:
+        description: Exact preview artifact name; defaults to the legacy run-ID name
+        required: false
+        default: ''
+        type: string
     outputs:
       asr_manifest_sha256:
         description: SHA-256 of the ASR batch manifest generated or applied by this run
         value: ${{ jobs.cleanup.outputs.asr_manifest_sha256 }}
+      asr_manifest_artifact_name:
+        description: Exact preview artifact containing the ASR batch manifest
+        value: ${{ jobs.cleanup.outputs.asr_manifest_artifact_name }}
 
 permissions:
   contents: read
@@ -67,6 +75,7 @@ jobs:
     timeout-minutes: 30
     outputs:
       asr_manifest_sha256: ${{ steps.cleanup.outputs.asr_manifest_sha256 }}
+      asr_manifest_artifact_name: ${{ steps.cleanup.outputs.asr_manifest_artifact_name }}
     env:
       INPUT_TARGET: ${{ inputs.target }}
       INPUT_APPLY: ${{ inputs.apply }}
@@ -92,7 +101,7 @@ jobs:
         if: ${{ inputs.apply == true && (inputs.target == 'all' || inputs.target == 'asr') }}
         uses: actions/download-artifact@v4
         with:
-          name: production-cleanup-${{ inputs.asr_manifest_run_id }}
+          name: ${{ inputs.asr_manifest_artifact_name != '' && inputs.asr_manifest_artifact_name || format('production-cleanup-{0}', inputs.asr_manifest_run_id) }}
           path: ${{ runner.temp }}/ragpincheng-approved-cleanup
           github-token: ${{ github.token }}
           run-id: ${{ inputs.asr_manifest_run_id }}
@@ -134,6 +143,15 @@ jobs:
           }
           & (Join-Path "${{ github.workspace }}" 'scripts\cleanup-production.ps1') @arguments
           if ($target -eq 'all' -or $target -eq 'asr') {
+            $previewArtifactName = if ($apply) {
+              if ('${{ inputs.asr_manifest_artifact_name }}') {
+                '${{ inputs.asr_manifest_artifact_name }}'
+              } else {
+                'production-cleanup-${{ inputs.asr_manifest_run_id }}'
+              }
+            } else {
+              'production-cleanup-${{ github.run_id }}-${{ github.run_attempt }}'
+            }
             $manifestSha256 = if ($apply) {
               $env:INPUT_ASR_MANIFEST_SHA256.ToLowerInvariant()
             } else {
@@ -145,13 +163,14 @@ jobs:
               (Get-FileHash -LiteralPath $manifests[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             }
             Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "asr_manifest_sha256=$manifestSha256"
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "asr_manifest_artifact_name=$previewArtifactName"
           }
 
       - name: Upload cleanup preview report
         if: ${{ always() && inputs.apply == false }}
         uses: actions/upload-artifact@v4
         with:
-          name: production-cleanup-${{ github.run_id }}
+          name: production-cleanup-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ragpincheng-production-cleanup
           if-no-files-found: warn
 
@@ -159,6 +178,6 @@ jobs:
         if: ${{ always() && inputs.apply == true }}
         uses: actions/upload-artifact@v4
         with:
-          name: production-cleanup-${{ github.run_id }}-apply
+          name: production-cleanup-${{ github.run_id }}-${{ github.run_attempt }}-apply
           path: ${{ runner.temp }}/ragpincheng-production-cleanup
           if-no-files-found: warn

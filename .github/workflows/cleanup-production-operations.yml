@@ -38,6 +38,11 @@ on:
         required: false
         default: ''
         type: string
+      asr_manifest_artifact_name:
+        description: Exact preview artifact name; required for attempt-aware previews
+        required: false
+        default: ''
+        type: string
   schedule:
     - cron: '23 19 * * *'
     - cron: '7,37 * * * *'
@@ -58,6 +63,7 @@ jobs:
       reason: ${{ inputs.reason }}
       asr_manifest_run_id: ${{ inputs.asr_manifest_run_id }}
       asr_manifest_sha256: ${{ inputs.asr_manifest_sha256 }}
+      asr_manifest_artifact_name: ${{ inputs.asr_manifest_artifact_name }}
     secrets: inherit
 
   nightly-dryrun:
@@ -152,11 +158,18 @@ jobs:
       reason: disk-pressure-auto-cleanup
       asr_manifest_run_id: ${{ github.run_id }}
       asr_manifest_sha256: ${{ needs.pressure-dryrun.outputs.asr_manifest_sha256 }}
+      asr_manifest_artifact_name: ${{ needs.pressure-dryrun.outputs.asr_manifest_artifact_name }}
     secrets: inherit
 
   auto-clean-backups:
-    needs: [disk-pressure]
-    if: ${{ needs.disk-pressure.outputs.tier == 'backup-apply' && vars.PRODUCTION_AUTO_CLEANUP_ENABLED == 'true' }}
+    needs: [disk-pressure, pressure-dryrun, auto-clean-asr]
+    if: >-
+      ${{
+        always() &&
+        needs.disk-pressure.outputs.tier == 'backup-apply' &&
+        (needs.auto-clean-asr.result == 'success' || needs.auto-clean-asr.result == 'skipped') &&
+        vars.PRODUCTION_AUTO_CLEANUP_ENABLED == 'true'
+      }}
     uses: ./.github/workflows/cleanup-production.yml
     with:
       target: backups

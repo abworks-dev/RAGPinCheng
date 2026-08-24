@@ -80,9 +80,14 @@ DryRun 后必须复核：每个候选是否位于上述固定根目录、是否�
 - Apply 下载该 preview artifact，并使用 workflow 输出的精确 SHA-256；
 - 候选在 Apply 前重新测量且与 manifest 完全一致。
 
-Preview artifact 保持 `production-cleanup-<run_id>`，Apply 审计使用独立的
-`production-cleanup-<run_id>-apply`，避免覆盖审批证据。默认单候选 20 GB、单批 18 GB
-上限继续生效；超限时整体失败，不扩大清理范围。
+Preview artifact 使用 `production-cleanup-<run_id>-<run_attempt>`，Apply 审计使用独立的
+`production-cleanup-<run_id>-<run_attempt>-apply`，避免覆盖审批证据，也允许 workflow
+rerun 生成新的不可变 artifact。Preview 将精确 artifact 名称和 manifest SHA-256 一并
+输出给 Apply；手工 Apply 未提供新名称时仍兼容旧的 `production-cleanup-<run_id>`。
+默认单候选 20 GB、单批 18 GB 上限继续生效；超限时整体失败，不扩大清理范围。
+
+磁盘压力流程严格按 `pressure-dryrun`、`auto-clean-asr`、`auto-clean-backups` 串行，
+避免多个复用 workflow 同时等待 `production-gpu-exclusive` concurrency group 时互相替换。
 
 该流程只清理明确配置的 qualification、dependency 和 failed staging 受管根目录。
 它不会递归删除 GitHub runner 通用 `_work`/`_temp`、正式模型、共享 `wheel-cache`、
