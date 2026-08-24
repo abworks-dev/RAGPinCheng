@@ -776,6 +776,8 @@ export const api = {
   },
   managedUploadTask: (batchId: string) =>
     jsonFetch<ManagedUploadTask>(`/api/admin/content/upload-tasks/${encodeURIComponent(batchId)}`),
+  deleteOrphanUploadTask: (batchId: string) =>
+    jsonFetch<void>(`/api/admin/content/upload-tasks/${encodeURIComponent(batchId)}/orphan`, { method: "DELETE" }),
   moveManagedContent: (itemId: string, targetCategoryId: string, expectedVersionId: string) =>
     jsonFetch<ManagedContentItem>(`/api/admin/content/items/${encodeURIComponent(itemId)}/move`, {
       method: "POST",
