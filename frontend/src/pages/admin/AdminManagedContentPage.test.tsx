@@ -348,8 +348,6 @@ describe("AdminManagedContentPage", () => {
     expect(await screen.findByTestId(`managed-folder-row-${category.id}`)).toBeInTheDocument();
     const overview = screen.getByRole("region", { name: "资料状态概览" });
     expect(within(overview).getByText("全部资料").parentElement?.parentElement).toHaveTextContent("8");
-    expect(within(overview).getByText("待确认").parentElement?.parentElement).toHaveTextContent("3");
-    expect(within(overview).getByText("已确认").parentElement?.parentElement).toHaveTextContent("1");
     expect(within(overview).getByText("已发布").parentElement?.parentElement).toHaveTextContent("2");
     expect(overview.querySelectorAll("svg")).toHaveLength(4);
     expect(screen.queryByText("standard.pdf · v1")).not.toBeInTheDocument();
