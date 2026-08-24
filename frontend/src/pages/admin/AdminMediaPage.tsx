@@ -330,7 +330,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const readyItems = pending.filter((item) => item.state !== "succeeded" && item.state !== "skipped");
   const canSubmit = Boolean(mode && readyItems.length && readyItems.every((item) => !validateItem(item)) && !submitting);
   const mediaFilterOptions = [
-    ["all", "全部"],
+    ["all", "全部任务"],
     ["processing", "处理中"],
     ["review", "待审核"],
     ["publishing", "发布处理中"],
