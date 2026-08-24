@@ -26,6 +26,13 @@ html.admin-scrollbar-stable {
   animation-fill-mode: both;
 }
 
+.resource-preview-sheet .docx-wrapper {
+  background: transparent !important;
+}
+.resource-preview-sheet .docx-wrapper > section {
+  box-shadow: 0 2px 8px rgb(15 23 42 / 0.14);
+}
+
 .resource-preview-overlay[data-state="open"] {
   animation-name: resource-preview-overlay-enter;
 }
