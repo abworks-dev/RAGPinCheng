@@ -28,6 +28,15 @@ export function DebugPanel({ msg }: { msg: ChatMessage }) {
               <span>检索改写：<code>{prep.search_query}</code></span>
             </div>
           )}
+          {prep?.query_resolution && (
+            <div>
+              问题类型：<code>{prep.query_resolution.kind}</code>
+              {prep.query_resolution.fallback_reason && (
+                <> · 兜底：<code>{prep.query_resolution.fallback_reason}</code></>
+              )}
+              {" "}· 置信度：<code>{prep.query_resolution.confidence.toFixed(2)}</code>
+            </div>
+          )}
           <div>
             timings:{" "}
             {Object.entries(timings).map(([k, v]) => (

@@ -23,6 +23,14 @@ export type Source = {
 export type PrepData = {
   search_query: string;
   rewrite_applied: boolean;
+  query_resolution?: {
+    original_query: string;
+    standalone_query: string;
+    kind: "standalone" | "follow_up" | "clarification_required" | "topic_switch";
+    confidence: number;
+    referenced_turns: number[];
+    fallback_reason: string;
+  } | null;
   history_chars: number;
   budget: number;
   fresh_count: number;
