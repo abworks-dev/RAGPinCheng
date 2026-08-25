@@ -108,6 +108,27 @@ def test_verify_file_sha256_rejects_changed_content(tmp_path: Path):
         module.verify_file_sha256(source, hashlib.sha256(b"other").hexdigest())
 
 
+def test_shadow_destination_guard_accepts_workflow_run_directory(tmp_path: Path):
+    module = load_script()
+    parents = tmp_path / "full-reindex-32897731751-1-shadow" / "parents.sqlite"
+    module.validate_shadow_destinations(
+        "pincheng_docs_rebuild_32897731751_1",
+        parents,
+    )
+
+    with pytest.raises(ValueError, match="shadow_parent_database_required"):
+        module.validate_shadow_destinations(
+            "pincheng_docs_rebuild_32897731751_1",
+            tmp_path / "production" / "parents.sqlite",
+        )
+
+    with pytest.raises(ValueError, match="shadow_destination_mismatch"):
+        module.validate_shadow_destinations(
+            "pincheng_docs_rebuild_32897731751_1",
+            tmp_path / "full-reindex-32897731751-2-shadow" / "parents.sqlite",
+        )
+
+
 def test_validate_report_requires_exact_head_coverage_and_green_collection():
     module = load_script()
     report = {
