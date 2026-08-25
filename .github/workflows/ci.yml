@@ -3,8 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches:
-      - master
+    branches: [master]
 
 permissions:
   contents: read
@@ -14,82 +13,139 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      collaboration: ${{ steps.scope.outputs.collaboration }}
+      python: ${{ steps.scope.outputs.python }}
+      frontend: ${{ steps.scope.outputs.frontend }}
+      visual: ${{ steps.scope.outputs.visual }}
+      transcription: ${{ steps.scope.outputs.transcription }}
+      providers: ${{ steps.scope.outputs.providers }}
+      asr: ${{ steps.scope.outputs.asr }}
+      gpu: ${{ steps.scope.outputs.gpu }}
+      compose: ${{ steps.scope.outputs.compose }}
+      migration_config: ${{ steps.scope.outputs.migration_config }}
+      ci: ${{ steps.scope.outputs.ci }}
+      full: ${{ steps.scope.outputs.full }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/master" ]]; then
+            python scripts/ci_scope.py --github-output >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base_sha="$PR_BASE_SHA"
+          [[ -n "$base_sha" ]] || base_sha="$BEFORE_SHA"
+          if [[ -z "$base_sha" || "$base_sha" =~ ^0+$ ]] || ! git cat-file -e "${base_sha}^{commit}"; then
+            python scripts/ci_scope.py --github-output >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mapfile -d '' changed_paths < <(git diff --name-only -z "$base_sha" "$HEAD_SHA")
+          python scripts/ci_scope.py --github-output "${changed_paths[@]}" >> "$GITHUB_OUTPUT"
+
   validate:
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 20
-
+    env:
+      RUN_COLLABORATION: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.collaboration == 'true' }}
+      RUN_PYTHON: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.python == 'true' }}
+      RUN_FRONTEND: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.frontend == 'true' }}
+      RUN_COMPOSE: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.compose == 'true' }}
     steps:
       - name: Check out repository
+        if: env.RUN_COLLABORATION == 'true' || env.RUN_PYTHON == 'true' || env.RUN_FRONTEND == 'true' || env.RUN_COMPOSE == 'true'
         uses: actions/checkout@v4
-
       - name: Test Codex workspace harness
+        if: env.RUN_COLLABORATION == 'true'
         shell: pwsh
         run: ./scripts/tests/Test-CodexWorkspace.ps1
-
       - name: Test Codex delivery harness
+        if: env.RUN_COLLABORATION == 'true'
         shell: pwsh
         run: ./scripts/tests/Test-CodexDelivery.ps1
-
       - name: Set up Python
+        if: env.RUN_PYTHON == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - name: Check Python syntax
+        if: env.RUN_PYTHON == 'true'
         run: python -m compileall -q api src scripts tests services gpu_service asr_service
-
       - name: Set up Node.js
+        if: env.RUN_FRONTEND == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-
       - name: Test and build frontend
+        if: env.RUN_FRONTEND == 'true'
         working-directory: frontend
         run: |
           npm ci
           npm run test:run
           npm run build
-
       - name: Validate Docker Compose configuration
+        if: env.RUN_COMPOSE == 'true'
         shell: bash
         run: |
           touch .env
           docker compose -f docker/docker-compose.yml config --quiet
+      - name: Report skipped validation scopes
+        if: env.RUN_COLLABORATION != 'true' && env.RUN_PYTHON != 'true' && env.RUN_FRONTEND != 'true' && env.RUN_COMPOSE != 'true'
+        run: echo "No validation scope matched this change."
 
   test-admin-visual:
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
+    env:
+      RUN_JOB: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.frontend == 'true' }}
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+        if: env.RUN_JOB == 'true'
+      - uses: actions/setup-node@v4
+        if: env.RUN_JOB == 'true'
         with:
           node-version: "20"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-
       - name: Install frontend dependencies
+        if: env.RUN_JOB == 'true'
         working-directory: frontend
         run: npm ci
-
       - name: Install Playwright Chromium
+        if: env.RUN_JOB == 'true'
         working-directory: frontend
         run: npx playwright install --with-deps chromium
-
-      - name: Run admin browser and visual tests
+      - name: Run browser interaction and visual regression tests
+        if: env.RUN_JOB == 'true'
         working-directory: frontend
+        env:
+          CI_FULL_VISUAL: ${{ github.event_name == 'push' && 'true' || 'false' }}
         run: npm run test:visual
-
+      - name: Report skipped browser tests
+        if: env.RUN_JOB != 'true'
+        run: echo "Browser tests skipped because no frontend path changed."
       - name: Upload Playwright failure artifacts
-        if: failure()
+        if: failure() && env.RUN_JOB == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: admin-playwright-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          name: playwright-failure-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             frontend/test-results/visual
             frontend/playwright-report
@@ -97,122 +153,115 @@ jobs:
           retention-days: 14
 
   test-transcription-contracts:
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install declared Python contract-test dependencies
-        run: |
-          pip install pytest requests httpx pypdf langchain-text-splitters qdrant-client openai python-dotenv tqdm fastapi sse-starlette passlib[argon2] python-multipart
-
-      - name: Run Phase 1 transcription contract tests
-        run: pytest tests/test_transcription*.py tests/test_transcript_manual_regression.py -v
-
-  test-transcription-phase5:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install existing Phase 5 test dependencies
-        run: |
-          pip install pytest requests httpx pypdf langchain-text-splitters qdrant-client openai python-dotenv tqdm fastapi sse-starlette passlib[argon2] python-multipart
-
-      - name: Run Phase 5 publication and visibility tests
-        run: |
-          pytest \
-            tests/test_transcription_phase5_application_e2e.py \
-            tests/test_transcription_publication_index_adapter.py \
-            tests/test_transcription_retrieval_visibility.py \
-            tests/test_transcript_retrieval_integration.py \
-            tests/test_transcription_phase5_worker.py \
-            tests/test_transcript_index_metadata.py \
-            tests/test_transcription_phase5_static_boundaries.py -v
-
-  test-providers:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install provider test dependencies
-        run: pip install httpx pytest python-dotenv
-
-      - name: Run provider unit tests
-        run: pytest tests/test_providers.py -v
-
-  test-asr-service-contract:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    env:
+      RUN_JOB: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.transcription == 'true' }}
     steps:
       - uses: actions/checkout@v4
+        if: env.RUN_JOB == 'true'
       - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - run: pip install pytest fastapi httpx requests python-dotenv
-      - run: pytest tests/test_transcription_asr_service_contract.py tests/test_transcription_provider_registry.py tests/test_transcription_profile_catalog.py tests/test_transcription_remote_provider.py tests/test_asr_deployment_static.py tests/test_qwen3_asr_controlled_wheel.py tests/test_qwen3_asr_qualification_failure_evidence.py tests/test_qwen3_asr_performance_diagnostic.py tests/test_gpu_runtime_deployment_static.py tests/test_deploy_git_safety.py tests/test_asr_activation.py tests/test_faster_whisper_model_tls.py tests/test_service_directory_boundaries.py services/asr_service/tests -v
+        if: env.RUN_JOB == 'true'
+        with: {python-version: "3.11", cache: pip, cache-dependency-path: requirements-ci.txt}
+      - if: env.RUN_JOB == 'true'
+        run: pip install -r requirements-ci.txt
+      - if: env.RUN_JOB == 'true'
+        run: python scripts/ci_test_groups.py transcription
+      - if: env.RUN_JOB != 'true'
+        run: echo "Transcription contracts skipped because no related path changed."
+
+  test-transcription-phase5:
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUN_JOB: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.transcription == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.RUN_JOB == 'true'
+      - uses: actions/setup-python@v5
+        if: env.RUN_JOB == 'true'
+        with: {python-version: "3.11", cache: pip, cache-dependency-path: requirements-ci.txt}
+      - if: env.RUN_JOB == 'true'
+        run: pip install -r requirements-ci.txt
+      - if: env.RUN_JOB == 'true'
+        run: python scripts/ci_test_groups.py phase5
+      - if: env.RUN_JOB != 'true'
+        run: echo "Phase 5 contracts skipped because no related path changed."
+
+  test-providers:
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RUN_JOB: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.providers == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.RUN_JOB == 'true'
+      - uses: actions/setup-python@v5
+        if: env.RUN_JOB == 'true'
+        with: {python-version: "3.11", cache: pip, cache-dependency-path: requirements-ci.txt}
+      - if: env.RUN_JOB == 'true'
+        run: pip install -r requirements-ci.txt
+      - if: env.RUN_JOB == 'true'
+        run: python scripts/ci_test_groups.py providers
+      - if: env.RUN_JOB != 'true'
+        run: echo "Provider tests skipped because no related path changed."
+
+  test-asr-service-contract:
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RUN_JOB: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.asr == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.RUN_JOB == 'true'
+      - uses: actions/setup-python@v5
+        if: env.RUN_JOB == 'true'
+        with: {python-version: "3.11", cache: pip, cache-dependency-path: requirements-ci.txt}
+      - if: env.RUN_JOB == 'true'
+        run: pip install -r requirements-ci.txt
+      - if: env.RUN_JOB == 'true'
+        run: python scripts/ci_test_groups.py asr
+      - if: env.RUN_JOB != 'true'
+        run: echo "ASR contracts skipped because no related path changed."
 
   test-gpu-contract:
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
-
+    env:
+      RUN_JOB: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.gpu == 'true' }}
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install GPU contract-test dependencies without GPU packages
-        run: pip install fastapi uvicorn pydantic httpx pytest python-dotenv
-
-      - name: Run GPU service contract tests with the test-local torch stub
-        run: pytest services/gpu_service/tests/test_contract.py -v
+      - uses: actions/checkout@v4
+        if: env.RUN_JOB == 'true'
+      - uses: actions/setup-python@v5
+        if: env.RUN_JOB == 'true'
+        with: {python-version: "3.11", cache: pip, cache-dependency-path: requirements-ci.txt}
+      - if: env.RUN_JOB == 'true'
+        run: pip install -r requirements-ci.txt
+      - if: env.RUN_JOB == 'true'
+        run: python scripts/ci_test_groups.py gpu
+      - if: env.RUN_JOB != 'true'
+        run: echo "GPU contracts skipped because no related path changed."
 
   validate-migration-config:
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
-
+    env:
+      RUN_JOB: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.migration_config == 'true' || needs.changes.outputs.gpu == 'true' }}
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
+      - uses: actions/checkout@v4
+        if: env.RUN_JOB == 'true'
       - name: Verify .env.example has all required GPU config keys
+        if: env.RUN_JOB == 'true'
+        shell: bash
         run: |
           for key in GPU_SERVICE_URL GPU_SERVICE_TOKEN EMBED_PROVIDER RERANK_PROVIDER; do
-            if grep -q "$key" .env.example; then
-              echo "✅ $key found in .env.example"
-            else
-              echo "❌ $key MISSING from .env.example"
-              exit 1
-            fi
+            grep -q "^${key}=" .env.example || { echo "Missing ${key} in .env.example"; exit 1; }
           done
+      - if: env.RUN_JOB != 'true'
+        run: echo "Migration configuration check skipped because no related path changed."

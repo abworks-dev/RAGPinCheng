@@ -104,11 +104,16 @@ def test_phase2_tests_use_temp_paths_not_application_database():
             assert "tmp_path" in text, path
 
 
-def test_existing_ci_glob_collects_phase2_tests_without_new_dependencies():
+def test_explicit_ci_group_collects_phase2_tests_without_runtime_dependencies():
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    assert "pytest tests/test_transcription*.py tests/test_transcript_manual_regression.py" in ci
+    runner = (ROOT / "scripts" / "ci_test_groups.py").read_text(encoding="utf-8")
+    assert "python scripts/ci_test_groups.py transcription" in ci
+    assert "tests/test_transcription_phase2_types.py" in runner
+    assert "tests/test_transcription_phase2_static_boundaries.py" in runner
+    assert "tests/test_transcription_phase2_manual_regression.py" in runner
     requirements = (
         (ROOT / "requirements.txt").read_text(encoding="utf-8")
         + (ROOT / "requirements-prod.txt").read_text(encoding="utf-8")
+        + (ROOT / "requirements-ci.txt").read_text(encoding="utf-8")
     ).lower()
     assert "funasr" not in requirements and "faster-whisper" not in requirements

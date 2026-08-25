@@ -17,6 +17,12 @@
 - viewport：`1440x900`、`1280x720`、`768x1024`、`390x844`。
 - 动效：`prefers-reduced-motion: reduce`，截图时禁用 CSS 动画并隐藏输入光标。
 
+## CI 分层
+
+- Pull request 只在前端相关路径变化时运行浏览器测试，并覆盖 `1440x900`、`390x844` 和视频横屏 `844x390` 三个边界视口。
+- `master` push 运行全部项目，额外覆盖 `1280x720` 和 `768x1024`，作为完整回归。
+- required check 始终存在；无前端变化时 job 会明确报告跳过，而不是通过 workflow 路径过滤让 check 缺失。
+
 ## 本地命令
 
 在 `frontend/` 执行：
