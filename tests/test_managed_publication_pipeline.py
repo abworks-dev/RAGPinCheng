@@ -51,9 +51,10 @@ def test_managed_cloud_pdf_uses_version_cache_and_reuses_markdown(tmp_path, monk
     parsed_dir = tmp_path / "parsed" / "managed" / "version"
     calls: list[Path] = []
 
-    def fake_cloud_parse(path, on_status=None, *, split_dir=None):
+    def fake_cloud_parse(path, on_status=None, *, split_dir=None, location_output=None):
         assert path == source
         assert split_dir == parsed_dir / "split"
+        assert location_output == parsed_dir / "document.locations.json"
         calls.append(split_dir)
         if on_status:
             on_status("uploading")
@@ -233,3 +234,62 @@ def test_cloud_parse_uses_bounded_ascii_identity_for_long_filename(tmp_path, mon
     assert observed["name"] == observed["data_id"]
     assert len(observed["data_id"]) < 128
     assert observed["data_id"].isascii()
+
+
+def test_mineru_get_retries_transient_connection_failures(monkeypatch):
+    response = object()
+    attempts = iter(
+        [
+            requests.ConnectionError("temporary outage"),
+            requests.Timeout("temporary timeout"),
+            response,
+        ]
+    )
+    sleeps: list[int] = []
+
+    def get(*_args, **_kwargs):
+        result = next(attempts)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(ingest.requests, "get", get)
+    monkeypatch.setattr(ingest.time, "sleep", sleeps.append)
+
+    assert ingest._mineru_get_with_retry("https://result.invalid", timeout=600) is response
+    assert sleeps == [2, 4]
+
+
+def test_mineru_get_sanitizes_request_error_after_retry_exhaustion(monkeypatch):
+    signed_url = "https://result.invalid/archive.zip?token=secret"
+    error = requests.ConnectionError(f"failed to fetch {signed_url}")
+    monkeypatch.setattr(
+        ingest.requests,
+        "get",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(error),
+    )
+    monkeypatch.setattr(ingest.time, "sleep", lambda _seconds: None)
+
+    try:
+        ingest._mineru_get_with_retry(signed_url, timeout=600)
+    except requests.ConnectionError as exc:
+        assert str(exc) == "MinerU GET exhausted retries"
+        assert signed_url not in str(exc)
+        assert exc.__cause__ is None
+    else:
+        raise AssertionError("retry exhaustion did not preserve a sanitized request error")
+
+
+def test_mineru_get_does_not_retry_http_responses(monkeypatch):
+    response = object()
+    calls = 0
+
+    def get(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return response
+
+    monkeypatch.setattr(ingest.requests, "get", get)
+
+    assert ingest._mineru_get_with_retry("https://result.invalid", timeout=30) is response
+    assert calls == 1

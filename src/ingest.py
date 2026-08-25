@@ -72,6 +72,25 @@ def _api_headers() -> dict:
     return {"Authorization": f"Bearer {MINERU_API_KEY}", "Content-Type": "application/json"}
 
 
+def _mineru_get_with_retry(url: str, **kwargs):
+    last_exc: Exception | None = None
+    for attempt in range(1, 6):
+        try:
+            return requests.get(url, **kwargs)
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+            last_exc = exc
+            if attempt < 5:
+                backoff = 2 ** attempt
+                print(
+                    f"  [retry] MinerU GET attempt {attempt} failed; "
+                    f"retrying in {backoff}s"
+                )
+                time.sleep(backoff)
+    if last_exc is None:  # pragma: no cover - the loop only exits after a caught failure
+        raise RuntimeError("MinerU GET retry loop exited without a request error")
+    raise type(last_exc)("MinerU GET exhausted retries") from None
+
+
 class PublicationParseError(RuntimeError):
     """A stable parse failure that callers may safely classify by code."""
 
@@ -231,7 +250,7 @@ def _cloud_parse_batch(
     result: dict = {}
     _seen_running = False
     while True:
-        poll = requests.get(
+        poll = _mineru_get_with_retry(
             f"{MINERU_API_BASE}/extract-results/batch/{batch_id}",
             headers=_api_headers(),
             timeout=30,
@@ -270,7 +289,7 @@ def _cloud_parse_batch(
         md_url = entry.get("full_zip_url") or entry.get("md_url") or entry.get("markdown_url")
         if not md_url:
             raise PublicationParseError("parser_result_invalid")
-        md_resp = requests.get(md_url, timeout=600)
+        md_resp = _mineru_get_with_retry(md_url, timeout=600)
         md_resp.raise_for_status()
         if md_url.endswith(".zip"):
             import io
