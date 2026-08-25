@@ -853,7 +853,7 @@ test.describe("转录任务", () => {
 });
 
 test.describe("索引任务", () => {
-  test("normal layout keeps publication identity, filters, and failures discoverable", async ({ page }) => {
+  test("normal layout keeps publication actions, selection, and columns aligned", async ({ page }) => {
     await openTab(page, "索引任务");
     await expect(page.getByRole("heading", { name: "发布任务" })).toBeVisible();
     await expect(page.getByText("资料管理发布失败的合成长文件名资料", { exact: true })).toBeVisible();
@@ -861,12 +861,40 @@ test.describe("索引任务", () => {
     await expect(page.getByRole("button", { name: "上传资料" })).toHaveCount(0);
     await expect(page.getByText("旧索引资料", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("searchbox", { name: "搜索发布任务" })).toBeVisible();
+    const refresh = page.getByRole("button", { name: "刷新列表" });
+    const bulk = page.getByRole("button", { name: "批量操作" });
+    await expect(refresh).toBeVisible();
+    await expect(bulk).toBeVisible();
+    await expect(bulk).toBeDisabled();
+    const [refreshBox, bulkBox] = await Promise.all([refresh.boundingBox(), bulk.boundingBox()]);
+    expect(refreshBox).not.toBeNull();
+    expect(bulkBox).not.toBeNull();
+    expect(bulkBox!.x).toBeGreaterThan(refreshBox!.x);
+
+    const publishedRow = page.getByText("已发布的合成资料", { exact: true }).locator("xpath=ancestor::tr");
+    await expect(publishedRow.getByRole("button", { name: "重新发布" })).toBeEnabled();
+
+    if (page.viewportSize()!.width >= 1024) {
+      const selectPage = page.getByRole("checkbox", { name: "全选当前页索引任务" });
+      const firstRowCheckbox = page.getByRole("checkbox", { name: "选择资料管理发布失败的合成长文件名资料" });
+      const [headerBox, rowBox] = await Promise.all([selectPage.boundingBox(), firstRowCheckbox.boundingBox()]);
+      expect(headerBox).not.toBeNull();
+      expect(rowBox).not.toBeNull();
+      expect(Math.abs((headerBox!.x + headerBox!.width / 2) - (rowBox!.x + rowBox!.width / 2))).toBeLessThanOrEqual(1);
+      await selectPage.click();
+      await expect(firstRowCheckbox).toBeChecked();
+      await expect(page.getByRole("button", { name: "批量操作（2）" })).toBeEnabled();
+      await selectPage.click();
+      await expect(firstRowCheckbox).not.toBeChecked();
+      await expect(page.getByRole("button", { name: "批量操作" })).toBeDisabled();
+    }
+
     await page.getByRole("button", { name: "展开发布任务筛选" }).click();
     await expect(page.getByRole("combobox", { name: "按数据库分类筛选" })).toBeVisible();
     await expect(page.getByRole("combobox", { name: "按资料来源筛选" })).toBeVisible();
     await expect(page.getByRole("checkbox", { name: "查看历史尝试" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "查看文件" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "重新发布" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "查看文件" }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "重新发布" }).first()).toBeVisible();
 
     const publicationFailure = page.getByText("文档解析服务请求失败，请稍后重试。", { exact: true });
     await publicationFailure.scrollIntoViewIfNeeded();

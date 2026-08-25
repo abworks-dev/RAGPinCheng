@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   retryPublicationJob: vi.fn(),
   managedCategories: vi.fn(),
   publishManagedContent: vi.fn(),
+  bulkPublishManagedContent: vi.fn(),
   managedContentFileUrl: vi.fn((versionId: string) => `/managed-files/${versionId}`),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
@@ -89,6 +90,7 @@ describe("AdminDocumentsPage", () => {
     });
     mocks.managedCategories.mockResolvedValue(categories);
     mocks.publishManagedContent.mockResolvedValue({ publication_id: "publication-2", index_job_id: "job-2", status: "pending" });
+    mocks.bulkPublishManagedContent.mockResolvedValue({ results: [{ version_id: "version-1", status: "succeeded", message: null, index_job_id: "job-2" }], succeeded: 1, failed: 0 });
     mocks.useAuth.mockReturnValue({
       state: { status: "authed", user: { role: "admin", content_permissions: [] } },
     });
@@ -246,7 +248,7 @@ describe("AdminDocumentsPage", () => {
     const row = (await screen.findByText(failedJob.title)).closest("tr") as HTMLElement;
     expect(within(row).getByText("当前正式版本可检索")).toBeInTheDocument();
     expect(within(row).getByText(/内容块：17 个/)).toBeInTheDocument();
-    expect(within(row).getByRole("button", { name: "重新发布" })).toBeDisabled();
+    expect(within(row).getByRole("button", { name: "重新发布" })).toBeEnabled();
   });
 
   it("requeues only the latest failed attempt and exposes a busy success state", async () => {
@@ -262,6 +264,56 @@ describe("AdminDocumentsPage", () => {
 
     await waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledWith("已重新加入发布队列"));
     await waitFor(() => expect(screen.getByRole("button", { name: "重新发布" })).toBeEnabled());
+  });
+
+  it("selects and clears the current page from the header checkbox", async () => {
+    render(<AdminDocumentsPage />);
+    await screen.findByText(failedJob.title);
+
+    const selectPage = screen.getByRole("checkbox", { name: "全选当前页索引任务" });
+    const selectJob = screen.getByRole("checkbox", { name: `选择${failedJob.title}` });
+    fireEvent.click(selectPage);
+    expect(selectJob).toBeChecked();
+    expect(screen.getByRole("button", { name: "批量操作（1）" })).toBeInTheDocument();
+
+    fireEvent.click(selectPage);
+    expect(selectJob).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "批量操作" })).toBeInTheDocument();
+  });
+
+  it("allows the latest published task to be republished", async () => {
+    mocks.publicationJobs.mockResolvedValue({
+      ...listing,
+      jobs: [{ ...failedJob, id: "job-published", status: "published", failure: null }],
+    });
+    render(<AdminDocumentsPage />);
+    await screen.findByText(failedJob.title);
+
+    const republish = screen.getByRole("button", { name: "重新发布" });
+    expect(republish).toBeEnabled();
+    fireEvent.click(republish);
+    expect(mocks.publishManagedContent).toHaveBeenCalledWith("version-1");
+  });
+
+  it("places bulk actions after refresh", async () => {
+    render(<AdminDocumentsPage />);
+    await screen.findByText(failedJob.title);
+
+    const refresh = screen.getByRole("button", { name: "刷新列表" });
+    const bulk = screen.getByRole("button", { name: "批量操作" });
+    expect(refresh.compareDocumentPosition(bulk) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("republishes eligible selected tasks from the bulk actions menu", async () => {
+    render(<AdminDocumentsPage />);
+    await screen.findByText(failedJob.title);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: `选择${failedJob.title}` }));
+    fireEvent.click(screen.getByRole("button", { name: "批量操作（1）" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "批量重新发布" }));
+
+    expect(mocks.bulkPublishManagedContent).toHaveBeenCalledWith(["version-1"]);
+    await waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledWith("已提交 1 个任务"));
   });
 
   it("reports retry failures and hides retry on an older attempt", async () => {
