@@ -722,6 +722,7 @@ export type ManagedIndexJobList = {
 };
 
 export type UnifiedPublicationJob = {
+  // Latest-attempt metadata is supplied by the unified publication endpoint.
   id: string;
   task_type: "document" | "video_transcript";
   task_type_label: string;
@@ -740,13 +741,13 @@ export type UnifiedPublicationJob = {
   error_code: string | null;
   error_summary: string | null;
   retryable: boolean;
+  is_archived: boolean;
+  is_current_head: boolean;
+  is_latest_attempt: boolean;
   created_at: number;
   started_at: number | null;
   finished_at: number | null;
   updated_at: number;
-  is_archived: boolean;
-  is_current_head: boolean;
-  is_latest_attempt: boolean;
   doc_type: string | null;
   version_number: number | null;
   file_size: number | null;
