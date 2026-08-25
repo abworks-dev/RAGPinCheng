@@ -15,7 +15,7 @@ export function useTranscriptionJobs() {
     requestInFlight.current = true;
     const revisionAtStart = localRevision.current;
     try {
-      const latest = await adminMediaApi.jobs(true, 100);
+      const latest = await adminMediaApi.jobs(true, 500);
       if (revisionAtStart === localRevision.current) {
         setJobs(latest);
         setError(null);

@@ -214,6 +214,13 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const [mediaPageSize, setMediaPageSize] = useState(10);
   const [selectedMediaIds, setSelectedMediaIds] = useState<string[]>([]);
   const [batchMenuOpen, setBatchMenuOpen] = useState(false);
+  const [batchCleanupTargetIds, setBatchCleanupTargetIds] = useState<string[]>([]);
+  const [batchActionBusy, setBatchActionBusy] = useState(false);
+  const [batchFeedback, setBatchFeedback] = useState<{
+    title: string;
+    succeeded: number;
+    failures: string[];
+  } | null>(null);
   const [lastLoadedAt, setLastLoadedAt] = useState<number | null>(null);
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
@@ -355,11 +362,59 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const pagedMediaAssets = visibleMediaAssets.slice(mediaPage * mediaPageSize, (mediaPage + 1) * mediaPageSize);
   const pageIds = pagedMediaAssets.map((asset) => asset.media_id);
   const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedMediaIds.includes(id));
+  const selectedAssets = selectedMediaIds
+    .map((id) => mediaAssets.find((asset) => asset.media_id === id))
+    .filter((asset): asset is MediaAsset => Boolean(asset));
   const selectedJobs = selectedMediaIds.map((id) => jobsByMediaId.get(id)).filter((job): job is TranscriptionJob => Boolean(job));
-  const retryableSelectedJobs = selectedJobs.filter((job) => (job.status === "failed" || job.status === "cancelled") && job.failure?.retryable !== false);
-  const cancellableSelectedJobs = selectedJobs.filter((job) => job.status === "pending" || job.status === "running");
-  const runBatchRetry = async () => { for (const job of retryableSelectedJobs) await retryJob(job); setSelectedMediaIds([]); setBatchMenuOpen(false); };
+  const retryableSelectedAssets = selectedAssets.filter((asset) => asset.available_actions.includes("retry_transcription"));
+  const cleanableSelectedAssets = selectedAssets.filter((asset) => asset.available_actions.includes("delete_failed"));
+  const cancellableSelectedJobs = selectedJobs.filter((job) => {
+    const asset = mediaAssets.find((item) => item.media_id === job.media_id);
+    return asset?.available_actions.includes("cancel_transcription") === true;
+  });
+  const runBatchRetry = async () => {
+    const mediaIds = retryableSelectedAssets.map((asset) => asset.media_id);
+    if (!mediaIds.length) return;
+    setBatchActionBusy(true);
+    setBatchMenuOpen(false);
+    setBatchFeedback(null);
+    try {
+      const result = await adminMediaApi.bulkRetryJobs(mediaIds, createRequestId());
+      setBatchFeedback({
+        title: result.failed ? "批量重试部分完成" : "批量重试完成",
+        succeeded: result.succeeded,
+        failures: result.items.filter((item) => item.status === "failed").map((item) => item.message || "重试失败"),
+      });
+      await refreshMediaState();
+    } catch (cause) {
+      setUploadError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBatchActionBusy(false);
+    }
+  };
   const runBatchCancel = async () => { for (const job of cancellableSelectedJobs) await cancelJob(job); setSelectedMediaIds([]); setBatchMenuOpen(false); };
+  const runBatchCleanup = async () => {
+    if (!batchCleanupTargetIds.length) return;
+    setBatchActionBusy(true);
+    setBatchFeedback(null);
+    try {
+      const result = await adminMediaApi.bulkDeleteFailedAssets(batchCleanupTargetIds);
+      for (const item of result.items) {
+        if (item.status === "succeeded" && item.cleanup_mode === "deleted") removeAsset(item.media_id);
+      }
+      setBatchFeedback({
+        title: result.failed ? "批量清理部分完成" : "批量清理完成",
+        succeeded: result.succeeded,
+        failures: result.items.filter((item) => item.status === "failed").map((item) => item.message || "清理失败"),
+      });
+      setBatchCleanupTargetIds([]);
+      await refreshMediaState();
+    } catch (cause) {
+      setUploadError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBatchActionBusy(false);
+    }
+  };
   useEffect(() => { setMediaPage(0); setSelectedMediaIds([]); }, [mediaFilter, mediaPageSize, mediaQuery]);
   useEffect(() => { if (mediaPage >= mediaPageCount) setMediaPage(Math.max(0, mediaPageCount - 1)); }, [mediaPage, mediaPageCount]);
   const filterCounts = mediaFilterOptions.reduce<Record<MediaFilter, number>>((counts, [value]) => {
@@ -460,9 +515,15 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   async function deleteFailedMedia(asset: MediaAsset) {
     setDeletingMediaId(asset.media_id);
     try {
-      await adminMediaApi.deleteFailedAsset(asset.media_id);
-      removeAsset(asset.media_id);
+      const result = await adminMediaApi.deleteFailedAsset(asset.media_id);
+      if (result.cleanup_mode === "deleted") removeAsset(asset.media_id);
       setDeleteTarget(null);
+      setBatchFeedback({
+        title: result.cleanup_mode === "reset" ? "失败任务已清理，可重新入队" : "失败任务已删除",
+        succeeded: 1,
+        failures: [],
+      });
+      if (result.cleanup_mode === "reset") await refreshMediaState();
     } catch (e: any) {
       setUploadError(e?.message || String(e));
     } finally {
@@ -637,15 +698,15 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
     }
   }
 
-  async function retryJob(job: TranscriptionJob) {
-    let requestKey = retryIdempotencyKeys.current.get(job.job_id);
+  async function retryMedia(asset: MediaAsset) {
+    let requestKey = retryIdempotencyKeys.current.get(asset.media_id);
     if (!requestKey) {
       requestKey = createRequestId();
-      retryIdempotencyKeys.current.set(job.job_id, requestKey);
+      retryIdempotencyKeys.current.set(asset.media_id, requestKey);
     }
     try {
-      replaceJob(await adminMediaApi.retryJob(job.media_id, job.scheme_id || job.profile_id, requestKey));
-      retryIdempotencyKeys.current.delete(job.job_id);
+      replaceJob(await adminMediaApi.retryJob(asset.media_id, requestKey));
+      retryIdempotencyKeys.current.delete(asset.media_id);
       await refresh();
     } catch (e: any) {
       setUploadError(e?.message || String(e));
@@ -966,12 +1027,13 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
             <div className="relative min-w-0"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /><Input type="search" aria-label="搜索转录任务" placeholder="搜索标题或文件名…" className="h-control-md pl-9 text-ui-xs" value={mediaQuery} onChange={(event) => setMediaQuery(event.target.value)} /></div>
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
               <Button size="sm" variant="outline" className="h-control-md" aria-label="刷新媒体资源" title="刷新媒体资源" disabled={loading} onClick={() => void refreshMediaState()}><RefreshCw className="size-4" aria-hidden="true" />刷新列表</Button>
-              <div className="relative"><Button size="sm" variant="outline" disabled={!selectedMediaIds.length} aria-haspopup="menu" aria-expanded={batchMenuOpen} onClick={() => setBatchMenuOpen((open) => !open)}>批量操作<ChevronDown className="size-4" /></Button>{batchMenuOpen && <div role="menu" aria-label="批量操作" className="absolute right-0 top-full z-dropdown mt-1 w-48 rounded-ui-md border border-border bg-popover p-1 shadow-overlay"><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" disabled={!retryableSelectedJobs.length} onClick={() => void runBatchRetry()}><RotateCcw className="size-4" />重试所选（{retryableSelectedJobs.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" disabled={!cancellableSelectedJobs.length} onClick={() => void runBatchCancel()}><Ban className="size-4" />取消所选（{cancellableSelectedJobs.length}）</button></div>}</div>
+              <div className="relative"><Button size="sm" variant="outline" disabled={!selectedMediaIds.length || batchActionBusy} aria-haspopup="menu" aria-expanded={batchMenuOpen} onClick={() => setBatchMenuOpen((open) => !open)}>批量操作<ChevronDown className="size-4" /></Button>{batchMenuOpen && <div role="menu" aria-label="批量操作" className="absolute right-0 top-full z-dropdown mt-1 w-48 rounded-ui-md border border-border bg-popover p-1 shadow-overlay"><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" disabled={!retryableSelectedAssets.length || batchActionBusy} onClick={() => void runBatchRetry()}><RotateCcw className="size-4" />重试所选（{retryableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" disabled={!cancellableSelectedJobs.length || batchActionBusy} onClick={() => void runBatchCancel()}><Ban className="size-4" />取消所选（{cancellableSelectedJobs.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm text-destructive hover:bg-destructive/10 disabled:opacity-40" disabled={!cleanableSelectedAssets.length || batchActionBusy} onClick={() => { setBatchCleanupTargetIds(cleanableSelectedAssets.map((asset) => asset.media_id)); setBatchMenuOpen(false); }}><Trash2 className="size-4" />清理所选（{cleanableSelectedAssets.length}）</button></div>}</div>
               <a className={buttonVariants({ variant: "outline", size: "sm" })} href="/admin/asr"><Settings2 className="size-4" />转录配置</a>
               {!embedded && <Button size="sm" onClick={() => setUploadDialogOpen(true)}><Upload className="size-4" />{hasUploadDraft ? `继续上传${pending.length ? `（${pending.length}）` : ""}` : "上传视频"}</Button>}
             </div>
           </div>
         {jobsError && <Alert role="alert"><AlertTitle>任务状态暂时无法刷新</AlertTitle><AlertDescription>{jobsError}</AlertDescription></Alert>}
+        {batchFeedback && <Alert variant={batchFeedback.failures.length ? "destructive" : "default"} role={batchFeedback.failures.length ? "alert" : "status"}><AlertTitle>{batchFeedback.title}</AlertTitle><AlertDescription><p>成功 {batchFeedback.succeeded} 项{batchFeedback.failures.length ? `，失败 ${batchFeedback.failures.length} 项。` : "。"}</p>{batchFeedback.failures.length > 0 && <ul className="mt-1 list-disc space-y-1 pl-5">{batchFeedback.failures.map((message, index) => <li key={`${message}-${index}`}>{message}</li>)}</ul>}</AlertDescription></Alert>}
         {loadError ? <ErrorState title="媒体资源加载失败" description={loadError} action={<Button variant="outline" size="sm" onClick={refresh}>重新加载</Button>} />
           : loading ? <Card><LoadingState className="min-h-48" label="正在加载媒体资源…" /></Card>
           : transcriptionTaskAssets.length === 0 ? <EmptyState title="暂无转录任务" description="在资料列表为视频选择转录方案后，任务和各阶段状态会显示在这里。" />
@@ -983,15 +1045,14 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
               {pagedMediaAssets.map((asset) => {
                 const job = jobsByMediaId.get(asset.media_id);
                 const sameNameCount = mediaAssets.filter((item) => item.original_filename === asset.original_filename).length;
-                const availableActions = new Set(asset.available_actions || []);
-                const disabledActions = asset.disabled_actions || {};
-                const hasServerCapabilities = Array.isArray(asset.available_actions);
+                const availableActions = new Set(asset.available_actions);
+                const disabledActions = asset.disabled_actions;
                 const isExternal = asset.storage_kind === "external";
-                const canCancel = hasServerCapabilities ? availableActions.has("cancel_transcription") : job?.status === "pending" || job?.status === "running";
-                const canRetry = hasServerCapabilities ? availableActions.has("retry_transcription") : (job?.status === "failed" || job?.status === "cancelled") && job.failure?.retryable !== false;
-                const canDelete = !isExternal && (hasServerCapabilities ? availableActions.has("delete_failed") : asset.status === "failed" && !job);
-                const canReplace = !isExternal && (hasServerCapabilities ? availableActions.has("replace_media") : asset.publication_status === "published");
-                const canArchive = !isExternal && (hasServerCapabilities ? availableActions.has("archive_media") : asset.publication_status === "published");
+                const canCancel = availableActions.has("cancel_transcription");
+                const canRetry = availableActions.has("retry_transcription");
+                const canDelete = availableActions.has("delete_failed");
+                const canReplace = availableActions.has("replace_media");
+                const canArchive = availableActions.has("archive_media");
                 const showCancel = canCancel || job?.status === "pending" || job?.status === "running";
                 const showRetry = canRetry || job?.status === "failed" || job?.status === "cancelled";
                 const showPublishedActions = canReplace || canArchive || asset.publication_status === "published";
@@ -1015,9 +1076,9 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
                       <IconButton label="进入转写工作台" tooltip="进入转写工作台" className="border border-border max-sm:size-control-md" onClick={() => openWorkbench(asset.media_id)}><Film className="size-4" /></IconButton>
                       {asset.catalog_item_id && asset.current_version_id && <IconButton label="调整目录" tooltip="调整目录" className="border border-border max-sm:size-control-md" onClick={() => { setMoveTarget(asset); setMoveCategoryId(""); setMoveError(null); }}><FolderInput className="size-4" /></IconButton>}
                       {showCancel && <IconButton label="取消" tooltip={canCancel ? "取消当前转录任务" : disabledActions.cancel_transcription || "当前状态不可取消"} className="border border-border max-sm:size-control-md" disabled={!job || !canCancel || deletingMediaId === asset.media_id} onClick={() => job && void cancelJob(job)}><Ban className="size-4" /></IconButton>}
-                      {showRetry && <IconButton label="重试" tooltip={canRetry ? "按原转录方案重试" : disabledActions.retry_transcription || "当前状态不可重试"} title={canRetry ? "按原转录方案重试" : disabledActions.retry_transcription || "当前状态不可重试"} className="border border-border max-sm:size-control-md" disabled={!job || !canRetry || deletingMediaId === asset.media_id} onClick={() => job && void retryJob(job)}><RotateCcw className="size-4" /></IconButton>}
+                      {showRetry && <IconButton label="重试" tooltip={canRetry ? "由服务端按原转录方案重试" : disabledActions.retry_transcription || "当前状态不可重试"} title={canRetry ? "由服务端按原转录方案重试" : disabledActions.retry_transcription || "当前状态不可重试"} className="border border-border max-sm:size-control-md" disabled={!canRetry || deletingMediaId === asset.media_id} onClick={() => void retryMedia(asset)}><RotateCcw className="size-4" /></IconButton>}
                       {showPublishedActions && <IconButton label="替换视频" tooltip={canReplace ? "上传候选视频并创建转录任务" : disabledActions.replace_media || "当前状态不可替换"} className="border border-border max-sm:size-control-md" disabled={!canReplace || deletingMediaId === asset.media_id} onClick={() => setReplaceSourceMediaId(asset.media_id)}><Repeat2 className="size-4" /></IconButton>}
-                      {asset.status === "failed" && <IconButton label="完整删除" tooltip={canDelete ? "删除失败视频及其原文件" : disabledActions.delete_failed || "当前失败记录不可删除"} className="border border-destructive/40 text-destructive max-sm:size-control-md" disabled={!canDelete || deletingMediaId === asset.media_id} onClick={() => setDeleteTarget(asset)}><Trash2 className="size-4" /></IconButton>}
+                      {asset.status === "failed" && <IconButton label="清理失败任务" tooltip={canDelete ? (isExternal ? "清理本地任务和缓存，保留共享原文件" : "删除失败媒体和本地任务历史") : disabledActions.delete_failed || "当前失败任务不可清理"} className="border border-destructive/40 text-destructive max-sm:size-control-md" disabled={!canDelete || deletingMediaId === asset.media_id} onClick={() => setDeleteTarget(asset)}><Trash2 className="size-4" /></IconButton>}
                       {showPublishedActions && <IconButton label="移入回收站" tooltip={canArchive ? "移入资料回收站" : disabledActions.archive_media || "当前状态不可归档"} className="border border-border max-sm:size-control-md" disabled={!canArchive || deletingMediaId === asset.media_id} onClick={() => { setArchiveTarget(asset); setArchiveAcknowledged(false); }}><Archive className="size-4" /></IconButton>}
                     </div>
                   </div>
@@ -1063,12 +1124,24 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
       <Dialog open={deleteTarget != null} onOpenChange={(open) => { if (!open && !deletingMediaId) setDeleteTarget(null); }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>完整删除失败视频</DialogTitle>
-            <DialogDescription>将删除“{deleteTarget?.title}”的媒体记录和原始视频。此操作不可恢复。</DialogDescription>
+            <DialogTitle>清理失败任务</DialogTitle>
+            <DialogDescription>{deleteTarget?.storage_kind === "external" ? `将清理“${deleteTarget?.title}”的本地失败任务和派生缓存，重置为可重新入队；不会删除共享目录原文件。` : `将删除“${deleteTarget?.title}”的失败媒体、本地原始视频和失败任务历史。此操作不可恢复。`}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deletingMediaId != null}>取消</Button>
-            <Button variant="destructive" onClick={() => deleteTarget && void deleteFailedMedia(deleteTarget)} disabled={deletingMediaId != null}>{deletingMediaId ? "删除中" : "完整删除"}</Button>
+            <Button variant="destructive" onClick={() => deleteTarget && void deleteFailedMedia(deleteTarget)} disabled={deletingMediaId != null}>{deletingMediaId ? "清理中" : "确认清理"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={batchCleanupTargetIds.length > 0} onOpenChange={(open) => { if (!open && !batchActionBusy) setBatchCleanupTargetIds([]); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>清理 {batchCleanupTargetIds.length} 个失败任务</DialogTitle>
+            <DialogDescription>普通受管媒体会删除本地媒体和失败历史；共享来源只清理本地任务与派生缓存并重置为可重新入队，绝不删除共享原文件。服务端会逐项复核活动任务、转录版本、正式版本和发布索引。</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" disabled={batchActionBusy} onClick={() => setBatchCleanupTargetIds([])}>取消</Button>
+            <Button variant="destructive" disabled={batchActionBusy} onClick={() => void runBatchCleanup()}>{batchActionBusy ? "清理中" : "确认批量清理"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

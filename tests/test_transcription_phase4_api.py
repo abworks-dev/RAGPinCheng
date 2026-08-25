@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import sqlite3
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,20 +14,40 @@ from pydantic import ValidationError
 from fastapi import HTTPException, UploadFile
 
 from api.auth import CurrentUser, require_admin, require_csrf_admin
-from api.routes_admin import delete_failed_media_asset, router as admin_router, upload_media
+from api.routes_admin import (
+    delete_failed_media_asset,
+    list_media_assets,
+    router as admin_router,
+    upload_media,
+)
 from api.routes_transcription import (
     _failure_dto,
+    _job_dto,
     build_transcription_service,
     list_profiles,
     preview_transcript_version_timeline,
+    retry_job,
     router as transcription_router,
 )
 from src.transcription.asr_service_contract import ASR_API_VERSION, ServiceCapabilities
 from api.schemas import RetryTranscriptionRequest
+from src.transcription.persistence import ManagedMarkdownRef
+from src.transcription.provider_protocol import ProviderFailureClassification
+from src.transcription.types import ReviewStatus, sha256_hex
 from tests.transcription_fixture_helpers import (
+    MEDIA_ID,
     make_pending_job,
     make_phase2_store,
     seed_admin_user,
+)
+
+
+ADMIN = CurrentUser(
+    id=1,
+    employee_id="admin",
+    real_name="Admin",
+    role="admin",
+    csrf_token="synthetic-csrf",
 )
 
 
@@ -50,6 +71,18 @@ def test_management_reads_require_admin_and_mutations_require_csrf_admin():
     retry = route_for(
         transcription_router, "/admin/transcription/media/{media_id}/retry", "POST"
     )
+    bulk_retry = next(
+        (route for route in transcription_router.routes
+         if route.path == "/admin/transcription/bulk-retry" and "POST" in route.methods),
+        None,
+    )
+    bulk_delete = next(
+        (route for route in admin_router.routes
+         if route.path == "/admin/media/bulk-delete-failed" and "POST" in route.methods),
+        None,
+    )
+    assert bulk_retry is not None
+    assert bulk_delete is not None
     revision = route_for(
         transcription_router,
         "/admin/transcription/versions/{base_version_id}/revisions",
@@ -73,6 +106,8 @@ def test_management_reads_require_admin_and_mutations_require_csrf_admin():
     assert require_admin in dependency_calls(detail)
     assert require_csrf_admin in dependency_calls(cancel)
     assert require_csrf_admin in dependency_calls(retry)
+    assert require_csrf_admin in dependency_calls(bulk_retry)
+    assert require_csrf_admin in dependency_calls(bulk_delete)
     assert require_csrf_admin in dependency_calls(revision)
     assert require_csrf_admin in dependency_calls(metadata_revision)
     assert require_admin in dependency_calls(timeline)
@@ -81,7 +116,7 @@ def test_management_reads_require_admin_and_mutations_require_csrf_admin():
     assert require_admin in dependency_calls(preview)
 
 
-def test_failed_media_delete_removes_file_and_record_but_rejects_history(tmp_path, monkeypatch):
+def test_failed_media_delete_removes_file_record_and_failed_job_history(tmp_path, monkeypatch):
     import api.routes_admin as routes_admin
 
     media_root = tmp_path / "media"
@@ -110,12 +145,417 @@ def test_failed_media_delete_removes_file_and_record_but_rejects_history(tmp_pat
         assert not (media_root / failed_id).exists()
         assert conn.execute("SELECT 1 FROM media_assets WHERE media_id=?", (failed_id,)).fetchone() is None
 
-        with pytest.raises(HTTPException, match="已有转录任务") as caught:
+        with pytest.raises(HTTPException) as caught:
             delete_failed_media_asset(protected_job.media_id, None, conn)
         assert caught.value.status_code == 409
         assert (media_root / protected_job.media_id).exists()
+
+        store.record_failure(
+            protected_job.id,
+            error_code="provider_unavailable",
+            classification=ProviderFailureClassification.transient,
+            error_summary="synthetic controlled failure",
+            now=11,
+        )
+        conn.execute(
+            "UPDATE media_assets SET status='failed',error='synthetic' WHERE media_id=?",
+            (protected_job.media_id,),
+        )
+        conn.commit()
+
+        result = delete_failed_media_asset(protected_job.media_id, None, conn)
+        assert result.cleanup_mode == "deleted"
+        assert conn.execute(
+            "SELECT 1 FROM transcription_jobs WHERE media_id=?", (protected_job.media_id,)
+        ).fetchone() is None
+        assert conn.execute(
+            "SELECT 1 FROM media_assets WHERE media_id=?", (protected_job.media_id,)
+        ).fetchone() is None
+        assert not (media_root / protected_job.media_id).exists()
     finally:
         conn.close()
+
+
+def test_failed_media_cleanup_restores_staged_directory_when_database_commit_fails(
+    tmp_path, monkeypatch
+):
+    import api.routes_admin as routes_admin
+
+    media_root = tmp_path / "media"
+    failed_id = "11111111-1111-4111-8111-111111111111"
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    conn.execute(
+        """INSERT INTO media_assets(media_id,title,original_filename,storage_rel_path,mime_type,file_size,
+        transcript_origin,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (failed_id, "Failed", "failed.mp4", f"{failed_id}/failed.mp4", "video/mp4", 1,
+         "generated", "failed", 1, 1),
+    )
+    conn.commit()
+    media_dir = media_root / failed_id
+    media_dir.mkdir(parents=True)
+    (media_dir / "failed.mp4").write_bytes(b"video")
+    monkeypatch.setattr(routes_admin, "MEDIA_DIR", media_root)
+
+    class FailingCommitConnection:
+        def execute(self, *args, **kwargs):
+            return conn.execute(*args, **kwargs)
+
+        def commit(self):
+            raise sqlite3.OperationalError("synthetic commit failure")
+
+        def rollback(self):
+            return conn.rollback()
+
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="synthetic commit failure"):
+            delete_failed_media_asset(failed_id, None, FailingCommitConnection())
+
+        assert media_dir.exists()
+        assert (media_dir / "failed.mp4").read_bytes() == b"video"
+        assert conn.execute(
+            "SELECT status FROM media_assets WHERE media_id=?", (failed_id,)
+        ).fetchone()[0] == "failed"
+    finally:
+        conn.close()
+
+
+def test_failed_media_cleanup_reports_staged_directory_removal_failure(
+    tmp_path, monkeypatch
+):
+    import api.routes_admin as routes_admin
+
+    media_root = tmp_path / "media"
+    failed_id = "11111111-1111-4111-8111-111111111111"
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    conn.execute(
+        """INSERT INTO media_assets(media_id,title,original_filename,storage_rel_path,mime_type,file_size,
+        transcript_origin,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (failed_id, "Failed", "failed.mp4", f"{failed_id}/failed.mp4", "video/mp4", 1,
+         "generated", "failed", 1, 1),
+    )
+    conn.commit()
+    media_dir = media_root / failed_id
+    media_dir.mkdir(parents=True)
+    (media_dir / "failed.mp4").write_bytes(b"video")
+    monkeypatch.setattr(routes_admin, "MEDIA_DIR", media_root)
+
+    def fail_remove(_path):
+        raise OSError("synthetic locked file")
+
+    monkeypatch.setattr(routes_admin.shutil, "rmtree", fail_remove)
+    try:
+        with pytest.raises(HTTPException) as caught:
+            delete_failed_media_asset(failed_id, None, conn)
+
+        assert caught.value.status_code == 500
+        assert caught.value.detail == "数据库状态已清理，但本地文件删除未完成"
+        assert not media_dir.exists()
+        assert len(list(media_root.glob(f".cleanup-{failed_id}-*"))) == 1
+        assert conn.execute(
+            "SELECT 1 FROM media_assets WHERE media_id=?", (failed_id,)
+        ).fetchone() is None
+    finally:
+        conn.close()
+
+
+def test_failed_external_media_cleanup_preserves_shared_original_and_resets_enqueue_state(tmp_path, monkeypatch):
+    import api.routes_admin as routes_admin
+
+    media_root = tmp_path / "media"
+    shared_original = tmp_path / "share" / "training.mp4"
+    shared_original.parent.mkdir()
+    shared_original.write_bytes(b"shared-original")
+    conn, store, _artifacts = make_phase2_store(tmp_path)
+    job = store.create_job(make_pending_job())
+    store.record_failure(
+        job.id,
+        error_code="provider_unavailable",
+        classification=ProviderFailureClassification.transient,
+        error_summary="synthetic controlled failure",
+        now=11,
+    )
+    conn.execute(
+        "UPDATE media_assets SET storage_kind='external',status='failed',error='synthetic' WHERE media_id=?",
+        (job.media_id,),
+    )
+    conn.commit()
+    cache_dir = media_root / job.media_id
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "prepared-audio-v1.wav").write_bytes(b"derived")
+    monkeypatch.setattr(routes_admin, "MEDIA_DIR", media_root)
+    try:
+        result = delete_failed_media_asset(job.media_id, None, conn)
+
+        assert result.cleanup_mode == "reset"
+        media = conn.execute(
+            "SELECT status,error,storage_kind FROM media_assets WHERE media_id=?", (job.media_id,)
+        ).fetchone()
+        assert tuple(media) == ("uploaded", None, "external")
+        assert conn.execute(
+            "SELECT 1 FROM transcription_jobs WHERE media_id=?", (job.media_id,)
+        ).fetchone() is None
+        assert not cache_dir.exists()
+        assert shared_original.read_bytes() == b"shared-original"
+    finally:
+        conn.close()
+
+
+def test_failed_media_cleanup_rejects_registered_transcript_version(tmp_path, monkeypatch):
+    import api.routes_admin as routes_admin
+
+    conn, store, _artifacts = make_phase2_store(tmp_path)
+    markdown = b"speaker 1 00:00:01\nsynthetic"
+    store.register_manual_version(
+        version_id="99999999-9999-4999-8999-999999999999",
+        media_id=MEDIA_ID,
+        markdown_ref=ManagedMarkdownRef("docs/synthetic.md", sha256_hex(markdown), len(markdown)),
+        initial_review_status=ReviewStatus.awaiting_review,
+        now=12,
+    )
+    conn.execute(
+        "UPDATE media_assets SET status='failed' WHERE media_id=?",
+        (MEDIA_ID,),
+    )
+    conn.commit()
+    monkeypatch.setattr(routes_admin, "MEDIA_DIR", tmp_path / "media")
+    try:
+        with pytest.raises(HTTPException) as caught:
+            delete_failed_media_asset(MEDIA_ID, None, conn)
+        assert caught.value.status_code == 409
+        assert caught.value.detail == "已有转录版本的失败媒体不能清理"
+    finally:
+        conn.close()
+
+
+def test_failed_media_cleanup_is_blocked_by_every_nonterminal_media_index_stage(
+    tmp_path, monkeypatch
+):
+    import api.routes_admin as routes_admin
+
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    conn.execute(
+        "UPDATE media_assets SET status='failed',error='synthetic' WHERE media_id=?",
+        (MEDIA_ID,),
+    )
+    conn.execute(
+        """INSERT INTO index_jobs(
+           filename,category,doc_type,source_path,file_size,media_id,status,created_at
+           ) VALUES (?,?,?,?,?,?,?,?)""",
+        ("fixture.md", "教学视频", "transcript", "synthetic/fixture.md", 1, MEDIA_ID, "embedding", 1),
+    )
+    conn.commit()
+    monkeypatch.setattr(routes_admin, "MEDIA_DIR", tmp_path / "media")
+    try:
+        asset = next(item for item in list_media_assets(500, None, conn) if item.media_id == MEDIA_ID)
+        assert "delete_failed" not in asset.available_actions
+
+        with pytest.raises(HTTPException) as caught:
+            delete_failed_media_asset(MEDIA_ID, None, conn)
+        assert caught.value.status_code == 409
+        assert caught.value.detail == "媒体索引任务正在处理，不能清理"
+        assert conn.execute(
+            "SELECT status FROM index_jobs WHERE media_id=?", (MEDIA_ID,)
+        ).fetchone()[0] == "embedding"
+    finally:
+        conn.close()
+
+
+def _attach_external_source(conn, media_id: str) -> str:
+    source_id = "88888888-8888-4888-8888-888888888888"
+    entry_id = "77777777-7777-4777-8777-777777777777"
+    scheme_id = "funasr-sensevoice-zh-experimental-v1"
+    conn.execute(
+        """INSERT INTO external_media_sources(
+           id,name,root_alias,relative_path,target_category_id,default_scheme_id,
+           auto_enqueue,scan_interval_seconds,enabled,status,total_files,available_files,
+           missing_files,created_at,updated_at,version)
+           VALUES (?,?,?,?,?,?,0,900,1,'available',1,1,0,1,1,1)""",
+        (source_id, "Synthetic share", "share", "", "cat-05", scheme_id),
+    )
+    conn.execute(
+        """INSERT INTO external_media_entries(
+           id,source_id,media_id,relative_path,parent_relative_path,filename,file_size,
+           modified_ns,fingerprint,availability,discovered_at,last_seen_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,'available',1,1,1)""",
+        (entry_id, source_id, media_id, "training.mp4", "", "training.mp4", 1, 1, "a" * 64),
+    )
+    return scheme_id
+
+
+def test_failed_external_media_without_job_advertises_server_retry_and_cleanup(tmp_path):
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    media_id = MEDIA_ID
+    try:
+        _attach_external_source(conn, media_id)
+        conn.execute(
+            "UPDATE media_assets SET storage_kind='external',status='failed',error='synthetic' WHERE media_id=?",
+            (media_id,),
+        )
+        conn.commit()
+
+        asset = next(item for item in list_media_assets(500, None, conn) if item.media_id == media_id)
+
+        assert "retry_transcription" in asset.available_actions
+        assert "delete_failed" in asset.available_actions
+    finally:
+        conn.close()
+
+
+def test_failed_external_media_with_disabled_source_scheme_does_not_advertise_retry(tmp_path):
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    try:
+        scheme_id = _attach_external_source(conn, MEDIA_ID)
+        conn.execute(
+            "UPDATE media_assets SET storage_kind='external',status='failed',error='synthetic' WHERE media_id=?",
+            (MEDIA_ID,),
+        )
+        conn.execute("UPDATE transcription_schemes SET enabled=0 WHERE id=?", (scheme_id,))
+        conn.commit()
+
+        asset = next(item for item in list_media_assets(500, None, conn) if item.media_id == MEDIA_ID)
+
+        assert "retry_transcription" not in asset.available_actions
+        assert "retry_transcription" in asset.disabled_actions
+        assert "delete_failed" in asset.available_actions
+    finally:
+        conn.close()
+
+
+def test_retry_request_allows_backend_to_resolve_authoritative_scheme():
+    profile = RetryTranscriptionRequest.model_fields["profile_id"]
+    assert profile.is_required() is False
+    assert RetryTranscriptionRequest(
+        request_idempotency_key="22222222-2222-4222-8222-222222222222"
+    ).profile_id is None
+
+
+def test_failed_external_media_without_job_retries_with_source_default_scheme(tmp_path, monkeypatch):
+    import api.routes_transcription as routes_transcription
+    from api.db import connect as open_db
+
+    db_path = tmp_path / "app.sqlite"
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    scheme_id = _attach_external_source(conn, MEDIA_ID)
+    conn.execute(
+        "UPDATE media_assets SET storage_kind='external',status='failed',error='synthetic' WHERE media_id=?",
+        (MEDIA_ID,),
+    )
+    conn.commit()
+    conn.close()
+
+    calls = []
+
+    class FakeService:
+        def create_pending_job(self, **kwargs):
+            calls.append(kwargs)
+            return make_pending_job()
+
+    queued = []
+    monkeypatch.setattr(routes_transcription, "ASR_ENABLED", True)
+    monkeypatch.setattr(routes_transcription, "ASR_SERVICE_TOKEN", "synthetic-token")
+    monkeypatch.setattr(routes_transcription, "connect", lambda: open_db(db_path))
+    monkeypatch.setattr(routes_transcription, "build_transcription_service", lambda: FakeService())
+    monkeypatch.setattr(routes_transcription, "enqueue", queued.append)
+
+    body = RetryTranscriptionRequest.model_construct(
+        profile_id=None,
+        request_idempotency_key="66666666-6666-4666-8666-666666666666",
+    )
+    result = retry_job(MEDIA_ID, body, ADMIN)
+
+    assert result.job_id == make_pending_job().id
+    assert calls == [{
+        "media_id": MEDIA_ID,
+        "profile_id": "funasr-sensevoice-zh-experimental-v1",
+        "request_idempotency_key": "66666666-6666-4666-8666-666666666666",
+        "created_by": ADMIN.id,
+        "scheme_id": scheme_id,
+    }]
+    assert queued == [make_pending_job().id]
+    check = open_db(db_path)
+    try:
+        assert tuple(check.execute(
+            "SELECT status,error FROM media_assets WHERE media_id=?", (MEDIA_ID,)
+        ).fetchone()) == ("transcribing", None)
+    finally:
+        check.close()
+
+
+def test_bulk_retry_and_cleanup_return_itemized_partial_results(monkeypatch):
+    import api.routes_admin as routes_admin
+    import api.routes_transcription as routes_transcription
+    import api.schemas as schemas
+
+    bulk_retry_request = getattr(schemas, "BulkRetryTranscriptionRequest", None)
+    bulk_delete_request = getattr(schemas, "BulkFailedMediaDeleteRequest", None)
+    bulk_retry = getattr(routes_transcription, "bulk_retry_jobs", None)
+    bulk_delete = getattr(routes_admin, "bulk_delete_failed_media_assets", None)
+    assert bulk_retry_request is not None
+    assert bulk_delete_request is not None
+    assert bulk_retry is not None
+    assert bulk_delete is not None
+
+    media_ids = [MEDIA_ID, "11111111-1111-4111-8111-111111111111"]
+
+    def fake_retry(media_id, request_key, admin):
+        if media_id != MEDIA_ID:
+            raise HTTPException(status_code=409, detail="synthetic retry failure")
+        return _job_dto(make_pending_job())
+
+    def fake_cleanup(media_id, conn):
+        if media_id != MEDIA_ID:
+            raise HTTPException(status_code=409, detail="synthetic cleanup failure")
+        return schemas.FailedMediaCleanupDTO(media_id=media_id, cleanup_mode="deleted")
+
+    monkeypatch.setattr(routes_transcription, "_retry_media_job", fake_retry, raising=False)
+    monkeypatch.setattr(routes_admin, "_cleanup_failed_media", fake_cleanup, raising=False)
+    retry_result = bulk_retry(
+        bulk_retry_request(
+            media_ids=media_ids,
+            request_idempotency_key="55555555-5555-4555-8555-555555555555",
+        ),
+        ADMIN,
+    )
+    delete_result = bulk_delete(bulk_delete_request(media_ids=media_ids), ADMIN, object())
+
+    assert (retry_result.succeeded, retry_result.failed) == (1, 1)
+    assert [(item.media_id, item.status) for item in retry_result.items] == [
+        (MEDIA_ID, "succeeded"),
+        ("11111111-1111-4111-8111-111111111111", "failed"),
+    ]
+    assert (delete_result.succeeded, delete_result.failed) == (1, 1)
+    assert [item.message for item in delete_result.items] == [None, "synthetic cleanup failure"]
+
+
+def test_bulk_retry_and_cleanup_contain_unexpected_item_failures(monkeypatch):
+    import api.routes_admin as routes_admin
+    import api.routes_transcription as routes_transcription
+    import api.schemas as schemas
+
+    def failing_retry(media_id, request_key, admin):
+        raise sqlite3.OperationalError("sensitive database detail")
+
+    def failing_cleanup(media_id, conn):
+        raise OSError("sensitive filesystem detail")
+
+    monkeypatch.setattr(routes_transcription, "_retry_media_job", failing_retry)
+    monkeypatch.setattr(routes_admin, "_cleanup_failed_media", failing_cleanup)
+    request_key = "55555555-5555-4555-8555-555555555555"
+
+    retry_result = routes_transcription.bulk_retry_jobs(
+        schemas.BulkRetryTranscriptionRequest(media_ids=[MEDIA_ID], request_idempotency_key=request_key),
+        ADMIN,
+    )
+    cleanup_result = routes_admin.bulk_delete_failed_media_assets(
+        schemas.BulkFailedMediaDeleteRequest(media_ids=[MEDIA_ID]), ADMIN, object()
+    )
+
+    assert (retry_result.succeeded, retry_result.failed) == (0, 1)
+    assert retry_result.items[0].message == "操作失败，请稍后重试"
+    assert "sensitive" not in retry_result.items[0].message
+    assert (cleanup_result.succeeded, cleanup_result.failed) == (0, 1)
+    assert cleanup_result.items[0].message == "操作失败，请稍后重试"
+    assert "sensitive" not in cleanup_result.items[0].message
 
 
 def test_retry_request_rejects_all_untrusted_execution_controls():

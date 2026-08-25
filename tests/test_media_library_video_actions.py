@@ -11,6 +11,7 @@ from api.auth import CurrentUser
 from api.routes_admin import (
     _media_action_state,
     _media_current_phase,
+    delete_failed_media_asset,
     preflight_media_upload,
     upload_media,
 )
@@ -73,7 +74,7 @@ def test_media_action_projection_matches_mutation_preconditions():
         publication_index_status=None,
     )
     assert "retry_transcription" in transient
-    assert "delete_failed" not in transient
+    assert "delete_failed" in transient
     assert "retry_transcription" not in permanent
     assert "retry_transcription" in permanent_disabled
 
@@ -106,6 +107,17 @@ def test_media_action_projection_matches_mutation_preconditions():
     )
     assert "replace_media" not in replacing and "archive_media" not in replacing
     assert replacing_disabled["replace_media"] == "视频替换任务正在处理"
+
+    failed_replacement, failed_replacement_disabled = _media_action_state(
+        status="failed",
+        job_status=None,
+        review_status=None,
+        publication_status=None,
+        publication_index_status=None,
+        replacement_status="pending",
+    )
+    assert "delete_failed" not in failed_replacement
+    assert failed_replacement_disabled["delete_failed"] == "视频替换任务正在处理，不能清理"
 
 
 @pytest.mark.parametrize(
@@ -229,6 +241,47 @@ def _replacement_candidate(conn, store, workflow, profile, base):
         now=70,
     )
     return source_item_id, candidate
+
+
+def test_failed_replacement_candidate_cannot_be_cleaned_while_replacement_is_active(
+    tmp_path, monkeypatch
+):
+    import api.routes_admin as routes_admin
+
+    conn, store, _workflow, profile, base = _published_base(tmp_path)
+    try:
+        _insert_replacement_media(conn)
+        store.register_replacement(
+            replacement_id=REPLACEMENT_ID,
+            source_media_id=base.media_id,
+            candidate_media_id=REPLACEMENT_MEDIA_ID,
+            profile_id=profile.profile_id,
+            request_idempotency_key=REPLACEMENT_REQUEST_ID,
+            requested_by=1,
+            now=51,
+        )
+        conn.execute(
+            "UPDATE media_assets SET status='failed',error='synthetic' WHERE media_id=?",
+            (REPLACEMENT_MEDIA_ID,),
+        )
+        conn.commit()
+        media_root = tmp_path / "media"
+        candidate_dir = media_root / REPLACEMENT_MEDIA_ID
+        candidate_dir.mkdir(parents=True)
+        (candidate_dir / "candidate.mp4").write_bytes(b"synthetic")
+        monkeypatch.setattr(routes_admin, "MEDIA_DIR", media_root)
+
+        with pytest.raises(HTTPException) as caught:
+            delete_failed_media_asset(REPLACEMENT_MEDIA_ID, None, conn)
+
+        assert caught.value.status_code == 409
+        assert caught.value.detail == "视频替换任务正在处理，不能清理"
+        assert candidate_dir.exists()
+        assert conn.execute(
+            "SELECT status FROM media_replacements WHERE id=?", (REPLACEMENT_ID,)
+        ).fetchone()[0] == "pending"
+    finally:
+        conn.close()
 
 
 def test_metadata_activation_is_atomic_and_preserves_the_old_head_until_success(tmp_path):

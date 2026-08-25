@@ -57,6 +57,8 @@ import type {
   ManagedUploadTaskList,
   MediaTranscript,
   TranscriptionJob,
+  FailedMediaCleanup,
+  BulkTranscriptionActionResult,
   BulkTranscriptionPreflight,
   BulkTranscriptionResult,
   TranscriptionProfile,
@@ -1091,7 +1093,12 @@ export const api = {
     body: JSON.stringify(body),
   }),
   deleteFailedMediaAsset: (mediaId: string) =>
-    jsonFetch<void>(`/api/admin/media/${mediaId}`, { method: "DELETE" }),
+    jsonFetch<FailedMediaCleanup>(`/api/admin/media/${mediaId}`, { method: "DELETE" }),
+  bulkDeleteFailedMediaAssets: (mediaIds: string[]) =>
+    jsonFetch<BulkTranscriptionActionResult>("/api/admin/media/bulk-delete-failed", {
+      method: "POST",
+      body: JSON.stringify({ media_ids: mediaIds }),
+    }),
   archiveMediaAsset: (mediaId: string) => jsonFetch(`/api/admin/media/${mediaId}/archive`, { method: "POST", body: JSON.stringify({}) }),
   listTranscriptionProfiles: () =>
     jsonFetch<TranscriptionProfile[]>("/api/admin/transcription/profiles"),
@@ -1142,10 +1149,15 @@ export const api = {
     jsonFetch<TranscriptionJob>(`/api/admin/transcription/jobs/${jobId}`),
   cancelTranscriptionJob: (jobId: string) =>
     jsonFetch<TranscriptionJob>(`/api/admin/transcription/jobs/${jobId}/cancel`, { method: "POST" }),
-  retryTranscription: (mediaId: string, profileId: string, requestIdempotencyKey: string) =>
+  retryTranscription: (mediaId: string, requestIdempotencyKey: string) =>
     jsonFetch<TranscriptionJob>(`/api/admin/transcription/media/${mediaId}/retry`, {
       method: "POST",
-      body: JSON.stringify({ profile_id: profileId, request_idempotency_key: requestIdempotencyKey }),
+      body: JSON.stringify({ request_idempotency_key: requestIdempotencyKey }),
+    }),
+  bulkRetryTranscriptions: (mediaIds: string[], requestIdempotencyKey: string) =>
+    jsonFetch<BulkTranscriptionActionResult>("/api/admin/transcription/bulk-retry", {
+      method: "POST",
+      body: JSON.stringify({ media_ids: mediaIds, request_idempotency_key: requestIdempotencyKey }),
     }),
   listTranscriptVersions: (mediaId: string) =>
     jsonFetch<TranscriptVersion[]>(`/api/admin/transcription/media/${mediaId}/versions`),

@@ -93,6 +93,8 @@ from .schemas import (
     AdminUserDTO,
     AdminUserListResponse,
     AdminUserPatchRequest,
+    BulkFailedMediaDeleteRequest,
+    BulkTranscriptionActionResponse,
     CategoryNodeDTO,
     CategoryTreeResponse,
     DeleteDocumentRequest,
@@ -103,6 +105,7 @@ from .schemas import (
     IndexedDocumentDTO,
     IndexedDocumentListResponse,
     MediaAssetDTO,
+    FailedMediaCleanupDTO,
     MediaUploadConflictDTO,
     MediaUploadPreflightEntryDTO,
     MediaUploadPreflightRequest,
@@ -115,6 +118,7 @@ from .schemas import (
     MaintenanceSettingsPatchRequest,
     MaintenanceStatusResponse,
     SystemOverviewResponse,
+    TranscriptionActionItemDTO,
     UploadResponse,
 )
 from .transcription_store import SQLiteTranscriptionStore, StoreConflictError
@@ -138,6 +142,14 @@ def _media_action_state(
     publication_status: str | None,
     publication_index_status: str | None,
     replacement_status: str | None = None,
+    storage_kind: str = "managed",
+    external_availability: str | None = None,
+    external_retry_scheme_available: bool = False,
+    has_active_job: bool = False,
+    has_transcript_versions: bool = False,
+    has_transcript_head: bool = False,
+    has_publication_index_jobs: bool = False,
+    has_active_index_job: bool = False,
 ) -> tuple[list[str], dict[str, str]]:
     available: list[str] = []
     disabled: dict[str, str] = {}
@@ -145,7 +157,18 @@ def _media_action_state(
         available.append("cancel_transcription")
     else:
         disabled["cancel_transcription"] = "当前没有运行中的转录任务"
-    if job_status == "cancelled" or (job_status == "failed" and job_failure_classification != "permanent"):
+    retryable_external_reservation_failure = (
+        storage_kind == "external"
+        and status == "failed"
+        and job_status is None
+        and external_availability not in {"missing", "superseded"}
+        and external_retry_scheme_available
+    )
+    if (
+        job_status == "cancelled"
+        or (job_status == "failed" and job_failure_classification != "permanent")
+        or retryable_external_reservation_failure
+    ):
         available.append("retry_transcription")
     else:
         disabled["retry_transcription"] = "仅可重试失败或已取消且允许恢复的转录任务"
@@ -164,10 +187,20 @@ def _media_action_state(
         reason = "视频替换任务正在处理" if replacement_status == "pending" else "仅已发布且未归档的视频可操作"
         disabled["replace_media"] = reason
         disabled["archive_media"] = reason
-    if status == "failed" and job_status is None:
+    cleanup_blocked = (
+        has_active_job
+        or has_active_index_job
+        or has_transcript_versions
+        or has_transcript_head
+        or has_publication_index_jobs
+        or replacement_status == "pending"
+    )
+    if status == "failed" and not cleanup_blocked:
         available.append("delete_failed")
+    elif replacement_status == "pending":
+        disabled["delete_failed"] = "视频替换任务正在处理，不能清理"
     else:
-        disabled["delete_failed"] = "仅从未创建转录任务的失败视频可删除"
+        disabled["delete_failed"] = "仅可清理无活动任务、转录版本或发布索引的失败视频"
     if publication_index_status in {"pending", "parsing", "chunking", "embedding"}:
         available[:] = [action for action in available if action != "publish_transcript"]
         disabled["publish_transcript"] = "转录稿专属索引正在处理"
@@ -1896,6 +1929,17 @@ def list_media_assets(
                m.transcript_origin, m.status, m.created_at, m.updated_at, m.error,
                m.storage_kind, e.source_id AS external_source_id,
                e.relative_path AS external_relative_path, e.availability AS external_availability,
+               EXISTS(
+                   SELECT 1
+                   FROM external_media_entries retry_entry
+                   JOIN external_media_sources retry_source ON retry_source.id=retry_entry.source_id
+                   JOIN transcription_schemes retry_scheme ON retry_scheme.id=retry_source.default_scheme_id
+                   JOIN transcription_bases retry_base ON retry_base.id=retry_scheme.base_id
+                   WHERE retry_entry.media_id=m.media_id
+                     AND retry_entry.availability='available'
+                     AND retry_scheme.enabled=1 AND retry_scheme.archived=0
+                     AND retry_base.admission='enabled' AND retry_base.availability='runtime'
+               ) AS external_retry_scheme_available,
                COALESCE(i.category_id,m.target_category_id) AS category_id,
                i.id AS catalog_item_id,h.current_version_id,
                (SELECT j.id FROM transcription_jobs j
@@ -1910,6 +1954,19 @@ def list_media_assets(
                (SELECT j.failure_classification FROM transcription_jobs j
                 WHERE j.media_id=m.media_id
                 ORDER BY j.attempt_number DESC,j.created_at DESC LIMIT 1) AS transcription_failure_classification,
+               EXISTS(SELECT 1 FROM transcription_jobs active
+                      WHERE active.media_id=m.media_id AND active.status IN ('pending','running')) AS has_active_job,
+               EXISTS(SELECT 1 FROM transcript_versions any_version
+                      WHERE any_version.media_id=m.media_id) AS has_transcript_versions,
+               EXISTS(SELECT 1 FROM media_transcript_heads any_head
+                      WHERE any_head.media_id=m.media_id) AS has_transcript_head,
+               EXISTS(SELECT 1 FROM transcript_publication_index_jobs any_publication_job
+                      JOIN transcript_versions indexed_version
+                        ON indexed_version.id=any_publication_job.transcript_version_id
+                      WHERE indexed_version.media_id=m.media_id) AS has_publication_index_jobs,
+               EXISTS(SELECT 1 FROM index_jobs active_index
+                      WHERE active_index.media_id=m.media_id
+                        AND active_index.status NOT IN ('done','failed')) AS has_active_index_job,
                v.review_status, v.publication_status,
                CASE WHEN h.current_version_id=v.id THEN 1 ELSE 0 END AS is_current_version,
                (
@@ -1954,6 +2011,14 @@ def list_media_assets(
             publication_status=r["publication_status"],
             publication_index_status=r["publication_index_status"],
             replacement_status=r["replacement_status"],
+            storage_kind=str(r["storage_kind"]),
+            external_availability=r["external_availability"],
+            external_retry_scheme_available=bool(r["external_retry_scheme_available"]),
+            has_active_job=bool(r["has_active_job"]),
+            has_transcript_versions=bool(r["has_transcript_versions"]),
+            has_transcript_head=bool(r["has_transcript_head"]),
+            has_publication_index_jobs=bool(r["has_publication_index_jobs"]),
+            has_active_index_job=bool(r["has_active_index_job"]),
         )
         result.append(MediaAssetDTO(
             media_id=r["media_id"],
@@ -2057,40 +2122,164 @@ def archive_media_asset(media_id: str, admin: CurrentUser = Depends(require_csrf
     return DeleteManagedContentResponse(item_id=result.item_id, version_id=result.version_id, archived_at=result.archived_at, previous_status=result.previous_status, publication_withdrawn=result.publication_withdrawn)
 
 
-@router.delete("/media/{media_id}", status_code=204)
-def delete_failed_media_asset(
+def _cleanup_failed_media(
     media_id: str,
-    _admin: CurrentUser = Depends(require_csrf_admin),
-    conn: sqlite3.Connection = Depends(get_db),
-) -> None:
-    """Remove a failed upload that never created transcription history."""
+    conn: sqlite3.Connection,
+) -> FailedMediaCleanupDTO:
     try:
         validate_uuid(media_id, "media_id")
     except ContractValidationError:
         raise HTTPException(status_code=404, detail="媒体不存在")
-    row = conn.execute(
-        "SELECT status,storage_kind FROM media_assets WHERE media_id=?", (media_id,)
-    ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail="媒体不存在")
-    if row["status"] != "failed":
-        raise HTTPException(status_code=409, detail="仅可完整删除失败且未进入转录流程的媒体")
-    if row["storage_kind"] == "external":
-        raise HTTPException(status_code=409, detail="共享目录视频由外部媒体源管理，不能在此删除")
-    if conn.execute(
-        "SELECT 1 FROM transcription_jobs WHERE media_id=?", (media_id,)
-    ).fetchone() is not None:
-        raise HTTPException(status_code=409, detail="已有转录任务的媒体不能在此删除")
-    if conn.execute(
-        "SELECT 1 FROM transcript_versions WHERE media_id=?", (media_id,)
-    ).fetchone() is not None:
-        raise HTTPException(status_code=409, detail="已有转录稿的媒体不能在此删除")
-    media_dir = (MEDIA_DIR / media_id).resolve(strict=False)
+    media_root = MEDIA_DIR.resolve()
+    media_dir = (media_root / media_id).resolve(strict=False)
+    staged_dir: Path | None = None
+    now = int(time.time())
     try:
-        media_dir.relative_to(MEDIA_DIR.resolve())
-    except ValueError:
-        raise HTTPException(status_code=500, detail="媒体存储路径异常")
-    if media_dir.exists():
-        shutil.rmtree(media_dir)
-    conn.execute("DELETE FROM media_assets WHERE media_id=?", (media_id,))
-    conn.commit()
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT status,storage_kind FROM media_assets WHERE media_id=?", (media_id,)
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="媒体不存在")
+        if row["status"] != "failed":
+            raise HTTPException(status_code=409, detail="仅可清理失败媒体")
+        if conn.execute(
+            "SELECT 1 FROM transcription_jobs WHERE media_id=? AND status IN ('pending','running')", (media_id,)
+        ).fetchone() is not None:
+            raise HTTPException(status_code=409, detail="媒体正在处理，不能清理")
+        if conn.execute(
+            "SELECT 1 FROM transcript_versions WHERE media_id=?", (media_id,)
+        ).fetchone() is not None:
+            raise HTTPException(status_code=409, detail="已有转录版本的失败媒体不能清理")
+        if conn.execute(
+            "SELECT 1 FROM media_transcript_heads WHERE media_id=?", (media_id,)
+        ).fetchone() is not None:
+            raise HTTPException(status_code=409, detail="已有正式转录版本的失败媒体不能清理")
+        if conn.execute(
+            """SELECT 1 FROM transcript_publication_index_jobs publication_job
+               JOIN transcript_versions version ON version.id=publication_job.transcript_version_id
+               WHERE version.media_id=?""",
+            (media_id,),
+        ).fetchone() is not None:
+            raise HTTPException(status_code=409, detail="已有发布索引历史的失败媒体不能清理")
+        if conn.execute(
+            "SELECT 1 FROM index_jobs WHERE media_id=? AND status NOT IN ('done','failed')", (media_id,)
+        ).fetchone() is not None:
+            raise HTTPException(status_code=409, detail="媒体索引任务正在处理，不能清理")
+        if conn.execute(
+            """SELECT 1 FROM media_replacements
+               WHERE (source_media_id=? OR candidate_media_id=?) AND status='pending'""",
+            (media_id, media_id),
+        ).fetchone() is not None:
+            raise HTTPException(status_code=409, detail="视频替换任务正在处理，不能清理")
+        try:
+            media_dir.relative_to(media_root)
+        except ValueError:
+            raise HTTPException(status_code=500, detail="媒体存储路径异常")
+        if media_dir.exists():
+            staged_dir = media_root / f".cleanup-{media_id}-{time.time_ns()}"
+            media_dir.replace(staged_dir)
+        conn.execute(
+            "UPDATE upload_batch_entries SET transcription_job_id=NULL WHERE media_id=?",
+            (media_id,),
+        )
+        conn.execute("DELETE FROM transcription_jobs WHERE media_id=?", (media_id,))
+        conn.execute("DELETE FROM index_jobs WHERE media_id=?", (media_id,))
+        conn.execute(
+            """DELETE FROM media_replacements
+               WHERE (source_media_id=? OR candidate_media_id=?)
+                 AND status IN ('failed','cancelled')""",
+            (media_id, media_id),
+        )
+        if row["storage_kind"] == "external":
+            conn.execute(
+                "UPDATE media_assets SET status='uploaded',error=NULL,updated_at=? WHERE media_id=?",
+                (now, media_id),
+            )
+            cleanup_mode = "reset"
+        else:
+            item_rows = conn.execute(
+                "SELECT id FROM content_items WHERE media_id=? AND content_kind='media_transcript'",
+                (media_id,),
+            ).fetchall()
+            for item_row in item_rows:
+                conn.execute(
+                    "UPDATE content_audit_events SET item_id=NULL WHERE item_id=?",
+                    (item_row["id"],),
+                )
+            conn.execute(
+                "DELETE FROM content_items WHERE media_id=? AND content_kind='media_transcript'",
+                (media_id,),
+            )
+            conn.execute("DELETE FROM media_assets WHERE media_id=?", (media_id,))
+            cleanup_mode = "deleted"
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        if staged_dir is not None and staged_dir.exists():
+            try:
+                staged_dir.replace(media_dir)
+            except OSError:
+                logger.exception("failed to restore staged media directory for %s", media_id)
+        raise
+    if staged_dir is not None:
+        try:
+            shutil.rmtree(staged_dir)
+        except OSError as exc:
+            logger.exception("failed to remove staged media directory for %s", media_id)
+            raise HTTPException(
+                status_code=500,
+                detail="数据库状态已清理，但本地文件删除未完成",
+            ) from exc
+    return FailedMediaCleanupDTO(media_id=media_id, cleanup_mode=cleanup_mode)
+
+
+@router.delete("/media/{media_id}", response_model=FailedMediaCleanupDTO)
+def delete_failed_media_asset(
+    media_id: str,
+    _admin: CurrentUser = Depends(require_csrf_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> FailedMediaCleanupDTO:
+    """Delete a managed failure or reset a shared-source failure for re-enqueue."""
+    return _cleanup_failed_media(media_id, conn)
+
+
+@router.post("/media/bulk-delete-failed", response_model=BulkTranscriptionActionResponse)
+def bulk_delete_failed_media_assets(
+    body: BulkFailedMediaDeleteRequest,
+    _admin: CurrentUser = Depends(require_csrf_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkTranscriptionActionResponse:
+    items: list[TranscriptionActionItemDTO] = []
+    seen: set[str] = set()
+    for media_id in body.media_ids:
+        if media_id in seen:
+            continue
+        seen.add(media_id)
+        try:
+            result = _cleanup_failed_media(media_id, conn)
+            items.append(TranscriptionActionItemDTO(
+                media_id=media_id,
+                status="succeeded",
+                cleanup_mode=result.cleanup_mode,
+            ))
+        except HTTPException as exc:
+            message = exc.detail.get("message") if isinstance(exc.detail, dict) else str(exc.detail)
+            items.append(TranscriptionActionItemDTO(
+                media_id=media_id,
+                status="failed",
+                message=message,
+            ))
+        except Exception:
+            logger.exception("unexpected failed-media cleanup error for %s", media_id)
+            items.append(TranscriptionActionItemDTO(
+                media_id=media_id,
+                status="failed",
+                message="操作失败，请稍后重试",
+            ))
+    succeeded = sum(item.status == "succeeded" for item in items)
+    return BulkTranscriptionActionResponse(
+        items=items,
+        succeeded=succeeded,
+        failed=len(items) - succeeded,
+    )

@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   getTranscriptionJob: vi.fn(),
   cancelTranscriptionJob: vi.fn(),
   retryTranscription: vi.fn(),
+  bulkRetryTranscriptions: vi.fn(),
+  bulkDeleteFailedMediaAssets: vi.fn(),
   managedCategories: vi.fn(),
   preflightMediaUpload: vi.fn(),
   moveManagedContent: vi.fn(),
@@ -75,6 +77,8 @@ const assets = [{
   created_at: 1785686400,
   updated_at: 1785686400,
   error: null,
+  available_actions: ["review_transcript"],
+  disabled_actions: {},
 }];
 
 const succeededJob = {
@@ -129,7 +133,7 @@ describe("AdminMediaPage wizard", () => {
       randomUUID: vi.fn(() => `11111111-1111-4111-8111-${String(++sequence).padStart(12, "0")}`),
     });
     mocks.listMediaAssets.mockResolvedValue(assets);
-    mocks.deleteFailedMediaAsset.mockResolvedValue(undefined);
+    mocks.deleteFailedMediaAsset.mockResolvedValue({ media_id: "media-ready", cleanup_mode: "deleted" });
     mocks.uploadMediaVideo.mockResolvedValue(assets[0]);
     mocks.uploadAutomaticMediaVideo.mockImplementation(async (file: File) => ({
       ...assets[0],
@@ -148,6 +152,8 @@ describe("AdminMediaPage wizard", () => {
     mocks.getTranscriptionJob.mockResolvedValue(succeededJob);
     mocks.cancelTranscriptionJob.mockResolvedValue({ ...succeededJob, status: "cancelled" });
     mocks.retryTranscription.mockResolvedValue({ ...succeededJob, status: "pending" });
+    mocks.bulkRetryTranscriptions.mockResolvedValue({ items: [], succeeded: 0, failed: 0 });
+    mocks.bulkDeleteFailedMediaAssets.mockResolvedValue({ items: [], succeeded: 0, failed: 0 });
     mocks.managedCategories.mockResolvedValue([{
       id: "cat-05", category_key: "training", parent_id: null, display_code: "05",
       display_name: "培训资料", sort_order: 50, level: 1, is_active: true,
@@ -478,14 +484,17 @@ describe("AdminMediaPage wizard", () => {
   it("preserves cancel and retry recovery actions", async () => {
     const running = { ...succeededJob, status: "running" as const };
     const failed = { ...succeededJob, job_id: "job-failed", media_id: "media-failed", status: "failed" as const };
-    mocks.listMediaAssets.mockResolvedValue([assets[0], { ...assets[0], media_id: "media-failed", title: "失败视频" }]);
+    mocks.listMediaAssets.mockResolvedValue([
+      { ...assets[0], status: "transcribing", available_actions: ["cancel_transcription"] },
+      { ...assets[0], media_id: "media-failed", title: "失败视频", status: "failed", available_actions: ["retry_transcription"] },
+    ]);
     mocks.listTranscriptionJobs.mockResolvedValue([running, failed]);
     render(<AdminMediaPage />);
     await screen.findByText("项目交付培训");
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     await waitFor(() => expect(mocks.cancelTranscriptionJob).toHaveBeenCalledWith("job-succeeded"));
-    await waitFor(() => expect(mocks.retryTranscription).toHaveBeenCalledWith("media-failed", availableProfile.scheme_id, expect.any(String)));
+    await waitFor(() => expect(mocks.retryTranscription).toHaveBeenCalledWith("media-failed", expect.any(String)));
   });
 
   it("uses indeterminate progress instead of a false zero percent while the model runs", async () => {
@@ -542,18 +551,100 @@ describe("AdminMediaPage wizard", () => {
     expect(within(row).getByRole("progressbar", { name: "转录进度：转录中" })).toHaveAttribute("aria-valuenow", "50");
   });
 
-  it("offers complete deletion only for a failed upload without a transcription job", async () => {
-    mocks.listMediaAssets.mockResolvedValue([{ ...assets[0], media_id: "media-upload-failed", title: "上传失败视频", status: "failed" }]);
-    mocks.listTranscriptionJobs.mockResolvedValue([]);
+  it("offers controlled cleanup for a failed managed task with terminal job history", async () => {
+    mocks.listMediaAssets.mockResolvedValue([{ ...assets[0], media_id: "media-upload-failed", title: "上传失败视频", status: "failed", available_actions: ["retry_transcription", "delete_failed"], disabled_actions: {} }]);
+    mocks.listTranscriptionJobs.mockResolvedValue([{ ...succeededJob, media_id: "media-upload-failed", status: "failed" }]);
     render(<AdminMediaPage />);
 
-    const remove = await screen.findByRole("button", { name: "完整删除" });
+    const remove = await screen.findByRole("button", { name: "清理失败任务" });
     fireEvent.click(remove);
-    expect(screen.getByRole("dialog", { name: "完整删除失败视频" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "完整删除" }));
+    expect(screen.getByRole("dialog", { name: "清理失败任务" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "确认清理" }));
 
     await waitFor(() => expect(mocks.deleteFailedMediaAsset).toHaveBeenCalledWith("media-upload-failed"));
     await waitFor(() => expect(screen.queryByText("上传失败视频")).not.toBeInTheDocument());
+  });
+
+  it("retries a shared-source reservation failure without a transcription job", async () => {
+    mocks.listMediaAssets.mockResolvedValue([{
+      ...assets[0],
+      media_id: "media-shared-failed",
+      title: "共享培训视频",
+      status: "failed",
+      storage_kind: "external",
+      available_actions: ["retry_transcription", "delete_failed"],
+      disabled_actions: {},
+    }]);
+    mocks.listTranscriptionJobs.mockResolvedValue([]);
+    mocks.retryTranscription.mockResolvedValue({
+      ...succeededJob,
+      media_id: "media-shared-failed",
+      status: "pending",
+    });
+    render(<AdminMediaPage embedded />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "重试" }));
+    await waitFor(() => expect(mocks.retryTranscription).toHaveBeenCalledWith(
+      "media-shared-failed",
+      expect.any(String),
+    ));
+  });
+
+  it("cleans a shared-source failure while explaining that the original is preserved", async () => {
+    mocks.listMediaAssets.mockResolvedValue([{
+      ...assets[0],
+      media_id: "media-shared-failed",
+      title: "共享培训视频",
+      status: "failed",
+      storage_kind: "external",
+      available_actions: ["retry_transcription", "delete_failed"],
+      disabled_actions: {},
+    }]);
+    mocks.listTranscriptionJobs.mockResolvedValue([]);
+    mocks.deleteFailedMediaAsset.mockResolvedValue({ media_id: "media-shared-failed", cleanup_mode: "reset" });
+    render(<AdminMediaPage embedded />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "清理失败任务" }));
+    expect(screen.getByText(/不会删除共享目录原文件/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "确认清理" }));
+
+    await waitFor(() => expect(mocks.deleteFailedMediaAsset).toHaveBeenCalledWith("media-shared-failed"));
+  });
+
+  it("uses backend bulk actions and retains itemized partial failures", async () => {
+    const failedAssets = [
+      { ...assets[0], media_id: "media-failed-1", title: "失败视频一", status: "failed", available_actions: ["retry_transcription", "delete_failed"], disabled_actions: {} },
+      { ...assets[0], media_id: "media-failed-2", title: "失败视频二", status: "failed", available_actions: ["retry_transcription", "delete_failed"], disabled_actions: {} },
+    ];
+    mocks.listMediaAssets.mockResolvedValue(failedAssets);
+    mocks.listTranscriptionJobs.mockResolvedValue([]);
+    mocks.bulkRetryTranscriptions.mockResolvedValue({
+      items: [
+        { media_id: "media-failed-1", status: "succeeded", transcription_job_id: "job-new" },
+        { media_id: "media-failed-2", status: "failed", message: "共享文件暂时不可读" },
+      ],
+      succeeded: 1,
+      failed: 1,
+    });
+    render(<AdminMediaPage embedded />);
+    fireEvent.click(await screen.findByRole("checkbox", { name: "选择当前页视频" }));
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "重试所选（2）" }));
+
+    await waitFor(() => expect(mocks.bulkRetryTranscriptions).toHaveBeenCalledWith(
+      ["media-failed-1", "media-failed-2"],
+      expect.any(String),
+    ));
+    expect(await screen.findByText("共享文件暂时不可读")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "清理所选（2）" }));
+    expect(screen.getByRole("dialog", { name: "清理 2 个失败任务" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "确认批量清理" }));
+    await waitFor(() => expect(mocks.bulkDeleteFailedMediaAssets).toHaveBeenCalledWith([
+      "media-failed-1",
+      "media-failed-2",
+    ]));
   });
 
   it("uses the managed-content upload entry when embedded as transcription tasks", async () => {
@@ -612,7 +703,7 @@ describe("AdminMediaPage wizard", () => {
     const failed = {
       ...succeededJob,
       status: "failed" as const,
-      failure: { code: "invalid_media", message: "视频不可解析", retryable: false, recommended_action: "更换视频" },
+      failure: { code: "provider_unavailable", message: "服务暂时不可用", retryable: true, recommended_action: "稍后重试" },
     };
     mocks.listMediaAssets.mockResolvedValue([{
       ...assets[0],
