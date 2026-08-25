@@ -34,7 +34,9 @@ from src.transcription.profile_catalog import (
     QWEN3_ASR_PROVIDER_KEY,
     WHISPERX_PROVIDER_KEY,
 )
+from src.transcription.profile import ProfileOperation
 from src.transcription.provider_registry import ProviderRegistry
+from src.transcription.scheme import SchemeValidationError
 from src.transcription.types import ContractValidationError, TranscriptionJobStatus
 
 from .auth import CurrentUser, require_admin, require_csrf_admin
@@ -147,7 +149,32 @@ def build_transcription_service() -> TranscriptionApplicationService:
         ),
         artifacts=LocalTranscriptionArtifactStore(TRANSCRIPTION_ARTIFACT_DIR),
         job_timeout_ms=ASR_JOB_TIMEOUT_SECONDS * 1000,
-)
+    )
+
+
+def resolve_admitted_retry_scheme(
+    conn: sqlite3.Connection,
+    preferred_scheme_id: str | None,
+    *,
+    service: TranscriptionApplicationService | None = None,
+) -> tuple[str, str] | None:
+    resolver = service or build_transcription_service()
+    candidate_ids: list[str] = []
+    if preferred_scheme_id:
+        candidate_ids.append(preferred_scheme_id)
+    candidate_ids.extend(
+        str(scheme["id"])
+        for scheme in available_schemes(conn)
+        if str(scheme["id"]) not in candidate_ids
+    )
+    for scheme_id in candidate_ids:
+        try:
+            scheme, profile_id = resolve_scheme_runtime(conn, scheme_id)
+            resolver.resolve_profile(profile_id, ProfileOperation.new_attempt)
+        except (ContractValidationError, SchemeValidationError):
+            continue
+        return str(scheme["id"]), profile_id
+    return None
 
 
 _TRANSCRIPTION_FAILURES: dict[str, tuple[str, bool]] = {
@@ -545,13 +572,21 @@ def _retry_media_job(
     admin: CurrentUser,
     profile_id: str | None = None,
 ) -> TranscriptionJobDTO:
-    if not ASR_ENABLED:
-        raise HTTPException(status_code=503, detail="自动转录当前未启用")
+    if not ASR_ENABLED or not ASR_SERVICE_TOKEN:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "transcription_service_unavailable",
+                "message": "自动转录当前不可用。",
+                "retryable": True,
+            },
+        )
     try:
         uuid.UUID(media_id)
         uuid.UUID(request_idempotency_key)
     except (ValueError, AttributeError):
         raise HTTPException(status_code=400, detail="媒体或重试幂等键不合法")
+    service: TranscriptionApplicationService | None = None
     conn = connect()
     try:
         existing = conn.execute(
@@ -615,9 +650,26 @@ def _retry_media_job(
             and media["default_scheme_id"]
         ):
             retry_kind = "external_reservation"
-            retry_scheme_id = str(media["default_scheme_id"])
-            retry_profile_id = _check_start_scheme(conn, retry_scheme_id)
-            if profile_id is not None and profile_id not in {retry_scheme_id, retry_profile_id}:
+            preferred_scheme_id = str(media["default_scheme_id"])
+            service = build_transcription_service()
+            resolved_scheme = resolve_admitted_retry_scheme(
+                conn, preferred_scheme_id, service=service
+            )
+            if resolved_scheme is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "transcription_scheme_unavailable",
+                        "message": "当前没有可用的转录方案，请先调整共享目录的默认转录方案。",
+                        "retryable": False,
+                    },
+                )
+            retry_scheme_id, retry_profile_id = resolved_scheme
+            if profile_id is not None and profile_id not in {
+                preferred_scheme_id,
+                retry_scheme_id,
+                retry_profile_id,
+            }:
                 raise HTTPException(status_code=409, detail="重试必须使用共享来源的默认转录方案")
             previous_job_id = None
         else:
@@ -625,7 +677,7 @@ def _retry_media_job(
     finally:
         conn.close()
     try:
-        service = build_transcription_service()
+        service = service or build_transcription_service()
         if retry_kind == "existing_job":
             job = service.create_retry_job(
                 previous_job_id=previous_job_id,
@@ -641,7 +693,14 @@ def _retry_media_job(
                 scheme_id=retry_scheme_id,
             )
     except StoreConflictError:
-        raise HTTPException(status_code=409, detail="转录任务状态发生冲突")
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "transcription_state_conflict",
+                "message": "转录任务状态已变化，请刷新列表后重试。",
+                "retryable": True,
+            },
+        )
     except (ContractValidationError, OSError):
         raise HTTPException(status_code=409, detail="视频音频准备失败，请检查视频后重试")
     latest_job = job

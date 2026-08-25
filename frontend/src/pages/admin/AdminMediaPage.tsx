@@ -245,6 +245,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const [replacementProgress, setReplacementProgress] = useState(0);
   const [replacementBusy, setReplacementBusy] = useState(false);
   const [replacementError, setReplacementError] = useState<string | null>(null);
+  const errorAlertRef = useRef<HTMLDivElement>(null);
   const retryIdempotencyKeys = useRef(new Map<string, string>());
   const previousJobStatuses = useRef(new Map<string, string>());
   const { assets: mediaAssets, loading, error: loadError, refresh, removeAsset } = useAdminMediaAssets();
@@ -284,6 +285,11 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
       })
       .catch((cause) => setUploadError(cause instanceof Error ? cause.message : "目录加载失败"));
   }, []);
+  useEffect(() => {
+    if (uploadError && typeof errorAlertRef.current?.scrollIntoView === "function") {
+      errorAlertRef.current.scrollIntoView({ block: "nearest" });
+    }
+  }, [uploadError]);
 
   const enabledSchemes = schemes.filter((item) => item.enabled && !item.archived && item.availability === "available");
   const editingItem = pending.find((item) => item.id === editingId);
@@ -1032,7 +1038,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
         </div>
       )}
 
-      {uploadError && <Alert variant="destructive" role="alert"><AlertTitle>操作失败</AlertTitle><AlertDescription>{uploadError}</AlertDescription></Alert>}
+      {uploadError && <div ref={errorAlertRef}><Alert variant="destructive" role="alert"><AlertTitle>操作失败</AlertTitle><AlertDescription>{uploadError}</AlertDescription></Alert></div>}
 
       <section className="space-y-5" aria-labelledby="media-assets-title">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="媒体快捷筛选">

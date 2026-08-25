@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   listExternalMediaEntries: vi.fn(),
   enqueueExternalMedia: vi.fn(),
 }));
+const scrollIntoView = vi.fn();
 
 vi.mock("../../api/client", () => ({ api: mocks }));
 
@@ -123,10 +124,15 @@ async function addVideosAndOpenMode(files: File[], mode: "自动转录" | "人�
 describe("AdminMediaPage wizard", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    delete (Element.prototype as { scrollIntoView?: Element["scrollIntoView"] }).scrollIntoView;
   });
 
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
     window.history.replaceState({}, "", "/admin/media");
     let sequence = 0;
     vi.stubGlobal("crypto", {
@@ -588,6 +594,30 @@ describe("AdminMediaPage wizard", () => {
       "media-shared-failed",
       expect.any(String),
     ));
+  });
+
+  it("shows the backend retry reason for a shared-source reservation failure", async () => {
+    mocks.listMediaAssets.mockResolvedValue([{
+      ...assets[0],
+      media_id: "media-shared-failed",
+      title: "共享培训视频",
+      status: "failed",
+      storage_kind: "external",
+      available_actions: ["retry_transcription", "delete_failed"],
+      disabled_actions: {},
+    }]);
+    mocks.listTranscriptionJobs.mockResolvedValue([]);
+    mocks.retryTranscription.mockRejectedValue(
+      new Error("当前没有可用的转录方案，请先调整共享目录的默认转录方案。"),
+    );
+    render(<AdminMediaPage embedded />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "重试" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "当前没有可用的转录方案，请先调整共享目录的默认转录方案。",
+    );
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
   });
 
   it("cleans a shared-source failure while explaining that the original is preserved", async () => {
