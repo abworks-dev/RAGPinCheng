@@ -853,6 +853,66 @@ test.describe("转录任务", () => {
 });
 
 test.describe("索引任务", () => {
+  test("select all covers more than twenty publication tasks and can be cleared", async ({ page }) => {
+    await installAdminRoutes(page);
+    const jobs = Array.from({ length: 25 }, (_, index) => ({
+      id: `bulk-limit-job-${index + 1}`,
+      publication_id: `bulk-limit-publication-${index + 1}`,
+      version_id: `bulk-limit-version-${index + 1}`,
+      attempt_number: 1,
+      status: "failed",
+      error_code: "parser_request_failed",
+      error_summary: "文档解析服务请求失败，请稍后重试。",
+      failure: { code: "parser_request_failed", message: "文档解析服务请求失败。", retryable: true, recommended_action: "请稍后重试。" },
+      attempt_count: 1,
+      created_at: 1700000000,
+      started_at: 1700000010,
+      finished_at: 1700000020,
+      updated_at: 1700000020,
+      title: `批量上限回归任务 ${index + 1}`,
+      original_filename: `bulk-limit-${index + 1}.pdf`,
+      doc_type: "pdf",
+      category_id: "cat-03",
+      category_label: "03 公司内部标准",
+      category_path: "03 公司内部标准 / 01 建模标准",
+      version_number: 1,
+      file_size: 2048,
+      source_origin: "legacy",
+      is_archived: false,
+      is_current_head: true,
+      is_latest_attempt: true,
+      parent_count: null,
+      preview_parent_id: null,
+      task_type: "document",
+      task_type_label: "普通资料",
+      media_id: null,
+      retryable: true,
+    }));
+    await page.route("**/api/admin/content/publication-jobs**", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ jobs, total: jobs.length, status_counts: { processing: 0, published: 0, failed: jobs.length } }),
+    }));
+    await page.goto("/admin");
+    if (page.viewportSize()!.width < 1024) {
+      await page.getByRole("button", { name: "展开管理功能" }).click();
+    }
+    await page.getByRole("link", { name: "资料管理", exact: true }).click();
+    await page.getByRole("tab", { name: "发布任务", exact: true }).click();
+    await expect(page.getByText("批量上限回归任务 25", { exact: true })).toBeVisible();
+    await expectNoBodyOverflow(page);
+
+    if (page.viewportSize()!.width < 1024) return;
+    const selectPage = page.getByRole("checkbox", { name: "全选当前页索引任务" });
+    await selectPage.click();
+    await expect(selectPage).toBeChecked();
+    await expect(page.getByRole("checkbox", { name: /选择批量上限回归任务/ })).toHaveCount(25);
+    await expect(page.getByRole("button", { name: "批量操作（25）" })).toBeEnabled();
+
+    await selectPage.click();
+    await expect(selectPage).not.toBeChecked();
+    await expect(page.getByRole("button", { name: "批量操作" })).toBeDisabled();
+  });
+
   test("normal layout keeps publication actions, selection, and columns aligned", async ({ page }) => {
     await openTab(page, "索引任务");
     await expect(page.getByRole("heading", { name: "发布任务" })).toBeVisible();
