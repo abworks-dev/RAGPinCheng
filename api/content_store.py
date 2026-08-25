@@ -1714,7 +1714,7 @@ def register_uploaded_document(
         """INSERT INTO content_versions
            (id,item_id,version_number,object_sha256,original_filename,doc_type,source_origin,
             source_batch_id,source_rel_path,lifecycle_status,created_by,created_at,updated_at,title)
-           VALUES (?,?,1,?,?,?,?,?,?, 'draft',?,?,?,?)""",
+           VALUES (?,?,1,?,?,?,?,?,?, 'approved',?,?,?,?)""",
         (
             version_id,
             item_id,
@@ -2680,7 +2680,7 @@ def create_content_revision(
             """INSERT INTO content_versions
                (id,item_id,version_number,object_sha256,original_filename,doc_type,source_origin,
                 source_batch_id,source_rel_path,lifecycle_status,created_by,created_at,updated_at,title)
-               VALUES (?,?,?,?,?,?,?,?,?,'draft',?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,'approved',?,?,?,?)""",
             (
                 version_id,
                 item_id,
