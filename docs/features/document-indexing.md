@@ -41,6 +41,7 @@
 - Parent、Child、parents.sqlite 和 Qdrant payload 携带 nullable 的 `content_item_id`、`content_version_id` 和 `category_key`；
 - 无可识别 Markdown 标题的文档开头区段在索引内部使用稳定 `section_path="(intro)"`；该值参与既有 Parent/Child 身份与向量上下文，用户界面将其显示为“文档开头”，不要求重建旧索引；
 - Parent SQLite 保存 Office 定位元数据；检索结果与来源 DTO 贯通 Excel 工作表/单元格、PowerPoint 页码和 Word 段落锚点，并在字段缺失时安全回退到章节定位；
+- PDF 解析缓存同时保留版本化定位侧车，记录文本证据到原始页码的映射；Parent/Child、SQLite、Qdrant 和来源 DTO 贯通 `page_number/page_end`，预览按页跳转并在文本层可用时高亮；
 - 检索按 `content_item_heads` 过滤受管版本，`compat` 模式继续允许旧的未版本化索引；
 - 发布时生成保留原扩展名的工作副本供解析和 Office 预览，引用接口通过稳定 `content://` 身份回取正式对象；
 - 受管 PDF 在 `data/parsed/managed/<content_version_id>/` 中使用独立解析缓存和临时目录，不依赖旧 `docs` 相对路径；空密码加密 PDF 使用临时解密副本解析且不修改正式对象，真正需要密码的 PDF 明确失败；MinerU 云解析结果原子写入 `document.md`，同一版本重试复用该缓存；

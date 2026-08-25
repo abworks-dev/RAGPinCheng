@@ -1243,6 +1243,12 @@ class SourceDTO(BaseModel):
     cell_range: str | None = None
     slide_number: int | None = None
     paragraph_anchor: str | None = None
+    page_number: int | None = None
+    page_end: int | None = None
+    topic_id: str | None = None
+    heading_anchor: str | None = None
+    location_quote: str | None = None
+    location_confidence: str | None = None
 
 
 class MediaAssetDTO(BaseModel):
@@ -1948,4 +1954,10 @@ def source_to_dto(d: dict[str, Any]) -> SourceDTO:
         cell_range=d.get("cell_range"),
         slide_number=d.get("slide_number"),
         paragraph_anchor=d.get("paragraph_anchor"),
+        page_number=d.get("page_number"),
+        page_end=d.get("page_end"),
+        topic_id=d.get("topic_id"),
+        heading_anchor=d.get("heading_anchor"),
+        location_quote=d.get("location_quote"),
+        location_confidence=d.get("location_confidence"),
     )

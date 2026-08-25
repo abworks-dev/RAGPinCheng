@@ -251,7 +251,24 @@ export function PdfPreview() {
     setNumPages(pdfDocument.numPages);
     setLoading(false);
     setLoadError(null);
-  }, []);
+    if (state.pageNumber > pdfDocument.numPages) setPage(pdfDocument.numPages);
+    if (state.pageNumber < 1) setPage(1);
+  }, [setPage, state.pageNumber]);
+
+  const highlightLocationQuote = useCallback(() => {
+    const quote = state.location.quote?.replace(/\s+/g, "").toLocaleLowerCase();
+    if (!quote || !viewportRef.current) return;
+    const terms = state.location.quote?.split(/\s+|[，。；：、,.!?（）()]/).filter((term) => term.length >= 4).sort((a, b) => b.length - a.length) || [];
+    const spans = Array.from(viewportRef.current.querySelectorAll<HTMLElement>(".react-pdf__Page__textContent span"));
+    const target = spans.find((span) => {
+      const text = span.innerText.replace(/\s+/g, "").toLocaleLowerCase();
+      return terms.some((term) => text.includes(term.toLocaleLowerCase())) || (text.length >= 8 && quote.includes(text));
+    });
+    if (target) {
+      target.classList.add("rounded-sm", "bg-yellow-300/70", "outline", "outline-1", "outline-yellow-600");
+      target.scrollIntoView({ block: "center", inline: "center" });
+    }
+  }, [state.location.quote]);
 
   const onDocumentLoadError = useCallback(() => {
     prefetchGenerationRef.current += 1;
@@ -349,7 +366,9 @@ export function PdfPreview() {
         : isXMind
           ? "XMind 思维导图"
         : numPages
-          ? `${state.pageNumber} / ${numPages} 页`
+          ? state.location.pageEnd && state.location.pageEnd > state.pageNumber
+            ? `${state.pageNumber} / ${numPages} 页 · 证据跨至第 ${state.location.pageEnd} 页`
+            : `${state.pageNumber} / ${numPages} 页`
           : "PDF 文档";
 
   const toolbar = (
@@ -471,6 +490,7 @@ export function PdfPreview() {
             <DocxPreview
               parentId={state.parentId!}
               paragraphAnchor={state.location.paragraphAnchor}
+              quote={state.location.quote}
               zoom={resourceZoom}
               onLoad={() => setLoading(false)}
               onError={() => setLoading(false)}
@@ -506,6 +526,7 @@ export function PdfPreview() {
                       pageNumber={state.pageNumber}
                       scale={scale}
                       onLoadSuccess={onPageLoadSuccess}
+                      onRenderTextLayerSuccess={highlightLocationQuote}
                       renderTextLayer={true}
                       renderAnnotationLayer={true}
                       className="shadow-md"

@@ -9,6 +9,14 @@ export interface PdfPreviewLocation {
   slideNumber?: number | null;
   /** DOCX: paragraph anchor hash to scroll to */
   paragraphAnchor?: string | null;
+  /** Evidence text used when a structural anchor is unavailable. */
+  quote?: string | null;
+  /** Last page when evidence spans multiple PDF pages. */
+  pageEnd?: number | null;
+  /** Markdown heading anchor. */
+  headingAnchor?: string | null;
+  /** XMind topic identifier. */
+  topicId?: string | null;
 }
 
 export type PdfPreviewReturnTarget = "managed-content-detail" | "managed-content-review";

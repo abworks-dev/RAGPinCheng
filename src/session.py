@@ -356,6 +356,12 @@ class ChatSession:
                 "cell_range": p.cell_range,
                 "slide_number": p.slide_number,
                 "paragraph_anchor": p.paragraph_anchor,
+                "page_number": p.page_number,
+                "page_end": p.page_end,
+                "topic_id": p.topic_id,
+                "heading_anchor": p.heading_anchor,
+                "location_quote": p.location_quote,
+                "location_confidence": p.location_confidence,
             }
             for p in parents
         ]

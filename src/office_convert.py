@@ -500,7 +500,7 @@ def _convert_xlsx_to_markdown_impl(path: Path) -> tuple[str, list[dict[str, Any]
 
     # Extract metadata for citation jumping
     sheets_metadata = [
-        {"sheet_name": c["sheet_name"], "cell_range": c["cell_range"]}
+        {"sheet_name": c["sheet_name"], "cell_range": c["cell_range"], "text": c["markdown"]}
         for c in chunks
     ]
 

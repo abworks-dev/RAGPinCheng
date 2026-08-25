@@ -54,6 +54,7 @@ from .ingest import (
     _safe_stem,
     _transcript_title,
 )
+from .document_locations import DocumentLocation, write_location_sidecar
 from .office_convert import (
     _md_path_for_office,
     convert_docx_to_markdown,
@@ -197,6 +198,7 @@ def _build_pdf_doc(
     parsed_dir.mkdir(parents=True, exist_ok=True)
     stem = cache_stem or _safe_stem(source_path)
     md_path = parsed_dir / f"{stem}.md"
+    location_map_path = parsed_dir / f"{stem}.locations.json"
     # Match `ingest_all`'s preference: cloud if MINERU_API_KEY is set,
     # otherwise the local CLI.
     if md_path.exists():
@@ -214,13 +216,16 @@ def _build_pdf_doc(
             source_path,
             on_status=on_status,
             split_dir=parsed_dir / "split",
+            location_output=location_map_path,
         )
         if not markdown.strip():
             raise ValueError("parser_result_invalid")
         _write_text_atomic(md_path, markdown)
     else:
         on_status("parsing")
-        markdown = _local_parse(source_path, work_dir=parsed_dir / "work")
+        markdown = _local_parse(
+            source_path, work_dir=parsed_dir / "work", location_output=location_map_path,
+        )
         if not markdown.strip():
             raise ValueError("parser_result_invalid")
         _write_text_atomic(md_path, markdown)
@@ -232,6 +237,7 @@ def _build_pdf_doc(
         markdown_path=md_path,
         doc_type="pdf",
         company=company,
+        location_map_path=location_map_path,
     )
 
 
@@ -295,14 +301,20 @@ def _build_docx_doc(
     """Parse a DOCX via Docling Slim and cache the markdown under data/parsed/."""
     parsed_dir.mkdir(parents=True, exist_ok=True)
     md_path = _md_path_for_office(source_path, parsed_dir)
+    location_map_path = md_path.with_suffix(".locations.json")
 
     if md_path.exists():
         on_status("parsing")
         markdown = md_path.read_text(encoding="utf-8")
-        anchors: list = []
+        from .office_convert import _extract_anchors_from_markdown
+        anchors = _extract_anchors_from_markdown(markdown)
     else:
         markdown, anchors = convert_docx_to_markdown(source_path)
         md_path.write_text(markdown, encoding="utf-8")
+    write_location_sidecar(
+        location_map_path,
+        (DocumentLocation(text=item["text"], paragraph_anchor=item["anchor"]) for item in anchors),
+    )
 
     category, company = _derive_category_and_company(source_path)
     return ParsedDoc(
@@ -312,6 +324,7 @@ def _build_docx_doc(
         markdown_path=md_path,
         doc_type="docx",
         company=company,
+        location_map_path=location_map_path,
     )
 
 
@@ -330,10 +343,12 @@ def _build_xlsx_doc(
     """
     parsed_dir.mkdir(parents=True, exist_ok=True)
     md_path = _md_path_for_office(source_path, parsed_dir)
+    location_map_path = md_path.with_suffix(".locations.json")
 
     if md_path.exists():
         on_status("parsing")
         markdown = md_path.read_text(encoding="utf-8")
+        metadata = []
     else:
         # Try to recalculate formulas via LibreOffice
         recalc_path = None
@@ -345,13 +360,18 @@ def _build_xlsx_doc(
             convert_path = source_path
 
         try:
-            markdown, _meta = convert_xlsx_to_markdown(convert_path)
+            markdown, metadata = convert_xlsx_to_markdown(convert_path)
         finally:
             # Clean up the recalculated temp file
             if recalc_path and recalc_path.exists():
                 recalc_path.unlink()
 
         md_path.write_text(markdown, encoding="utf-8")
+    if metadata:
+        write_location_sidecar(
+            location_map_path,
+            (DocumentLocation(text=item.get("text", item.get("markdown", "")), sheet_name=item["sheet_name"], cell_range=item["cell_range"]) for item in metadata),
+        )
 
     category, company = _derive_category_and_company(source_path)
     return ParsedDoc(
@@ -361,6 +381,7 @@ def _build_xlsx_doc(
         markdown_path=md_path,
         doc_type="xlsx",
         company=company,
+        location_map_path=location_map_path,
     )
 
 
@@ -378,18 +399,25 @@ def _build_pptx_doc(
     """
     parsed_dir.mkdir(parents=True, exist_ok=True)
     md_path = _md_path_for_office(source_path, parsed_dir)
+    location_map_path = md_path.with_suffix(".locations.json")
 
     if md_path.exists():
         on_status("parsing")
         markdown = md_path.read_text(encoding="utf-8")
+        slides = []
     else:
         try:
             on_status("parsing")
-            markdown, _slides = convert_pptx_to_markdown(source_path)
+            markdown, slides = convert_pptx_to_markdown(source_path)
             md_path.write_text(markdown, encoding="utf-8")
         except Exception as exc:
             logger.error("PPTX parsing failed: %s", exc)
             raise
+    if slides:
+        write_location_sidecar(
+            location_map_path,
+            (DocumentLocation(text=item["text"], page_number=item["slide_number"], slide_number=item["slide_number"]) for item in slides),
+        )
 
     preview_path = source_path.with_suffix(".preview.pdf")
     if write_preview and not is_valid_pdf_file(preview_path):
@@ -406,6 +434,7 @@ def _build_pptx_doc(
         markdown_path=md_path,
         doc_type="pptx",
         company=company,
+        location_map_path=location_map_path,
     )
 
 
