@@ -48,6 +48,9 @@ from src.office_convert import (
     PptxPreviewFileTooLargeError,
     convert_pptx_to_pdf,
     is_valid_pdf_file,
+    is_valid_xlsx_file,
+    recalculate_xlsx,
+    write_xlsx_preview,
 )
 from src.xmind_parser import XMindParseError, XMindTopic, parse_xmind
 
@@ -1896,7 +1899,15 @@ def _content_item_dto(
                     content_version_id=row["version_id"],
                     filename=row["original_filename"],
                 )
-                preview_status = "ready" if is_valid_pdf_file(source_path.with_suffix(".preview.pdf")) else "missing"
+                preview_status = (
+                    "ready"
+                    if (
+                        is_valid_pdf_file(source_path.with_suffix(".preview.pdf"))
+                        if row["doc_type"] in {"ppt", "pptx"}
+                        else is_valid_xlsx_file(source_path.with_suffix(".preview.xlsx"))
+                    )
+                    else "missing"
+                )
             else:
                 preview_status = "ready"
             if preview_status == "ready":
@@ -2785,7 +2796,7 @@ def regenerate_office_preview(
     user: CurrentUser = Depends(require_content_permission("item.publish", csrf=True)),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedPreviewDTO:
-    """Regenerate the derived PDF preview for the current published Office file."""
+    """Regenerate the derived preview for the current published Office file."""
     _require_feature()
     if not OFFICE_PROCESSING_ENABLED:
         raise HTTPException(
@@ -2804,7 +2815,7 @@ def regenerate_office_preview(
     if row is None:
         raise HTTPException(status_code=404, detail="资料不存在")
     if row["doc_type"] not in {"ppt", "pptx", "xls", "xlsx"}:
-        raise HTTPException(status_code=400, detail="只有 PPT、PPTX、XLS 或 XLSX 文件需要生成 PDF 预览")
+        raise HTTPException(status_code=400, detail="只有 PPT、PPTX、XLS 或 XLSX 文件需要生成预览")
     if row["lifecycle_status"] != "published" or row["current_version_id"] != version_id:
         raise HTTPException(status_code=409, detail="只有当前已发布版本可以重新生成预览")
 
@@ -2821,8 +2832,17 @@ def regenerate_office_preview(
     )
     if not source_path.is_file() or source_path.is_symlink():
         raise HTTPException(status_code=404, detail="已发布的 Office 原文件不可用")
+    preview_format = "pdf"
     try:
-        convert_pptx_to_pdf(source_path)
+        if row["doc_type"] in {"ppt", "pptx"}:
+            convert_pptx_to_pdf(source_path)
+        else:
+            recalculated_path = recalculate_xlsx(source_path)
+            try:
+                write_xlsx_preview(source_path, recalculated_path.read_bytes())
+            finally:
+                recalculated_path.unlink(missing_ok=True)
+            preview_format = "xlsx"
     except httpx.HTTPError as exc:
         logger.warning("Office preview service unavailable for version %s: %s", version_id, exc)
         raise HTTPException(
@@ -2851,7 +2871,7 @@ def regenerate_office_preview(
         actor_user_id=user.id,
         item_id=row["item_id"],
         version_id=version_id,
-        metadata={"preview_format": "pdf"},
+        metadata={"preview_format": preview_format},
     )
     conn.commit()
     return ManagedPreviewDTO(

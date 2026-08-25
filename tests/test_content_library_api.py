@@ -4184,6 +4184,209 @@ def test_published_pptx_preview_status_and_regeneration(content_api, monkeypatch
     assert ready["preview_parent_id"] == "parent-pptx"
 
 
+def test_published_xlsx_preview_status_and_regeneration(content_api, monkeypatch):
+    client, sessions, _queued, db_path = content_api
+    office_bytes = io.BytesIO()
+    with zipfile.ZipFile(office_bytes, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types />")
+        archive.writestr("xl/workbook.xml", "<workbook />")
+    upload = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[
+            (
+                "files",
+                (
+                    "schedule.xlsx",
+                    office_bytes.getvalue(),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+            ),
+        ],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+    version_id = upload["version_id"]
+    client.post(
+        f"/api/admin/content/versions/{version_id}/submit",
+        json={},
+        **_auth(sessions, "organizer", csrf=True),
+    )
+    client.post(
+        f"/api/admin/content/versions/{version_id}/review",
+        json={"approved": True},
+        **_auth(sessions, "reviewer", csrf=True),
+    )
+    publication = client.post(
+        f"/api/admin/content/versions/{version_id}/publish",
+        json={},
+        **_auth(sessions, "publisher", csrf=True),
+    ).json()
+
+    now = int(time.time())
+    conn = connect(db_path)
+    conn.execute(
+        "UPDATE content_index_jobs SET status='done',finished_at=?,updated_at=? WHERE id=?",
+        (now, now, publication["index_job_id"]),
+    )
+    conn.execute(
+        "UPDATE content_publications SET status='published',published_at=?,updated_at=? WHERE id=?",
+        (now, now, publication["publication_id"]),
+    )
+    conn.execute(
+        "UPDATE content_versions SET lifecycle_status='published',updated_at=? WHERE id=?",
+        (now, version_id),
+    )
+    conn.execute(
+        "INSERT INTO content_item_heads(item_id,current_version_id,publication_id,updated_at) VALUES (?,?,?,?)",
+        (upload["item_id"], version_id, publication["publication_id"], now),
+    )
+    conn.commit()
+    conn.close()
+
+    source = routes_content._storage.published_source_path(
+        content_item_id=upload["item_id"],
+        content_version_id=version_id,
+        filename="schedule.xlsx",
+    )
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"synthetic-xlsx")
+    monkeypatch.setattr(
+        routes_content,
+        "list_managed_version_index_summaries",
+        lambda version_ids: {
+            candidate: routes_content.ManagedVersionIndexSummary(
+                parent_count=2,
+                preview_parent_id="parent-xlsx",
+            )
+            for candidate in version_ids
+        },
+    )
+
+    listing = client.get(
+        "/api/admin/content/items-page?category_id=cat-03",
+        **_auth(sessions, "publisher"),
+    ).json()["items"][0]
+    assert listing["preview_status"] == "missing"
+    assert listing["preview_parent_id"] is None
+
+    preview_url = f"/api/admin/content/versions/{version_id}/preview"
+    assert client.post(preview_url, json={}, **_auth(sessions, "organizer", csrf=True)).status_code == 403
+
+    recalculated = source.parent / "recalculated.xlsx"
+    recalculated.write_bytes(b"PK\x03\x04recalculated")
+    monkeypatch.setattr(routes_content, "recalculate_xlsx", lambda _path: recalculated)
+
+    regenerated = client.post(
+        preview_url,
+        json={},
+        **_auth(sessions, "publisher", csrf=True),
+    )
+    assert regenerated.status_code == 200
+    assert regenerated.json() == {
+        "version_id": version_id,
+        "preview_parent_id": "parent-xlsx",
+        "preview_status": "ready",
+    }
+    assert source.with_suffix(".preview.xlsx").read_bytes() == b"PK\x03\x04recalculated"
+
+    ready = client.get(
+        "/api/admin/content/items-page?category_id=cat-03",
+        **_auth(sessions, "publisher"),
+    ).json()["items"][0]
+    assert ready["preview_status"] == "ready"
+    assert ready["preview_parent_id"] == "parent-xlsx"
+
+
+def test_published_xlsx_preview_failure_preserves_existing_preview(content_api, monkeypatch):
+    client, sessions, _queued, db_path = content_api
+    office_bytes = io.BytesIO()
+    with zipfile.ZipFile(office_bytes, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types />")
+        archive.writestr("xl/workbook.xml", "<workbook />")
+    upload = client.post(
+        "/api/admin/content/uploads",
+        data={"category_id": "cat-03"},
+        files=[
+            (
+                "files",
+                (
+                    "schedule.xlsx",
+                    office_bytes.getvalue(),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+            ),
+        ],
+        **_auth(sessions, "organizer", csrf=True),
+    ).json()["entries"][0]
+    version_id = upload["version_id"]
+    client.post(
+        f"/api/admin/content/versions/{version_id}/submit",
+        json={},
+        **_auth(sessions, "organizer", csrf=True),
+    )
+    client.post(
+        f"/api/admin/content/versions/{version_id}/review",
+        json={"approved": True},
+        **_auth(sessions, "reviewer", csrf=True),
+    )
+    publication = client.post(
+        f"/api/admin/content/versions/{version_id}/publish",
+        json={},
+        **_auth(sessions, "publisher", csrf=True),
+    ).json()
+
+    now = int(time.time())
+    conn = connect(db_path)
+    conn.execute(
+        "UPDATE content_index_jobs SET status='done',finished_at=?,updated_at=? WHERE id=?",
+        (now, now, publication["index_job_id"]),
+    )
+    conn.execute(
+        "UPDATE content_publications SET status='published',published_at=?,updated_at=? WHERE id=?",
+        (now, now, publication["publication_id"]),
+    )
+    conn.execute(
+        "UPDATE content_versions SET lifecycle_status='published',updated_at=? WHERE id=?",
+        (now, version_id),
+    )
+    conn.execute(
+        "INSERT INTO content_item_heads(item_id,current_version_id,publication_id,updated_at) VALUES (?,?,?,?)",
+        (upload["item_id"], version_id, publication["publication_id"], now),
+    )
+    conn.commit()
+    conn.close()
+
+    source = routes_content._storage.published_source_path(
+        content_item_id=upload["item_id"],
+        content_version_id=version_id,
+        filename="schedule.xlsx",
+    )
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"synthetic-xlsx")
+    existing_preview = source.with_suffix(".preview.xlsx")
+    existing_preview.write_bytes(b"PK\x03\x04existing-preview")
+    monkeypatch.setattr(
+        routes_content,
+        "list_managed_version_index_summaries",
+        lambda version_ids: {
+            candidate: routes_content.ManagedVersionIndexSummary(
+                parent_count=2,
+                preview_parent_id="parent-xlsx",
+            )
+            for candidate in version_ids
+        },
+    )
+    monkeypatch.setattr(routes_content, "recalculate_xlsx", lambda _path: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    response = client.post(
+        f"/api/admin/content/versions/{version_id}/preview",
+        json={},
+        **_auth(sessions, "publisher", csrf=True),
+    )
+    assert response.status_code == 502
+    assert existing_preview.read_bytes() == b"PK\x03\x04existing-preview"
+
+
 def test_managed_index_jobs_hide_archived_items_by_default(content_api):
     client, sessions, _queued, db_path = content_api
     upload = client.post(
