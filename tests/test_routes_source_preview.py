@@ -42,12 +42,15 @@ def source_preview_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     sources = {
         "pdf-parent": docs_dir / "guide.pdf",
         "docx-parent": docs_dir / "guide.docx",
-        "xlsx-parent": docs_dir / "schedule.xlsx",
+        "xls-parent": docs_dir / "schedule.xls",
+        "xlsx-parent": docs_dir / "schedule-current.xlsx",
         "pptx-parent": docs_dir / "deck.pptx",
     }
     sources["pdf-parent"].write_bytes(b"%PDF-synthetic")
     sources["docx-parent"].write_bytes(b"PK-docx-synthetic")
+    sources["xls-parent"].write_bytes(b"D0CF-xls-synthetic")
     sources["xlsx-parent"].write_bytes(b"PK-xlsx-synthetic")
+    sources["xls-parent"].with_suffix(".preview.xlsx").write_bytes(b"PK-xls-preview")
     sources["pptx-parent"].write_bytes(b"PK-pptx-synthetic")
     sources["xlsx-parent"].with_suffix(".preview.xlsx").write_bytes(b"PK-xlsx-preview")
     sources["pptx-parent"].with_suffix(".preview.pdf").write_bytes(b"%PDF-pptx-preview")
@@ -63,6 +66,7 @@ def source_preview_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         [
             ("pdf-parent", str(sources["pdf-parent"]), "pdf", None, None),
             ("docx-parent", str(sources["docx-parent"]), "docx", None, None),
+            ("xls-parent", str(sources["xls-parent"]), "xls", None, None),
             ("xlsx-parent", str(sources["xlsx-parent"]), "xlsx", None, None),
             ("pptx-parent", str(sources["pptx-parent"]), "pptx", None, None),
             ("missing-parent", str(docs_dir / "internal-missing.docx"), "docx", None, None),
@@ -110,7 +114,8 @@ def test_office_source_and_preview_matrix_for_authenticated_roles(source_preview
     client, sessions, _docs_dir = source_preview_api
     endpoints = (
         ("/api/source/docx-parent/raw", b"PK-docx-synthetic"),
-        ("/api/source/xlsx-parent/raw", b"PK-xlsx-synthetic"),
+        ("/api/source/xls-parent/raw", b"PK-xls-preview"),
+        ("/api/source/xlsx-parent/raw", b"PK-xlsx-preview"),
         ("/api/source/pptx-parent/raw", b"PK-pptx-synthetic"),
         ("/api/pdf/pptx-parent", b"%PDF-pptx-preview"),
     )

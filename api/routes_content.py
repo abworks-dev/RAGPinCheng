@@ -1890,7 +1890,7 @@ def _content_item_dto(
     if row["doc_type"] in {"pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "xmind"}:
         preview_status = "ready" if row["doc_type"] == "xmind" else "pending"
         if row["doc_type"] != "xmind" and summary and summary.preview_parent_id:
-            if row["doc_type"] in {"ppt", "pptx"}:
+            if row["doc_type"] in {"ppt", "pptx", "xls", "xlsx"}:
                 source_path = _storage.published_source_path(
                     content_item_id=row["item_id"],
                     content_version_id=row["version_id"],
@@ -2780,12 +2780,12 @@ def get_xmind_preview(
 
 
 @router.post("/versions/{version_id}/preview", response_model=ManagedPreviewDTO)
-def regenerate_pptx_preview(
+def regenerate_office_preview(
     version_id: str,
     user: CurrentUser = Depends(require_content_permission("item.publish", csrf=True)),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ManagedPreviewDTO:
-    """Regenerate the derived PDF preview for the current published PPTX."""
+    """Regenerate the derived PDF preview for the current published Office file."""
     _require_feature()
     if not OFFICE_PROCESSING_ENABLED:
         raise HTTPException(
@@ -2803,8 +2803,8 @@ def regenerate_pptx_preview(
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="资料不存在")
-    if row["doc_type"] != "pptx":
-        raise HTTPException(status_code=400, detail="只有 PPTX 文件需要生成 PDF 预览")
+    if row["doc_type"] not in {"ppt", "pptx", "xls", "xlsx"}:
+        raise HTTPException(status_code=400, detail="只有 PPT、PPTX、XLS 或 XLSX 文件需要生成 PDF 预览")
     if row["lifecycle_status"] != "published" or row["current_version_id"] != version_id:
         raise HTTPException(status_code=409, detail="只有当前已发布版本可以重新生成预览")
 
@@ -2820,29 +2820,29 @@ def regenerate_pptx_preview(
         filename=row["original_filename"],
     )
     if not source_path.is_file() or source_path.is_symlink():
-        raise HTTPException(status_code=404, detail="已发布的 PPTX 原文件不可用")
+        raise HTTPException(status_code=404, detail="已发布的 Office 原文件不可用")
     try:
         convert_pptx_to_pdf(source_path)
     except httpx.HTTPError as exc:
-        logger.warning("PPTX preview service unavailable for version %s: %s", version_id, exc)
+        logger.warning("Office preview service unavailable for version %s: %s", version_id, exc)
         raise HTTPException(
             status_code=503,
-            detail={"code": "preview_service_unavailable", "message": "PPTX 预览服务暂不可用，请稍后重试"},
+            detail={"code": "preview_service_unavailable", "message": "Office 预览服务暂不可用，请稍后重试"},
         ) from exc
     except PptxPreviewFileTooLargeError as exc:
-        logger.warning("PPTX preview input too large for version %s: %s", version_id, exc)
+        logger.warning("Office preview input too large for version %s: %s", version_id, exc)
         raise HTTPException(
             status_code=413,
             detail={
                 "code": "preview_file_too_large",
-                "message": "PPTX 文件过大，超过当前转换上限，请压缩文件后重试",
+                "message": "Office 文件过大，超过当前转换上限，请压缩文件后重试",
             },
         ) from exc
     except (OSError, RuntimeError) as exc:
-        logger.warning("PPTX preview conversion failed for version %s: %s", version_id, exc)
+        logger.warning("Office preview conversion failed for version %s: %s", version_id, exc)
         raise HTTPException(
             status_code=502,
-            detail={"code": "preview_conversion_failed", "message": "PPTX 转换失败，请检查文件后重试"},
+            detail={"code": "preview_conversion_failed", "message": "Office 转换失败，请检查文件后重试"},
         ) from exc
 
     audit_event(

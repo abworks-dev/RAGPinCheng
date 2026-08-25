@@ -3725,7 +3725,7 @@ export function AdminManagedContentPage() {
       setReviewTarget((current) =>
         current ? applyReadyPreview(current) : current,
       );
-      toast.success("PPTX 预览已生成");
+      toast.success(`${item.doc_type.toUpperCase()} 预览已生成`);
     } catch (previewError) {
       toast.error(
         previewError instanceof Error
@@ -4994,8 +4994,8 @@ export function AdminManagedContentPage() {
       unavailableReason ||
       (previewable
         ? "预览文件"
-        : item.preview_status === "missing" && item.doc_type === "pptx"
-          ? "PPTX 预览生成失败，可在资料详情中重新生成"
+        : item.preview_status === "missing" && ["ppt", "pptx", "xls", "xlsx"].includes(item.doc_type)
+          ? `${item.doc_type.toUpperCase()} 预览生成失败，可在资料详情中重新生成`
           : item.preview_status === "pending"
             ? "发布完成后可在线预览"
             : !item.preview_parent_id
@@ -8313,7 +8313,7 @@ export function AdminManagedContentPage() {
                       打开文件
                     </Button>
                   )}
-                  {detail.doc_type === "pptx" &&
+                  {["ppt", "pptx", "xls", "xlsx"].includes(detail.doc_type) &&
                     detail.preview_status === "missing" &&
                     detail.lifecycle_status === "published" &&
                     can("item.publish") && (

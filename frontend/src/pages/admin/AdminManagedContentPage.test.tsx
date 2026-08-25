@@ -597,6 +597,35 @@ describe("AdminManagedContentPage", () => {
     expect(mocks.success).toHaveBeenCalledWith("PPTX 预览已生成");
   });
 
+  it("regenerates a missing published XLSX preview from details", async () => {
+    mocks.permissions = PUBLISHER_PERMISSIONS;
+    mocks.items.mockResolvedValue({
+      items: [{
+        ...item,
+        doc_type: "xlsx",
+        original_filename: "budget.xlsx",
+        lifecycle_status: "published",
+        is_current: true,
+        has_published_head: true,
+        latest_publication_status: "done",
+        preview_parent_id: null,
+        preview_status: "missing",
+      }],
+      total: 1,
+      status_counts: { published: 1 },
+    });
+
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+    fireEvent.click(screen.getAllByRole("button", { name: "查看“建模标准”的详细信息" })[0]);
+
+    fireEvent.click(screen.getByRole("button", { name: "重新生成预览" }));
+
+    await waitFor(() => expect(mocks.regeneratePreview).toHaveBeenCalledWith("version-1"));
+    expect(await screen.findByRole("button", { name: "预览文件" })).toBeInTheDocument();
+    expect(mocks.success).toHaveBeenCalledWith("XLSX 预览已生成");
+  });
+
   it("shows minute-level update times and sorts them in both directions", async () => {
     const olderItem = { ...item, item_id: "item-older", version_id: "version-older", title: "较早资料", updated_at: 1_700_000_000 };
     const newerItem = { ...item, item_id: "item-newer", version_id: "version-newer", title: "较新资料", updated_at: 1_800_000_000 };
