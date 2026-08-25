@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import shutil
 import sqlite3
 import sys
@@ -37,6 +38,21 @@ class TranscriptHead(NamedTuple):
 class RebuildSnapshot(NamedTuple):
     managed: tuple[ManagedHead, ...]
     transcripts: tuple[TranscriptHead, ...]
+
+
+def validate_shadow_destinations(collection: str, parents_database: Path) -> None:
+    collection_match = re.fullmatch(
+        r"pincheng_docs_rebuild_([0-9]+)_([0-9]+)", collection
+    )
+    if collection_match is None:
+        raise ValueError("shadow_collection_required")
+    parent_match = re.fullmatch(
+        r"full-reindex-([0-9]+)-([0-9]+)-shadow", parents_database.parent.name
+    )
+    if parents_database.name != "parents.sqlite" or parent_match is None:
+        raise ValueError("shadow_parent_database_required")
+    if collection_match.groups() != parent_match.groups():
+        raise ValueError("shadow_destination_mismatch")
 
 
 def load_rebuild_snapshot(conn: sqlite3.Connection) -> RebuildSnapshot:
@@ -156,10 +172,7 @@ def run_rebuild(
         index_transcript_candidate,
     )
 
-    if not COLLECTION.startswith("pincheng_docs_rebuild_"):
-        raise ValueError("shadow_collection_required")
-    if PARENTS_DB.name != "parents.sqlite" or "rebuild" not in str(PARENTS_DB.parent):
-        raise ValueError("shadow_parent_database_required")
+    validate_shadow_destinations(COLLECTION, PARENTS_DB)
     data_root = PARENTS_DB.parent
     data_root.mkdir(parents=True, exist_ok=True)
     report_path.parent.mkdir(parents=True, exist_ok=True)
