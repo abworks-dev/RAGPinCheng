@@ -1,12 +1,15 @@
 import { defineConfig } from "@playwright/test";
 import process from "node:process";
 
-const viewports = [
+const fullViewports = [
   { name: "chromium-1440x900", width: 1440, height: 900 },
   { name: "chromium-1280x720", width: 1280, height: 720 },
   { name: "chromium-768x1024", width: 768, height: 1024 },
   { name: "chromium-390x844", width: 390, height: 844 },
 ];
+const viewports = process.env.CI_FULL_VISUAL === "false"
+  ? [fullViewports[0], fullViewports[3]]
+  : fullViewports;
 const testPort = process.env.PLAYWRIGHT_PORT || "4173";
 
 export default defineConfig({

@@ -146,11 +146,13 @@ def test_phase3_contract_tests_have_no_skip_or_xfail():
 
 def test_ci_collects_phase3_without_conditional_success():
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    runner = (ROOT / "scripts" / "ci_test_groups.py").read_text(encoding="utf-8")
     section = ci.split("  test-asr-service-contract:", 1)[1].split(
         "  test-gpu-contract:", 1
     )[0]
-    assert "services/asr_service/tests" in section
-    assert "test_transcription_remote_provider.py" in section
-    assert "pip install pytest fastapi httpx" in section
+    assert "python scripts/ci_test_groups.py asr" in section
+    assert "services/asr_service/tests" in runner
+    assert "test_transcription_remote_provider.py" in runner
+    assert "pip install -r requirements-ci.txt" in section
     assert "|| true" not in section
     assert "asr_service" in ci.split("Check Python syntax", 1)[1]
