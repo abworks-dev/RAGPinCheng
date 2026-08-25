@@ -116,6 +116,7 @@ import { CategoryDeleteDialog } from "../../components/admin/CategoryDeleteDialo
 import { CategoryDestinationPicker } from "../../components/admin/CategoryDestinationPicker";
 import { ManagedContentBulkOperationDialog } from "../../components/admin/ManagedContentBulkOperationDialog";
 import { ManagedItemType } from "../../components/admin/ManagedItemType";
+import { ExternalFolderBrowser } from "../../components/admin/ExternalFolderBrowser";
 import { compareManagedCategories } from "../../lib/category-tree";
 import { AdminTranscriptionTasksPage } from "./AdminTranscriptionTasksPage";
 import { useManagedContentLiveRefresh } from "../../hooks/useManagedContentLiveRefresh";
@@ -7283,6 +7284,7 @@ export function AdminManagedContentPage() {
               </>
             )
           )}
+          {currentFolder?.category_kind === "shared_folder" && currentFolder.external_source_id && <ExternalFolderBrowser sourceId={currentFolder.external_source_id} title={`${currentFolder.display_name}远程目录`} />}
         </div>
       </Card>
 

@@ -22,6 +22,7 @@ import { adminMediaApi } from "../../api/admin/media";
 import { CategoryDeleteDialog } from "../../components/admin/CategoryDeleteDialog";
 import { CategoryTreePicker } from "../../components/admin/CategoryTreePicker";
 import { ExternalMediaSourcesPanel } from "../../components/admin/ExternalMediaSourcesPanel";
+import { ExternalFolderBrowser } from "../../components/admin/ExternalFolderBrowser";
 import { useAuth } from "../../context/AuthContext";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
@@ -559,6 +560,7 @@ export function AdminCategoriesPage() {
       )}
 
       {canManageExternalSources && !error && <ExternalMediaSourcesPanel categories={categories} schemes={sharedSchemes} onOpenWorkbench={() => undefined} onMediaChanged={async () => { await load(true); }} />}
+      {selectedCategory?.category_kind === "shared_folder" && selectedCategory.external_source_id && <ExternalFolderBrowser sourceId={selectedCategory.external_source_id} title={`${selectedCategory.display_name}远程目录`} />}
 
       <Sheet open={sharedOpen} onOpenChange={(open) => { if (!sharedSaving) setSharedOpen(open); }}>
         <SheetContent className="max-w-xl overflow-y-auto">

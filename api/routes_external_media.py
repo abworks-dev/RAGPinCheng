@@ -18,6 +18,7 @@ from .db import connect, get_db
 from .external_media import ExternalMediaError, due_source_ids, external_request_key, reconcile_source
 from .media_storage import normalize_external_relative_path
 from .media_upload_conflicts import require_active_category
+from .content_permissions import require_content_permission
 from .routes_transcription import build_transcription_service
 from .schemas import (
     ExternalMediaEnqueueRequest,
@@ -211,7 +212,7 @@ def _entry_rows(conn: sqlite3.Connection, source_id: str) -> list[sqlite3.Row]:
 def list_entries(
     source_id: str,
     parent: str = Query(default="", max_length=1000),
-    _admin: CurrentUser = Depends(require_admin),
+    _user: CurrentUser = Depends(require_content_permission("category.view")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> ExternalMediaEntryListDTO:
     if conn.execute("SELECT 1 FROM external_media_sources WHERE id=?", (source_id,)).fetchone() is None:
