@@ -539,12 +539,14 @@ def test_config_acl_preserves_trusted_runner_modify_without_full_control():
 def test_gpu_activity_contract_and_ci_are_real_but_dependency_light():
     app = read("services/gpu_service/app.py")
     ci = read(".github/workflows/ci.yml")
+    runner = read("scripts/ci_test_groups.py")
     gpu_section = ci.split("  test-gpu-contract:", 1)[1].split(
         "  validate-migration-config:", 1
     )[0]
     assert '@app.get("/v1/activity"' in app
     assert "verify_token(request)" in app
-    assert "services/gpu_service/tests/test_contract.py" in gpu_section
+    assert "python scripts/ci_test_groups.py gpu" in gpu_section
+    assert "services/gpu_service/tests/test_contract.py" in runner
     assert "requirements-gpu" not in gpu_section
     assert "services/gpu_service/requirements.txt" not in gpu_section
     assert "|| true" not in gpu_section

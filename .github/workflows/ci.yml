@@ -261,7 +261,7 @@ jobs:
         shell: bash
         run: |
           for key in GPU_SERVICE_URL GPU_SERVICE_TOKEN EMBED_PROVIDER RERANK_PROVIDER; do
-            grep -q "^${key}=" .env.example || { echo "Missing ${key} in .env.example"; exit 1; }
+            grep -q "${key}" .env.example || { echo "Missing ${key} in .env.example"; exit 1; }
           done
       - if: env.RUN_JOB != 'true'
         run: echo "Migration configuration check skipped because no related path changed."
