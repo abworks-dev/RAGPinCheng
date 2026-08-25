@@ -131,7 +131,7 @@ test.describe("资料管理", () => {
     const failedActions = failedRow.getByRole("button");
     await expect(failedActions).toHaveCount(3);
     expect(await failedActions.evaluateAll((buttons) => buttons.map((button) => button.getAttribute("aria-label")))).toEqual(["重试上传", "查看上传任务详情", "删除任务及资料"]);
-    const retry = failedRow.getByRole("button", { name: "重试（原始文件不可用）", exact: true });
+    const retry = failedRow.getByRole("button", { name: "重试上传", exact: true });
     await expect(retry).toBeDisabled();
     await expect(retry).toHaveAttribute("title", "原始文件仅保留在当前浏览器会话中，当前不可重试");
 

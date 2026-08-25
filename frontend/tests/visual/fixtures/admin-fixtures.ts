@@ -1031,9 +1031,17 @@ export async function installAdminRoutes(
     if (path === "/api/admin/content/folder-requests") {
       return json(route, options.includeFolderRequest ? folderRequests : []);
     }
-    if (path === "/api/admin/content/index-jobs") {
+    if (path === "/api/admin/content/publication-jobs") {
       const includesArchived = url.searchParams.get("include_archived") === "true";
-      const jobs = scenario === "empty" ? [] : includesArchived ? [...managedIndexJobs, archivedManagedIndexJob] : managedIndexJobs;
+      const sourceJobs = scenario === "empty" ? [] : includesArchived ? [...managedIndexJobs, archivedManagedIndexJob] : managedIndexJobs;
+      const jobs = sourceJobs.map((job) => ({
+        ...job,
+        task_type: "document",
+        task_type_label: "普通资料",
+        status: job.status === "done" ? "published" : job.status,
+        media_id: null,
+        retryable: job.failure?.retryable ?? false,
+      }));
       return json(route, {
         jobs,
         total: jobs.length,
