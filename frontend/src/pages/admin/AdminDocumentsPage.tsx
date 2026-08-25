@@ -1,4 +1,4 @@
-import { CheckCircle2, CircleAlert, Clock3, Eye, ListChecks, RefreshCw, Rocket, Search, SlidersHorizontal, X } from "lucide-react";
+import { CheckCircle2, ChevronDown, CircleAlert, Clock3, Eye, ListChecks, RefreshCw, Rocket, Search, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { adminContentApi } from "../../api/admin/content";
 import { Badge } from "../../components/ui/badge";
@@ -140,6 +140,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
   const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
   const [selectedJobIds, setSelectedJobIds] = useState<string[]>([]);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setQuery(searchInput.trim()), 250);
@@ -244,9 +245,11 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
   const selectableJobs = listing.jobs.filter((job) => job.is_latest_attempt && !job.is_archived);
   const actionableJobs = listing.jobs.filter((job) => selectedJobIds.includes(job.id) && ["failed", "done"].includes(job.status) && job.is_latest_attempt && !job.is_archived);
   const toggleJob = (id: string) => setSelectedJobIds((current) => current.includes(id) ? current.filter((item) => item !== id) : current.length >= BULK_LIMIT ? current : [...current, id]);
-  const togglePage = () => {
+  const togglePage = (checked: boolean) => {
     const ids = selectableJobs.map((job) => job.id);
-    setSelectedJobIds((current) => ids.every((id) => current.includes(id)) ? current.filter((id) => !ids.includes(id)) : [...new Set([...current, ...ids])].slice(0, BULK_LIMIT));
+    setSelectedJobIds((current) => checked
+      ? [...new Set([...current, ...ids])].slice(0, BULK_LIMIT)
+      : current.filter((id) => !ids.includes(id)));
   };
   const bulkRepublish = async () => {
     const jobs = actionableJobs;
@@ -295,6 +298,34 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
             </p>
           </div>
           <IndexTaskSearchFilters searchInput={searchInput} categoryId={categoryId} docType={docType} sourceOrigin={sourceOrigin} status={status} history={history} includeArchived={includeArchived} categories={categories} onSearchInputChange={setSearchInput} onCategoryChange={setCategoryId} onDocTypeChange={setDocType} onSourceChange={setSourceOrigin} onStatusChange={setStatus} onHistoryChange={setHistory} onIncludeArchivedChange={setIncludeArchived} onClear={clearFilters} />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button size="sm" variant="outline" className="h-control-md" onClick={() => void load(true)} disabled={loading || refreshing}>
+              <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
+              {refreshing ? "刷新中…" : "刷新列表"}
+            </Button>
+            <div className="relative">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-control-md"
+                aria-haspopup="menu"
+                aria-expanded={bulkMenuOpen}
+                disabled={!canPublish || bulkBusy || selectedJobIds.length === 0}
+                onClick={() => setBulkMenuOpen((current) => !current)}
+              >
+                批量操作{selectedJobIds.length > 0 ? `（${selectedJobIds.length}）` : ""}
+                <ChevronDown className="size-4" />
+              </Button>
+              {bulkMenuOpen && (
+                <div role="menu" aria-label="发布任务批量操作" className="absolute right-0 top-full z-dropdown mt-2 min-w-44 rounded-ui-md border border-border bg-popover p-1 text-popover-foreground shadow-overlay">
+                  <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-left text-ui-sm hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50" disabled={actionableJobs.length === 0 || bulkBusy} onClick={() => { setBulkMenuOpen(false); void bulkRepublish(); }}>
+                    <Rocket className="size-4" />
+                    批量重新发布
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {loading ? (
@@ -353,7 +384,7 @@ function ManagedJobsTable({
   selectedJobIds: string[];
   selectableJobs: ManagedIndexJob[];
   onToggleJob: (id: string) => void;
-  onTogglePage: () => void;
+  onTogglePage: (checked: boolean) => void;
 }) {
   return (
     <div className="overflow-x-auto border-t border-border">
@@ -361,7 +392,7 @@ function ManagedJobsTable({
         <caption className="sr-only">资料发布任务、类型、更新时间、状态、来源、内容块和操作</caption>
         <thead className="hidden border-b border-border bg-surface-muted text-left text-muted-foreground lg:table-header-group">
           <tr>
-            <th className="w-16 px-4 py-3 text-center font-medium"><Checkbox aria-label="全选当前页索引任务" checked={selectableJobs.length > 0 && selectableJobs.every((job) => selectedJobIds.includes(job.id))} onChange={onTogglePage} /></th>
+            <th className="w-14 px-3 py-3 text-center font-medium"><span className="flex justify-center"><Checkbox aria-label="全选当前页索引任务" checked={selectableJobs.length > 0 && selectableJobs.every((job) => selectedJobIds.includes(job.id))} onChange={(event) => onTogglePage(event.target.checked)} /></span></th>
             <th className="w-16 px-2 py-3 text-center font-medium">类型</th>
             <th className="min-w-48 px-2 py-3 font-medium">资料</th>
             <th className="min-w-24 whitespace-nowrap px-3 py-3 font-medium">更新时间</th>
@@ -381,7 +412,7 @@ function ManagedJobsTable({
             const retrying = retryingJobId === job.id;
             return (
               <tr key={job.id} className="group grid grid-cols-[2.5rem_5rem_minmax(0,1fr)] gap-x-2 gap-y-3 px-4 py-4 transition-colors duration-normal hover:bg-surface-muted/60 sm:px-5 lg:table-row lg:p-0">
-                <td className="block px-1 lg:table-cell lg:px-4 lg:py-3"><Checkbox aria-label={`选择${job.title || job.original_filename || "任务"}`} checked={selectedJobIds.includes(job.id)} disabled={!(job.is_latest_attempt && !job.is_archived) && !selectedJobIds.includes(job.id)} onChange={() => onToggleJob(job.id)} /></td>
+                <td className="flex items-start justify-center px-1 pt-0 lg:table-cell lg:w-14 lg:px-3 lg:py-3 lg:text-center lg:align-top"><Checkbox aria-label={`选择${job.title || job.original_filename || "任务"}`} checked={selectedJobIds.includes(job.id)} disabled={!(job.is_latest_attempt && !job.is_archived) && !selectedJobIds.includes(job.id)} onChange={() => onToggleJob(job.id)} /></td>
                 <td className="block lg:table-cell lg:px-2 lg:py-3"><ManagedItemType docType={job.doc_type} /></td>
                 <td className="block min-w-0 lg:table-cell lg:px-2 lg:py-3">
                   <p className="break-words font-medium text-foreground" title={job.title || job.original_filename || undefined}>
@@ -432,8 +463,8 @@ function ManagedJobsTable({
                     <Button
                       size="sm"
                       className="max-sm:h-control-md"
-                      disabled={!canPublish || Boolean(retryingJobId) || job.is_archived || job.status !== "failed" || !job.is_latest_attempt}
-                      title={!canPublish ? "当前账号没有发布权限" : job.is_archived ? "回收站资料不可重试" : job.status !== "failed" ? "仅失败任务可重试" : !job.is_latest_attempt ? "仅最新尝试可重试" : "重试索引"}
+                      disabled={!canPublish || Boolean(retryingJobId) || job.is_archived || !["failed", "done"].includes(job.status) || !job.is_latest_attempt}
+                      title={!canPublish ? "当前账号没有发布权限" : job.is_archived ? "回收站资料不可重试" : !["failed", "done"].includes(job.status) ? "仅失败或已发布任务可重新发布" : !job.is_latest_attempt ? "仅最新尝试可重试" : "重新发布"}
                       onClick={() => onRetry(job)}
                     >
                       <Rocket className={cn("size-4", retrying && "animate-pulse")} />

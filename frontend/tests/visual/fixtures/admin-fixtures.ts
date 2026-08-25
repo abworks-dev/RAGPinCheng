@@ -231,6 +231,23 @@ const managedIndexJobs = [{
   parent_count: null, preview_parent_id: null,
 }];
 
+const publishedManagedIndexJob = {
+  ...managedIndexJobs[0],
+  id: "managed-job-published",
+  publication_id: "publication-published",
+  version_id: "version-published",
+  status: "published",
+  error_code: null,
+  error_summary: null,
+  failure: null,
+  attempt_count: 1,
+  title: "已发布的合成资料",
+  original_filename: "published-managed-document.docx",
+  doc_type: "docx",
+  is_current_head: true,
+  parent_count: 12,
+};
+
 const archivedManagedIndexJob = {
   ...managedIndexJobs[0],
   id: "managed-job-archived",
@@ -1039,6 +1056,21 @@ export async function installAdminRoutes(
         total: jobs.length,
         status_counts: jobs.length
           ? { processing: 0, ready: includesArchived ? 1 : 0, failed: 1 }
+          : {},
+      });
+    }
+    if (path === "/api/admin/content/publication-jobs") {
+      const includesArchived = url.searchParams.get("include_archived") === "true";
+      const jobs = scenario === "empty"
+        ? []
+        : includesArchived
+          ? [...managedIndexJobs, publishedManagedIndexJob, archivedManagedIndexJob]
+          : [...managedIndexJobs, publishedManagedIndexJob];
+      return json(route, {
+        jobs,
+        total: jobs.length,
+        status_counts: jobs.length
+          ? { processing: 0, published: includesArchived ? 2 : 1, failed: 1 }
           : {},
       });
     }
