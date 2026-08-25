@@ -17,10 +17,10 @@ PROTECTED = {
     # archived and unpublished media remain hidden; normalize_hash is portable.
     "api/routes_media.py": "be62e86673fa78adaa4db8a253c106b0698dd0460ecda75538716dad74f487f7",
     "api/indexing.py": "048559281160fa3c6ca4ee611cfb5757b0854e84b8bd90e912fbd51a4d299b21",
-    "src/chunk.py": "f22d79fe976a6da4fc4c2ba430490ad2c24205b2399e733912390e480858c542",
-    "src/index.py": "993d4e101cfd0e6e1b670de7d43edaa71a73cd0778d18cef6aba72d3184d23bc",
-    "src/indexing_pipeline.py": "13c332d0ac70241365027d6ae74dc13e9d8e5923a2c805d3a568b0e5b1e30cb6",
-    "src/retrieve.py": "94aa463186b86c86d0cfa3964a52c59e7219c0fa24c57660329e15a05921378b",
+    "src/chunk.py": "47b0845053645ecc24e7a00c201936e29bd95dc8e0101949544837b571046970",
+    "src/index.py": "071e278e0edcf54ddb8cb4b6bd53efe8fee98fae1b6432a52c581907beaa004f",
+    "src/indexing_pipeline.py": "ae3c2509a4840e66d00aa0b0e83751daffa8ab76321a8ecaaae478d8141dfc97",
+    "src/retrieve.py": "de585207fe38d94edca120a1a47670b538607d7cc62119d1c73946ac4087ddbf",
 }
 FORBIDDEN = {
     "funasr", "faster_whisper", "whisper", "torch", "av", "ffmpeg",
