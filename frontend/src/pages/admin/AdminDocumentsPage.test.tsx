@@ -281,6 +281,30 @@ describe("AdminDocumentsPage", () => {
     expect(screen.getByRole("button", { name: "批量操作" })).toBeInTheDocument();
   });
 
+  it("selects and clears every task on a page larger than the former bulk limit", async () => {
+    const jobs = Array.from({ length: 25 }, (_, index) => ({
+      ...failedJob,
+      id: `job-${index + 1}`,
+      version_id: `version-${index + 1}`,
+      title: `批量任务 ${index + 1}`,
+    }));
+    mocks.publicationJobs.mockResolvedValue({
+      jobs,
+      total: jobs.length,
+      status_counts: { processing: 0, published: 0, failed: jobs.length },
+    });
+    render(<AdminDocumentsPage />);
+    await screen.findByText("批量任务 25");
+
+    const selectPage = screen.getByRole("checkbox", { name: "全选当前页索引任务" });
+    fireEvent.click(selectPage);
+    screen.getAllByRole("checkbox", { name: /选择批量任务/ }).forEach((checkbox) => expect(checkbox).toBeChecked());
+    expect(screen.getByRole("button", { name: "批量操作（25）" })).toBeInTheDocument();
+
+    fireEvent.click(selectPage);
+    screen.getAllByRole("checkbox", { name: /选择批量任务/ }).forEach((checkbox) => expect(checkbox).not.toBeChecked());
+  });
+
   it("allows the latest published task to be republished", async () => {
     mocks.publicationJobs.mockResolvedValue({
       ...listing,

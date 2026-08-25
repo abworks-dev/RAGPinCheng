@@ -21,7 +21,6 @@ import { useManagedContentLiveRefresh } from "../../hooks/useManagedContentLiveR
 
 const PAGE_SIZE = 25;
 const PAGE_SIZE_OPTIONS = [25, 50, 100];
-const BULK_LIMIT = 20;
 const ACTIVE_STATUSES = new Set([
   "pending",
   "uploading",
@@ -244,11 +243,11 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
 
   const selectableJobs = listing.jobs.filter((job) => job.is_latest_attempt && !job.is_archived);
   const actionableJobs = listing.jobs.filter((job) => selectedJobIds.includes(job.id) && ["failed", "done"].includes(job.status) && job.is_latest_attempt && !job.is_archived);
-  const toggleJob = (id: string) => setSelectedJobIds((current) => current.includes(id) ? current.filter((item) => item !== id) : current.length >= BULK_LIMIT ? current : [...current, id]);
+  const toggleJob = (id: string) => setSelectedJobIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   const togglePage = (checked: boolean) => {
     const ids = selectableJobs.map((job) => job.id);
     setSelectedJobIds((current) => checked
-      ? [...new Set([...current, ...ids])].slice(0, BULK_LIMIT)
+      ? [...new Set([...current, ...ids])]
       : current.filter((id) => !ids.includes(id)));
   };
   const bulkRepublish = async () => {
