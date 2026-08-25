@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
+import sqlite3
 import time
 import unicodedata
 import uuid
@@ -638,16 +639,23 @@ def _retry_media_job(
         raise HTTPException(status_code=409, detail="转录任务状态发生冲突")
     except (ContractValidationError, OSError):
         raise HTTPException(status_code=409, detail="视频音频准备失败，请检查视频后重试")
-    conn = connect()
     try:
-        conn.execute(
-            "UPDATE media_assets SET status='transcribing',error=NULL,updated_at=? WHERE media_id=?",
-            (int(time.time()), media_id),
-        )
-        conn.commit()
+        try:
+            conn = connect()
+            try:
+                conn.execute(
+                    "UPDATE media_assets SET status='transcribing',error=NULL,updated_at=? WHERE media_id=?",
+                    (int(time.time()), media_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        except (OSError, sqlite3.Error):
+            logger.exception(
+                "retry job %s persisted but media summary update failed", job.id
+            )
     finally:
-        conn.close()
-    enqueue(job.id)
+        enqueue(job.id)
     return _job_dto(job)
 
 

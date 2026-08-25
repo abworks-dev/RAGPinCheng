@@ -13,6 +13,7 @@ import logging
 import re
 import shutil
 import sqlite3
+import stat
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -2122,6 +2123,30 @@ def archive_media_asset(media_id: str, admin: CurrentUser = Depends(require_csrf
     return DeleteManagedContentResponse(item_id=result.item_id, version_id=result.version_id, archived_at=result.archived_at, previous_status=result.previous_status, publication_withdrawn=result.publication_withdrawn)
 
 
+def _is_reparse_point(path: Path) -> bool:
+    try:
+        attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    except FileNotFoundError:
+        return False
+    return path.is_symlink() or bool(
+        attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    )
+
+
+def _remove_staged_media_dirs(media_id: str, directories: list[Path]) -> None:
+    for directory in directories:
+        if _is_reparse_point(directory):
+            raise HTTPException(status_code=409, detail="媒体暂存目录不是受管目录")
+        try:
+            shutil.rmtree(directory)
+        except OSError as exc:
+            logger.exception("failed to remove staged media directory for %s", media_id)
+            raise HTTPException(
+                status_code=500,
+                detail="数据库状态已清理，但本地文件删除未完成",
+            ) from exc
+
+
 def _cleanup_failed_media(
     media_id: str,
     conn: sqlite3.Connection,
@@ -2131,7 +2156,9 @@ def _cleanup_failed_media(
     except ContractValidationError:
         raise HTTPException(status_code=404, detail="媒体不存在")
     media_root = MEDIA_DIR.resolve()
-    media_dir = (media_root / media_id).resolve(strict=False)
+    media_candidate = media_root / media_id
+    media_dir = media_candidate
+    stale_dirs: list[Path] = []
     staged_dir: Path | None = None
     now = int(time.time())
     try:
@@ -2139,9 +2166,18 @@ def _cleanup_failed_media(
         row = conn.execute(
             "SELECT status,storage_kind FROM media_assets WHERE media_id=?", (media_id,)
         ).fetchone()
+        stale_dirs = list(media_root.glob(f".cleanup-{media_id}-*"))
         if row is None:
+            if stale_dirs:
+                conn.rollback()
+                _remove_staged_media_dirs(media_id, stale_dirs)
+                return FailedMediaCleanupDTO(media_id=media_id, cleanup_mode="deleted")
             raise HTTPException(status_code=404, detail="媒体不存在")
         if row["status"] != "failed":
+            if row["storage_kind"] == "external" and row["status"] == "uploaded" and stale_dirs:
+                conn.rollback()
+                _remove_staged_media_dirs(media_id, stale_dirs)
+                return FailedMediaCleanupDTO(media_id=media_id, cleanup_mode="reset")
             raise HTTPException(status_code=409, detail="仅可清理失败媒体")
         if conn.execute(
             "SELECT 1 FROM transcription_jobs WHERE media_id=? AND status IN ('pending','running')", (media_id,)
@@ -2172,6 +2208,9 @@ def _cleanup_failed_media(
             (media_id, media_id),
         ).fetchone() is not None:
             raise HTTPException(status_code=409, detail="视频替换任务正在处理，不能清理")
+        if _is_reparse_point(media_candidate):
+            raise HTTPException(status_code=409, detail="媒体存储目录不是受管目录")
+        media_dir = media_candidate.resolve(strict=False)
         try:
             media_dir.relative_to(media_root)
         except ValueError:
@@ -2222,15 +2261,8 @@ def _cleanup_failed_media(
             except OSError:
                 logger.exception("failed to restore staged media directory for %s", media_id)
         raise
-    if staged_dir is not None:
-        try:
-            shutil.rmtree(staged_dir)
-        except OSError as exc:
-            logger.exception("failed to remove staged media directory for %s", media_id)
-            raise HTTPException(
-                status_code=500,
-                detail="数据库状态已清理，但本地文件删除未完成",
-            ) from exc
+    cleanup_dirs = [*stale_dirs, *([staged_dir] if staged_dir is not None else [])]
+    _remove_staged_media_dirs(media_id, cleanup_dirs)
     return FailedMediaCleanupDTO(media_id=media_id, cleanup_mode=cleanup_mode)
 
 
