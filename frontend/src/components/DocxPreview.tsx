@@ -7,12 +7,14 @@ import { useEffect, useRef, useState } from "react";
 export function DocxPreview({
   parentId,
   paragraphAnchor,
+  quote,
   onLoad,
   onError,
   zoom = 1,
 }: {
   parentId: string;
   paragraphAnchor?: string | null;
+  quote?: string | null;
   onLoad?: () => void;
   onError?: (err: string) => void;
   zoom?: number;
@@ -24,6 +26,38 @@ export function DocxPreview({
   onErrorRef.current = onError;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  function normalize(value: string) {
+    return value.replace(/\s+/g, "").toLocaleLowerCase();
+  }
+
+  async function shortHash(value: string) {
+    const bytes = new TextEncoder().encode(value.trim());
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("").slice(0, 8);
+  }
+
+  async function locate(container: HTMLElement) {
+    const candidates = Array.from(container.querySelectorAll<HTMLElement>("p, li, h1, h2, h3, h4, h5, h6"));
+    let target: HTMLElement | undefined;
+    if (paragraphAnchor) {
+      for (const candidate of candidates) {
+        const text = candidate.innerText.trim();
+        if (text && (await shortHash(text)) === paragraphAnchor) {
+          target = candidate;
+          break;
+        }
+      }
+    }
+    if (!target && quote) {
+      const probe = normalize(quote).slice(0, 48);
+      target = candidates.find((candidate) => normalize(candidate.innerText).includes(probe) || probe.includes(normalize(candidate.innerText).slice(0, 32)));
+    }
+    if (!target) return;
+    target.dataset.citationTarget = "true";
+    target.classList.add("rounded-sm", "bg-yellow-100", "outline", "outline-2", "outline-yellow-500", "dark:bg-yellow-900/40");
+    target.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -54,6 +88,8 @@ export function DocxPreview({
           ignoreHeight: false,
         });
 
+        await locate(container);
+
         if (!cancelled) {
           setLoading(false);
           onLoadRef.current?.();
@@ -72,7 +108,7 @@ export function DocxPreview({
     return () => {
       cancelled = true;
     };
-  }, [parentId]);
+  }, [parentId, paragraphAnchor, quote]);
 
   if (error) {
     return (

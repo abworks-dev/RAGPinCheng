@@ -351,12 +351,16 @@ function CitationMarker({
       source.parent_id,
       source.doc_title,
       source.doc_type,
-      source.doc_type === "pptx" && source.slide_number ? source.slide_number : 1,
+      source.page_number || source.slide_number || 1,
       {
         sheetName: source.sheet_name,
         cellRange: source.cell_range,
         slideNumber: source.slide_number,
         paragraphAnchor: source.paragraph_anchor,
+        ...(source.location_quote ? { quote: source.location_quote } : {}),
+        ...(source.page_end ? { pageEnd: source.page_end } : {}),
+        ...(source.heading_anchor ? { headingAnchor: source.heading_anchor } : {}),
+        ...(source.topic_id ? { topicId: source.topic_id } : {}),
       },
     );
   };

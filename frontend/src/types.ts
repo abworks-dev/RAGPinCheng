@@ -18,6 +18,12 @@ export type Source = {
   cell_range: string | null;
   slide_number: number | null;
   paragraph_anchor: string | null;
+  page_number?: number | null;
+  page_end?: number | null;
+  topic_id?: string | null;
+  heading_anchor?: string | null;
+  location_quote?: string | null;
+  location_confidence?: string | null;
 };
 
 export type PrepData = {

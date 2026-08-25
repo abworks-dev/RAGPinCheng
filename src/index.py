@@ -167,6 +167,18 @@ def _init_parents_db(reset: bool = False) -> sqlite3.Connection:
         conn.execute("ALTER TABLE parents ADD COLUMN slide_number INTEGER")
     if "paragraph_anchor" not in existing:
         conn.execute("ALTER TABLE parents ADD COLUMN paragraph_anchor TEXT")
+    if "page_number" not in existing:
+        conn.execute("ALTER TABLE parents ADD COLUMN page_number INTEGER")
+    if "page_end" not in existing:
+        conn.execute("ALTER TABLE parents ADD COLUMN page_end INTEGER")
+    if "topic_id" not in existing:
+        conn.execute("ALTER TABLE parents ADD COLUMN topic_id TEXT")
+    if "heading_anchor" not in existing:
+        conn.execute("ALTER TABLE parents ADD COLUMN heading_anchor TEXT")
+    if "location_quote" not in existing:
+        conn.execute("ALTER TABLE parents ADD COLUMN location_quote TEXT")
+    if "location_confidence" not in existing:
+        conn.execute("ALTER TABLE parents ADD COLUMN location_confidence TEXT")
     if "transcript_version_id" not in existing:
         conn.execute("ALTER TABLE parents ADD COLUMN transcript_version_id TEXT")
     if "publication_target_id" not in existing:
@@ -212,6 +224,12 @@ def store_parents(parents: Iterable[Parent], reset: bool = False) -> None:
             p.cell_range,
             p.slide_number,
             p.paragraph_anchor,
+            p.page_number,
+            p.page_end,
+            p.topic_id,
+            p.heading_anchor,
+            p.location_quote,
+            p.location_confidence,
             p.transcript_version_id,
             p.publication_target_id,
             p.content_item_id,
@@ -224,8 +242,9 @@ def store_parents(parents: Iterable[Parent], reset: bool = False) -> None:
         "INSERT OR REPLACE INTO parents "
         "(parent_id, doc_title, category, section_path, source_path, text, doc_type, "
         "start_time, company, media_id, sheet_name, cell_range, slide_number, paragraph_anchor, "
+        "page_number, page_end, topic_id, heading_anchor, location_quote, location_confidence, "
         "transcript_version_id, publication_target_id, content_item_id, content_version_id, category_key) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         rows,
     )
     conn.commit()
@@ -241,7 +260,8 @@ def fetch_parents(parent_ids: list[str]) -> dict[str, dict]:
     rows = conn.execute(
         f"SELECT parent_id, doc_title, category, section_path, source_path, text, "
         f"doc_type, start_time, company, media_id, sheet_name, cell_range, slide_number, "
-        f"paragraph_anchor, transcript_version_id, publication_target_id, "
+        f"paragraph_anchor, page_number, page_end, topic_id, heading_anchor, location_quote, location_confidence, "
+        f"transcript_version_id, publication_target_id, "
         f"content_item_id, content_version_id, category_key "
         f"FROM parents WHERE parent_id IN ({placeholders})",
         parent_ids,
@@ -263,11 +283,17 @@ def fetch_parents(parent_ids: list[str]) -> dict[str, dict]:
             "cell_range": r[11] if len(r) > 11 else None,
             "slide_number": r[12] if len(r) > 12 else None,
             "paragraph_anchor": r[13] if len(r) > 13 else None,
-            "transcript_version_id": r[14] if len(r) > 14 else None,
-            "publication_target_id": r[15] if len(r) > 15 else None,
-            "content_item_id": r[16] if len(r) > 16 else None,
-            "content_version_id": r[17] if len(r) > 17 else None,
-            "category_key": r[18] if len(r) > 18 else None,
+            "page_number": r[14] if len(r) > 14 else None,
+            "page_end": r[15] if len(r) > 15 else None,
+            "topic_id": r[16] if len(r) > 16 else None,
+            "heading_anchor": r[17] if len(r) > 17 else None,
+            "location_quote": r[18] if len(r) > 18 else None,
+            "location_confidence": r[19] if len(r) > 19 else None,
+            "transcript_version_id": r[20] if len(r) > 20 else None,
+            "publication_target_id": r[21] if len(r) > 21 else None,
+            "content_item_id": r[22] if len(r) > 22 else None,
+            "content_version_id": r[23] if len(r) > 23 else None,
+            "category_key": r[24] if len(r) > 24 else None,
         }
         for r in rows
     }
@@ -293,7 +319,16 @@ def index_children(children: list[Child], reset: bool = False) -> None:
     # Skip the existing-id probe when the collection is known-empty
     # (reset, or just created). Otherwise check Qdrant for which child_ids
     # are already present so we don't re-embed them.
-    if not reset and not just_created and children:
+    location_metadata_present = any(
+        c.page_number is not None
+        or c.sheet_name
+        or c.slide_number is not None
+        or c.paragraph_anchor
+        or c.topic_id
+        or c.heading_anchor
+        for c in children
+    )
+    if not reset and not just_created and children and not location_metadata_present:
         all_ids = [c.child_id for c in children]
         existing: set[str] = set()
         # qdrant-client's retrieve() tolerates large id lists; chunk anyway
@@ -346,6 +381,12 @@ def index_children(children: list[Child], reset: bool = False) -> None:
                         **({"cell_range": c.cell_range} if c.cell_range else {}),
                         **({"slide_number": c.slide_number} if c.slide_number is not None else {}),
                         **({"paragraph_anchor": c.paragraph_anchor} if c.paragraph_anchor else {}),
+                        **({"page_number": c.page_number} if c.page_number is not None else {}),
+                        **({"page_end": c.page_end} if c.page_end is not None else {}),
+                        **({"topic_id": c.topic_id} if c.topic_id else {}),
+                        **({"heading_anchor": c.heading_anchor} if c.heading_anchor else {}),
+                        **({"location_quote": c.location_quote} if c.location_quote else {}),
+                        **({"location_confidence": c.location_confidence} if c.location_confidence else {}),
                         **({"media_id": c.media_id} if c.media_id else {}),
                         **({"transcript_version_id": c.transcript_version_id} if c.transcript_version_id else {}),
                         **({"publication_target_id": c.publication_target_id} if c.publication_target_id else {}),

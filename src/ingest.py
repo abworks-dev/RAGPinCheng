@@ -13,6 +13,8 @@ Cloud flow per PDF:
 from __future__ import annotations
 
 import hashlib
+import dataclasses
+import json
 import shutil
 import subprocess
 import sys
@@ -24,6 +26,7 @@ from typing import Callable, Iterator
 
 import requests
 from .external_usage import record_usage
+from .document_locations import DocumentLocation, mineru_locations, write_location_sidecar
 from pypdf import PdfReader, PdfWriter
 from pypdf.errors import DependencyError
 
@@ -55,6 +58,7 @@ class ParsedDoc:
     # Office document preview fields
     preview_path: Path | None = None  # path to preview file (e.g. PDF for PPTX)
     parsed_via: str | None = None  # "docling" | "openpyxl" | "mineru_fallback"
+    location_map_path: Path | None = None
 
 
 def _safe_stem(pdf: Path) -> str:
@@ -141,6 +145,7 @@ def _split_pdf_for_cloud(pdf: Path, work_dir: Path) -> list[Path]:
 def _cloud_parse_batch(
     parts: list[Path],
     on_status: "Callable[[str], None] | None" = None,
+    location_batches: list[list[DocumentLocation]] | None = None,
 ) -> list[str]:
     """Submit N PDF parts as one MinerU batch. Returns markdown per part, in order.
 
@@ -276,8 +281,20 @@ def _cloud_parse_batch(
                 raise PublicationParseError("parser_result_invalid")
             best = max(md_files, key=lambda n: len(zf.read(n)))
             markdowns.append(zf.read(best).decode("utf-8"))
+            content_files = [n for n in zf.namelist() if n.endswith("content_list.json")]
+            if location_batches is not None:
+                if content_files:
+                    try:
+                        payload = json.loads(zf.read(content_files[0]).decode("utf-8"))
+                        location_batches.append(mineru_locations(payload))
+                    except (UnicodeDecodeError, ValueError):
+                        location_batches.append([])
+                else:
+                    location_batches.append([])
         else:
             markdowns.append(md_resp.text)
+            if location_batches is not None:
+                location_batches.append([])
     return markdowns
 
 
@@ -286,6 +303,7 @@ def _cloud_parse(
     on_status: "Callable[[str], None] | None" = None,
     *,
     split_dir: Path | None = None,
+    location_output: Path | None = None,
 ) -> str:
     """Parse one PDF via the MinerU cloud API, splitting into ≤200-page parts
     if necessary and concatenating the resulting markdown."""
@@ -295,7 +313,10 @@ def _cloud_parse(
         prepared = _prepare_pdf(pdf, split_dir / "preflight")
         parts = _split_pdf_for_cloud(prepared, split_dir / "parts")
         try:
-            markdowns = _cloud_parse_batch(parts, on_status=on_status)
+            location_batches: list[list[DocumentLocation]] = []
+            markdowns = _cloud_parse_batch(
+                parts, on_status=on_status, location_batches=location_batches,
+            )
         except Exception:
             record_usage("mineru", "cloud_parse", success=False,
                          item_count=len(parts), input_bytes=pdf.stat().st_size,
@@ -304,6 +325,17 @@ def _cloud_parse(
         record_usage("mineru", "cloud_parse", item_count=len(parts),
                      input_bytes=pdf.stat().st_size,
                      latency_ms=int((time.perf_counter() - started) * 1000))
+        if location_output is not None:
+            locations: list[DocumentLocation] = []
+            for index, batch in enumerate(location_batches):
+                offset = index * MINERU_MAX_PAGES
+                locations.extend(
+                    DocumentLocation(
+                        **{**dataclasses.asdict(item), "page_number": item.page_number + offset if item.page_number else None}
+                    )
+                    for item in batch
+                )
+            write_location_sidecar(location_output, locations)
         if len(markdowns) == 1:
             return markdowns[0]
         joined = []
@@ -332,7 +364,9 @@ def _mineru_exe() -> str:
     )
 
 
-def _local_parse(pdf: Path, *, work_dir: Path | None = None) -> str:
+def _local_parse(
+    pdf: Path, *, work_dir: Path | None = None, location_output: Path | None = None,
+) -> str:
     """Run local mineru CLI and return markdown string."""
     work_dir = work_dir or PARSED_DIR / f"_work_{_safe_stem(pdf)}"
     if work_dir.exists():
@@ -346,7 +380,19 @@ def _local_parse(pdf: Path, *, work_dir: Path | None = None) -> str:
         if not md_files:
             raise PublicationParseError("parser_result_invalid")
         best = max(md_files, key=lambda p: p.stat().st_size)
-        return best.read_text(encoding="utf-8")
+        markdown = best.read_text(encoding="utf-8")
+        if location_output is not None:
+            content_files = list(work_dir.rglob("content_list.json"))
+            locations: list[DocumentLocation] = []
+            if content_files:
+                try:
+                    locations = mineru_locations(
+                        json.loads(content_files[0].read_text(encoding="utf-8"))
+                    )
+                except (OSError, ValueError):
+                    pass
+            write_location_sidecar(location_output, locations)
+        return markdown
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 

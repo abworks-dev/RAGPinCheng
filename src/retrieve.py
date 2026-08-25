@@ -75,6 +75,12 @@ class RetrievedParent:
     cell_range: str | None = None
     slide_number: int | None = None
     paragraph_anchor: str | None = None
+    page_number: int | None = None
+    page_end: int | None = None
+    topic_id: str | None = None
+    heading_anchor: str | None = None
+    location_quote: str | None = None
+    location_confidence: str | None = None
     transcript_version_id: str | None = None
     content_item_id: str | None = None
     content_version_id: str | None = None
@@ -481,6 +487,12 @@ def _dedup_to_parents(
                 cell_range=p.get("cell_range"),
                 slide_number=p.get("slide_number"),
                 paragraph_anchor=p.get("paragraph_anchor"),
+                page_number=p.get("page_number"),
+                page_end=p.get("page_end"),
+                topic_id=p.get("topic_id"),
+                heading_anchor=p.get("heading_anchor"),
+                location_quote=p.get("location_quote"),
+                location_confidence=p.get("location_confidence"),
                 transcript_version_id=p.get("transcript_version_id"),
                 content_item_id=p.get("content_item_id"),
                 content_version_id=p.get("content_version_id"),

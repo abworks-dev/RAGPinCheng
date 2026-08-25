@@ -28,6 +28,7 @@ from .config import (
     PARENT_SIZE,
 )
 from .ingest import ParsedDoc
+from .document_locations import match_locations, read_location_sidecar, location_quote
 
 NAMESPACE = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
@@ -123,6 +124,12 @@ class Parent:
     cell_range: str | None = None    # XLSX: cell range (e.g. "A1:F12")
     slide_number: int | None = None  # PPTX: slide number
     paragraph_anchor: str | None = None  # DOCX: text-hash anchor for citation jumping
+    page_number: int | None = None
+    page_end: int | None = None
+    topic_id: str | None = None
+    heading_anchor: str | None = None
+    location_quote: str | None = None
+    location_confidence: str | None = None
 
 
 @dataclass
@@ -143,6 +150,12 @@ class Child:
     cell_range: str | None = None    # XLSX: cell range (e.g. "A1:F12")
     slide_number: int | None = None  # PPTX: slide number
     paragraph_anchor: str | None = None  # DOCX: text-hash anchor for citation jumping
+    page_number: int | None = None
+    page_end: int | None = None
+    topic_id: str | None = None
+    heading_anchor: str | None = None
+    location_quote: str | None = None
+    location_confidence: str | None = None
     company: str | None = None       # only set for category=="公司内部标准"
     media_id: str | None = None      # associated video asset if any
     transcript_version_id: str | None = None
@@ -593,6 +606,7 @@ def chunk_document(doc: ParsedDoc) -> tuple[list[Parent], list[Child]]:
         return chunk_transcript(doc)
 
     markdown = doc.markdown_path.read_text(encoding="utf-8")
+    locations = read_location_sidecar(doc.location_map_path)
     # MinerU emits every heading as `#` regardless of its real level; re-infer
     # the level from numbering patterns so the splitter sees a real hierarchy.
     markdown = _normalize_heading_levels(markdown)
@@ -604,6 +618,10 @@ def chunk_document(doc: ParsedDoc) -> tuple[list[Parent], list[Child]]:
     for sec in sections:
         section_path = _section_path(sec.metadata)
         for parent_text in _split_parents(sec.page_content):
+            located = match_locations(parent_text, locations)
+            page_number = located.page_number if located else None
+            page_end = located.page_end if located else None
+            quote = location_quote(parent_text)
             # Hash the full parent text, not a prefix: header-propagated table
             # fragments share the same opening 80 chars (the column-label row)
             # and would otherwise collide on parent_id.
@@ -626,6 +644,12 @@ def chunk_document(doc: ParsedDoc) -> tuple[list[Parent], list[Child]]:
                     content_version_id=doc.content_version_id,
                     category_key=doc.category_key,
                     publication_target_id=doc.publication_target_id,
+                    page_number=page_number,
+                    page_end=page_end,
+                    topic_id=located.topic_id if located else None,
+                    heading_anchor=located.heading_anchor if located else None,
+                    location_quote=quote,
+                    location_confidence=located.confidence if located else None,
                 )
             )
             header_prefix = f"{doc.doc_title} > {section_path}\n\n"
@@ -648,6 +672,12 @@ def chunk_document(doc: ParsedDoc) -> tuple[list[Parent], list[Child]]:
                         content_version_id=doc.content_version_id,
                         category_key=doc.category_key,
                         publication_target_id=doc.publication_target_id,
+                        page_number=page_number,
+                        page_end=page_end,
+                        topic_id=located.topic_id if located else None,
+                        heading_anchor=located.heading_anchor if located else None,
+                        location_quote=quote,
+                        location_confidence=located.confidence if located else None,
                     )
                 )
     return parents, children
