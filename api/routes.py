@@ -223,8 +223,9 @@ def get_source_file(parent_id: str, _user_id: int = Depends(require_user)) -> Re
     )
     download_name = managed[1] if managed else file_path.name
 
-    # For XLSX, serve the preview file (with cached formula values) if available
-    if row["doc_type"] == "xls":
+    # Legacy XLS and native XLSX share the same derived workbook path when one
+    # exists, so the spreadsheet renderer sees a consistent workbook format.
+    if row["doc_type"] in {"xls", "xlsx"}:
         preview_path = (
             _managed_preview(
                 row["content_item_id"],
@@ -242,7 +243,7 @@ def get_source_file(parent_id: str, _user_id: int = Depends(require_user)) -> Re
         raise HTTPException(status_code=404, detail="Source file not found")
 
     # Map file extension to MIME type
-    suffix = Path(download_name).suffix.lower()
+    suffix = file_path.suffix.lower()
     mime_map = {
         ".pdf": "application/pdf",
         ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
