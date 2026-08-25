@@ -1,0 +1,347 @@
+name: Rebuild Production Index Manual
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: Select REBUILD_PRODUCTION_INDEX to rebuild and replace the production index
+        required: true
+        default: CANCEL
+        type: choice
+        options:
+          - CANCEL
+          - REBUILD_PRODUCTION_INDEX
+      expected_commit:
+        description: Full master commit approved for this production rebuild
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-full-index-rebuild
+  cancel-in-progress: false
+
+jobs:
+  rebuild-index:
+    environment: production-asr
+    runs-on: [self-hosted, linux, ubuntu, production, app]
+    timeout-minutes: 720
+    env:
+      REPO_PATH: ${{ vars.PRODUCTION_APP_REPO_PATH }}
+      DATA_PATH: ${{ vars.PRODUCTION_APP_DATA_PATH }}
+      BACKUP_ROOT: ${{ vars.PRODUCTION_APP_BACKUP_DIRECTORY }}
+      CONTENT_ROOT: ${{ vars.PRODUCTION_CONTENT_ROOT }}
+      COMPOSE_OVERRIDE: ${{ vars.PRODUCTION_APP_COMPOSE_OVERRIDE }}
+      COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
+      EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+      CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
+    steps:
+      - name: Check out the approved rebuild implementation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.expected_commit }}
+          persist-credentials: false
+
+      - name: Back up, rebuild, cut over, and strictly verify
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          [ "${CONFIRM_PRODUCTION}" = "REBUILD_PRODUCTION_INDEX" ] || {
+            echo "ERROR: production full index rebuild was not confirmed"
+            exit 1
+          }
+          [[ "${EXPECTED_COMMIT}" =~ ^[0-9a-f]{40}$ ]]
+          [ "${GITHUB_REF}" = "refs/heads/master" ]
+          [ "${GITHUB_SHA}" = "${EXPECTED_COMMIT}" ]
+          [ "$(git rev-parse HEAD)" = "${EXPECTED_COMMIT}" ]
+          [ "${REPO_PATH}" = "/data/workspace/projects/ragpincheng" ]
+          [ "${DATA_PATH}" = "/data/services/docker/data/ragpincheng/prod/app" ]
+          [ "${BACKUP_ROOT}" = "/data/backup/databases/ragpincheng" ]
+          [ "${CONTENT_ROOT}" = "/data/business/ragpincheng/content" ]
+          [ "${COMPOSE_OVERRIDE}" = "/data/services/docker/compose/ragpincheng/prod/compose.prod.yaml" ]
+          [ "${COMPOSE_ENV_FILE}" = "/data/secrets/ragpincheng/prod.env" ]
+
+          for path in "${REPO_PATH}" "${DATA_PATH}" "${BACKUP_ROOT}" "${CONTENT_ROOT}"; do
+            [ -d "${path}" ] && [ ! -L "${path}" ] || {
+              echo "ERROR: approved production path is unavailable"
+              exit 1
+            }
+          done
+          for path in "${DATA_PATH}/app.sqlite" "${DATA_PATH}/parents.sqlite"; do
+            [ -f "${path}" ] && [ ! -L "${path}" ] || {
+              echo "ERROR: production database is unavailable"
+              exit 1
+            }
+          done
+          [ "$(git -C "${REPO_PATH}" branch --show-current)" = "master" ]
+          [ -z "$(git -C "${REPO_PATH}" status --porcelain --untracked-files=no)" ]
+          git -C "${REPO_PATH}" fetch --no-tags origin master
+          [ "$(git -C "${REPO_PATH}" rev-parse origin/master)" = "${EXPECTED_COMMIT}" ]
+
+          [ -e "${BACKUP_ROOT}/.managed-content-t9.lock" ]
+          [ -e "${BACKUP_ROOT}/.production-app-deploy.lock" ]
+          exec 9>"${BACKUP_ROOT}/.managed-content-t9.lock"
+          flock -n 9 || { echo "ERROR: another managed-content operation is active"; exit 1; }
+          exec 8>"${BACKUP_ROOT}/.production-app-deploy.lock"
+          flock -n 8 || { echo "ERROR: an application deployment is active"; exit 1; }
+
+          RUN_ID=full-reindex-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
+          RUN_ROOT=${BACKUP_ROOT}/${RUN_ID}
+          SHADOW_DATA=${DATA_PATH}/${RUN_ID}-shadow
+          SHADOW_COLLECTION=pincheng_docs_rebuild_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}
+          REPORT_PATH=${SHADOW_DATA}/report.json
+          [ ! -e "${RUN_ROOT}" ] && [ ! -e "${SHADOW_DATA}" ]
+          mkdir -m 700 "${RUN_ROOT}" "${SHADOW_DATA}"
+
+          COMPOSE=(docker compose -p ragpincheng-prod -f "${REPO_PATH}/docker/docker-compose.yml" -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
+          MAINTENANCE=("${COMPOSE[@]}" run --rm --no-deps -T -v "${GITHUB_WORKSPACE}:/maintenance-repo:ro" backend)
+          SNAPSHOT_TOOL=("${COMPOSE[@]}" run --rm --no-deps -T -v "${RUN_ROOT}:/rebuild-backup" backend)
+          BACKEND_CONTAINER="$("${COMPOSE[@]}" ps -q backend)"
+          [ -n "${BACKEND_CONTAINER}" ]
+          [ "$(docker inspect --format '{{.State.Health.Status}}' "${BACKEND_CONTAINER}")" = "healthy" ]
+
+          active_job_preflight() {
+            local label="$1"
+            APP_DATABASE="${DATA_PATH}/app.sqlite" python3 - "${label}" <<'PY'
+          import os, sqlite3, sys
+          active = {
+              "content_index_jobs": ("status", ("pending", "parsing", "chunking", "summarizing", "embedding")),
+              "content_reclassification_jobs": ("status", ("pending", "applying", "committing", "rolling_back")),
+              "content_bulk_operations": ("status", ("pending", "running")),
+              "index_jobs": ("status", ("pending", "running")),
+              "transcript_publication_index_jobs": ("status", ("pending", "parsing", "chunking", "embedding")),
+              "transcription_jobs": ("status", ("pending", "running")),
+          }
+          details = {}
+          with sqlite3.connect(f"file:{os.environ['APP_DATABASE']}?mode=ro", uri=True) as conn:
+              tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+              for table, (column, statuses) in active.items():
+                  if table not in tables:
+                      details[table] = 0
+                      continue
+                  marks = ",".join("?" for _ in statuses)
+                  details[table] = conn.execute(
+                      f"SELECT count(*) FROM {table} WHERE {column} IN ({marks})", statuses
+                  ).fetchone()[0]
+          print("ACTIVE_JOB_PREFLIGHT", sys.argv[1], " ".join(f"{k}={v}" for k, v in details.items()))
+          if any(details.values()):
+              raise SystemExit("active application jobs must finish before rebuild")
+          PY
+          }
+
+          head_snapshot_sha256() {
+            APP_DATABASE="$1" python3 - <<'PY'
+          import hashlib, json, os, sqlite3
+          with sqlite3.connect(f"file:{os.environ['APP_DATABASE']}?mode=ro", uri=True) as conn:
+              payload = {
+                  "managed": conn.execute(
+                      "SELECT item_id,current_version_id,publication_id FROM content_item_heads ORDER BY item_id"
+                  ).fetchall(),
+                  "transcripts": conn.execute(
+                      "SELECT media_id,current_version_id FROM media_transcript_heads ORDER BY media_id"
+                  ).fetchall(),
+              }
+          print(hashlib.sha256(json.dumps(payload, separators=(",", ":")).encode()).hexdigest())
+          PY
+          }
+
+          active_job_preflight initial
+          HEAD_SNAPSHOT_SHA256="$(head_snapshot_sha256 "${DATA_PATH}/app.sqlite")"
+          [[ "${HEAD_SNAPSHOT_SHA256}" =~ ^[0-9a-f]{64}$ ]]
+
+          "${MAINTENANCE[@]}" curl -fsS http://qdrant:6333/collections/pincheng_docs > "${RUN_ROOT}/qdrant-before.json"
+          RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          result = json.loads((Path(os.environ["RUN_ROOT_ENV"]) / "qdrant-before.json").read_text())["result"]
+          if result.get("status") != "green" or int(result.get("points_count") or 0) <= 0:
+              raise SystemExit("production Qdrant is not a non-empty green collection")
+          PY
+
+          BACKUP_DEVICE="$(findmnt -n -o MAJ:MIN -T "${BACKUP_ROOT}")"
+          [ "$(findmnt -n -o MAJ:MIN -T "${DATA_PATH}")" != "${BACKUP_DEVICE}" ]
+          [ "$(findmnt -n -o MAJ:MIN -T "${CONTENT_ROOT}")" != "${BACKUP_DEVICE}" ]
+          DATABASE_BYTES="$(du -cb "${DATA_PATH}/app.sqlite" "${DATA_PATH}/parents.sqlite" | awk 'END {print $1}')"
+          CONTENT_BYTES="$(du -sb "${CONTENT_ROOT}/objects" | awk '{print $1}')"
+          QDRANT_BYTES="$(RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          result = json.loads((Path(os.environ["RUN_ROOT_ENV"]) / "qdrant-before.json").read_text())["result"]
+          print(int(result.get("disk_data_size") or 0))
+          PY
+          )"
+          BACKUP_FREE="$(df -PB1 "${BACKUP_ROOT}" | awk 'NR==2 {print $4}')"
+          DATA_FREE="$(df -PB1 "${DATA_PATH}" | awk 'NR==2 {print $4}')"
+          [ "${BACKUP_FREE}" -ge $((DATABASE_BYTES * 2 + QDRANT_BYTES * 2 + 5368709120)) ]
+          [ "${DATA_FREE}" -ge $((CONTENT_BYTES * 2 + QDRANT_BYTES * 2 + 10737418240)) ]
+
+          SRC="${DATA_PATH}" DST="${RUN_ROOT}" python3 - <<'PY'
+          import os, sqlite3
+          from pathlib import Path
+          source, destination = Path(os.environ["SRC"]), Path(os.environ["DST"])
+          for name in ("app.sqlite", "parents.sqlite"):
+              with sqlite3.connect(f"file:{source / name}?mode=ro", uri=True) as current:
+                  if current.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                      raise SystemExit(f"source integrity failed: {name}")
+                  with sqlite3.connect(destination / name) as backup:
+                      current.backup(backup)
+                      if backup.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                          raise SystemExit(f"backup integrity failed: {name}")
+          PY
+          [ "$(head_snapshot_sha256 "${RUN_ROOT}/app.sqlite")" = "${HEAD_SNAPSHOT_SHA256}" ]
+
+          "${MAINTENANCE[@]}" curl -fsS -X POST http://qdrant:6333/collections/pincheng_docs/snapshots > "${RUN_ROOT}/qdrant-before-snapshot.json"
+          BEFORE_SNAPSHOT_NAME="$(RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          payload = json.loads((Path(os.environ["RUN_ROOT_ENV"]) / "qdrant-before-snapshot.json").read_text())
+          name = payload.get("result", {}).get("name")
+          if payload.get("status") != "ok" or not name:
+              raise SystemExit("invalid production Qdrant snapshot response")
+          print(name)
+          PY
+          )"
+          "${MAINTENANCE[@]}" curl -fsS --max-time 1800 \
+            "http://qdrant:6333/collections/pincheng_docs/snapshots/${BEFORE_SNAPSHOT_NAME}" \
+            > "${RUN_ROOT}/qdrant-before.snapshot"
+          [ -s "${RUN_ROOT}/qdrant-before.snapshot" ]
+          echo "REBUILD_BACKUP status=complete path=${RUN_ROOT}"
+
+          set +e
+          "${COMPOSE[@]}" run --rm --no-deps -T \
+            -v "${GITHUB_WORKSPACE}:/maintenance-repo:ro" \
+            -v "${RUN_ROOT}:/rebuild-backup:ro" \
+            -e "RAG_DATA_DIR=/app/data/${RUN_ID}-shadow" \
+            -e "RAG_PARSED_DIR=/app/data/${RUN_ID}-shadow/parsed" \
+            -e "QDRANT_COLLECTION=${SHADOW_COLLECTION}" \
+            backend python /maintenance-repo/scripts/rebuild_managed_index.py \
+              --app-database /rebuild-backup/app.sqlite \
+              --content-root /app/content \
+              --artifact-root /app/content/transcription-artifacts \
+              --report "/app/data/${RUN_ID}-shadow/report.json"
+          BUILD_STATUS=$?
+          set -e
+          [ "${BUILD_STATUS}" -eq 0 ] || {
+            echo "ERROR: shadow index build failed; production index was not changed"
+            exit "${BUILD_STATUS}"
+          }
+          [ -s "${REPORT_PATH}" ]
+          echo "REBUILD_SHADOW status=verified collection=${SHADOW_COLLECTION} report=${REPORT_PATH}"
+
+          "${MAINTENANCE[@]}" curl -fsS -X POST \
+            "http://qdrant:6333/collections/${SHADOW_COLLECTION}/snapshots" \
+            > "${RUN_ROOT}/qdrant-shadow-snapshot.json"
+          SHADOW_SNAPSHOT_NAME="$(RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          payload = json.loads((Path(os.environ["RUN_ROOT_ENV"]) / "qdrant-shadow-snapshot.json").read_text())
+          name = payload.get("result", {}).get("name")
+          if payload.get("status") != "ok" or not name:
+              raise SystemExit("invalid shadow Qdrant snapshot response")
+          print(name)
+          PY
+          )"
+          "${MAINTENANCE[@]}" curl -fsS --max-time 1800 \
+            "http://qdrant:6333/collections/${SHADOW_COLLECTION}/snapshots/${SHADOW_SNAPSHOT_NAME}" \
+            > "${RUN_ROOT}/qdrant-shadow.snapshot"
+          [ -s "${RUN_ROOT}/qdrant-shadow.snapshot" ]
+
+          active_job_preflight cutover
+          LIVE_HEAD_SHA256="$(head_snapshot_sha256 "${DATA_PATH}/app.sqlite")"
+          [ "${LIVE_HEAD_SHA256}" = "${HEAD_SNAPSHOT_SHA256}" ] || {
+            echo "HEAD_SNAPSHOT_CHANGED expected=${HEAD_SNAPSHOT_SHA256} actual=${LIVE_HEAD_SHA256}"
+            exit 1
+          }
+
+          MUTATED=0
+          BACKEND_STOPPED=0
+          rollback_rebuild() (
+            set -euo pipefail
+            echo "REBUILD_ROLLBACK status=starting"
+            "${COMPOSE[@]}" stop backend || true
+            "${SNAPSHOT_TOOL[@]}" curl -fsS --max-time 1800 -X POST \
+              "http://qdrant:6333/collections/pincheng_docs/snapshots/upload?priority=snapshot" \
+              -F "snapshot=@/rebuild-backup/qdrant-before.snapshot" \
+              > "${RUN_ROOT}/qdrant-rollback.json"
+            SRC="${RUN_ROOT}/parents.sqlite" DST="${DATA_PATH}/parents.sqlite" python3 - <<'PY'
+          import os, sqlite3
+          with sqlite3.connect(f"file:{os.environ['SRC']}?mode=ro", uri=True) as source:
+              if source.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                  raise SystemExit("rollback Parent backup is invalid")
+              with sqlite3.connect(os.environ["DST"]) as target:
+                  source.backup(target)
+                  if target.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                      raise SystemExit("rollback Parent restore failed")
+          PY
+            "${COMPOSE[@]}" up -d --no-deps backend
+            for attempt in $(seq 1 60); do
+              container="$("${COMPOSE[@]}" ps -q backend)"
+              [ -n "${container}" ] && \
+                [ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "${container}" 2>/dev/null || true)" = "healthy" ] && break
+              sleep 5
+            done
+            [ "$(docker inspect --format '{{.State.Health.Status}}' "$("${COMPOSE[@]}" ps -q backend)")" = "healthy" ]
+            echo "REBUILD_ROLLBACK status=complete"
+          )
+
+          on_exit() {
+            status=$?
+            if [ "${status}" -ne 0 ] && [ "${MUTATED}" -eq 1 ]; then
+              rollback_rebuild || echo "REBUILD_ROLLBACK status=failed"
+            elif [ "${status}" -ne 0 ] && [ "${BACKEND_STOPPED}" -eq 1 ]; then
+              "${COMPOSE[@]}" up -d --no-deps backend || true
+            fi
+            exit "${status}"
+          }
+          trap on_exit EXIT
+
+          "${COMPOSE[@]}" stop backend
+          BACKEND_STOPPED=1
+          MUTATED=1
+          "${SNAPSHOT_TOOL[@]}" curl -fsS --max-time 1800 -X POST \
+            "http://qdrant:6333/collections/pincheng_docs/snapshots/upload?priority=snapshot" \
+            -F "snapshot=@/rebuild-backup/qdrant-shadow.snapshot" \
+            > "${RUN_ROOT}/qdrant-cutover.json"
+          SRC="${SHADOW_DATA}/parents.sqlite" DST="${DATA_PATH}/parents.sqlite" python3 - <<'PY'
+          import os, sqlite3
+          with sqlite3.connect(f"file:{os.environ['SRC']}?mode=ro", uri=True) as source:
+              if source.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                  raise SystemExit("shadow Parent database is invalid")
+              with sqlite3.connect(os.environ["DST"]) as target:
+                  source.backup(target)
+                  if target.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                      raise SystemExit("Parent cutover failed")
+          PY
+          "${COMPOSE[@]}" up -d --no-deps backend
+          BACKEND_STOPPED=0
+          for attempt in $(seq 1 60); do
+            BACKEND_CONTAINER="$("${COMPOSE[@]}" ps -q backend)"
+            [ -n "${BACKEND_CONTAINER}" ] && \
+              [ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "${BACKEND_CONTAINER}" 2>/dev/null || true)" = "healthy" ] && break
+            sleep 5
+          done
+          [ "$(docker inspect --format '{{.State.Health.Status}}' "${BACKEND_CONTAINER}")" = "healthy" ]
+          "${COMPOSE[@]}" exec -T backend curl -fsS http://localhost:8000/api/health >/dev/null
+
+          "${COMPOSE[@]}" run --rm --no-deps -T \
+            -e "REPORT_PATH_ENV=/app/data/${RUN_ID}-shadow/report.json" \
+            backend python3 - <<'PY'
+          import json, os, sqlite3, urllib.request
+          report = json.load(open(os.environ["REPORT_PATH_ENV"], encoding="utf-8"))
+          with urllib.request.urlopen("http://qdrant:6333/collections/pincheng_docs", timeout=30) as response:
+              result = json.load(response)["result"]
+          if result.get("status") != "green" or result.get("points_count") != report["indexed"]["children"]:
+              raise SystemExit("production Qdrant does not match the verified shadow report")
+          with sqlite3.connect("/app/data/parents.sqlite") as conn:
+              if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                  raise SystemExit("production Parent integrity failed")
+              if conn.execute("SELECT count(*) FROM parents").fetchone()[0] != report["indexed"]["parents"]:
+                  raise SystemExit("production Parent count does not match the verified shadow report")
+          PY
+          [ "$(head_snapshot_sha256 "${DATA_PATH}/app.sqlite")" = "${HEAD_SNAPSHOT_SHA256}" ]
+          MUTATED=0
+          echo "REBUILD_CUTOVER status=success target=${EXPECTED_COMMIT} collection=pincheng_docs"
+          echo "REBUILD_ROLLBACK_READY status=retained backup=${RUN_ROOT} shadow=${SHADOW_DATA}"
