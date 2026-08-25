@@ -3730,7 +3730,7 @@ export function AdminManagedContentPage() {
       toast.error(
         previewError instanceof Error
           ? previewError.message
-          : "PPTX 预览生成失败，请稍后重试",
+          : `${item.doc_type.toUpperCase()} 预览生成失败，请稍后重试`,
       );
     } finally {
       setBusyAction(null);
