@@ -63,6 +63,7 @@ from .office_convert import (
     is_valid_pdf_file,
     convert_xlsx_to_markdown,
     recalculate_xlsx,
+    write_xlsx_preview,
 )
 from .xmind_parser import parse_xmind, xmind_to_markdown
 
@@ -355,6 +356,8 @@ def _build_xlsx_doc(
         try:
             recalc_path = recalculate_xlsx(source_path)
             convert_path = recalc_path
+            if write_preview:
+                write_xlsx_preview(source_path, recalc_path.read_bytes())
         except Exception as exc:
             logger.warning("LibreOffice recalculation failed, using original: %s", exc)
             convert_path = source_path

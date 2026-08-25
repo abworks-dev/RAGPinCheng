@@ -18,6 +18,7 @@ Two entry points share the pipeline:
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+import re
 from time import perf_counter
 from typing import Iterator
 
@@ -48,6 +49,27 @@ HISTORY_TURNS = 4
 # How many of the previous turn's top sources to carry forward into the next
 # retrieval as a safety net for thin follow-ups.
 CARRY_SOURCES = 2
+
+_VAGUE_FOLLOW_UP_RE = re.compile(
+    r"^(?:那)?(?:这个|那个|上面|刚才说的)?(?:呢|怎么样|怎么说|怎么看|看下|看一下)?[？?。！!]*$"
+    r"|^(?:那)?我(?:来)?问你(?:看下|看一下)?[？?。！!]*$"
+)
+_CLARIFICATION_MESSAGE = (
+    "我还无法确定您想追问上一条回答中的哪一项。"
+    "请补充具体对象或条件，例如条款、构件、材料型号或操作步骤。"
+)
+
+
+@dataclass
+class QueryResolution:
+    """How conversational text was resolved into a retrieval query."""
+
+    original_query: str
+    standalone_query: str
+    kind: str = "standalone"
+    confidence: float = 1.0
+    referenced_turns: list[int] = field(default_factory=list)
+    fallback_reason: str = ""
 
 
 def _context_budget(
@@ -175,6 +197,7 @@ class StreamingTurnPrep:
     guard_reason: str = ""
     relevance: dict = field(default_factory=dict)
     policy_snapshot: dict = field(default_factory=dict)
+    query_resolution: QueryResolution | None = None
 
 
 _USAGE_KEYS = ("prompt_tokens", "completion_tokens", "total_tokens")
@@ -268,7 +291,7 @@ class ChatSession:
 
     def _resolve_search_query(
         self, query: str, usage_out: dict | None = None,
-    ) -> tuple[str, float]:
+    ) -> tuple[QueryResolution, float]:
         """Step ①: pick the query to send to retrieval, with timing.
 
         Skips the rewrite LLM call when:
@@ -281,7 +304,7 @@ class ChatSession:
         t0 = perf_counter()
         prior = self.state.history_for_rewrite()
         if not prior:
-            return query, perf_counter() - t0
+            return QueryResolution(query, query), perf_counter() - t0
 
         last_user = next(
             (m["content"] for m in reversed(prior) if m["role"] == "user"),
@@ -292,10 +315,32 @@ class ChatSession:
             and self.state.last_search_query
             and query.strip() == last_user.strip()
         ):
-            return self.state.last_search_query, perf_counter() - t0
+            return QueryResolution(
+                query, self.state.last_search_query,
+                fallback_reason="repeat_query",
+            ), perf_counter() - t0
 
         rewritten = rewrite_query(prior, query, usage_out=usage_out)
-        return rewritten, perf_counter() - t0
+        changed = rewritten.strip() != query.strip()
+        resolution = QueryResolution(
+            original_query=query,
+            standalone_query=rewritten,
+            kind="follow_up" if changed else "standalone",
+            confidence=0.8 if changed else 0.6,
+        )
+        if not changed and _VAGUE_FOLLOW_UP_RE.fullmatch(query.strip()):
+            resolution.kind = "clarification_required"
+            resolution.confidence = 0.0
+            resolution.referenced_turns = [self.state.turn_index]
+            resolution.fallback_reason = "ambiguous_follow_up"
+            return resolution, perf_counter() - t0
+        if not changed and len(query.strip()) <= 12 and last_user:
+            resolution.kind = "follow_up"
+            resolution.standalone_query = f"{last_user.strip()}；追问：{query.strip()}"
+            resolution.confidence = 0.35
+            resolution.referenced_turns = [self.state.turn_index]
+            resolution.fallback_reason = "short_follow_up_fallback"
+        return resolution, perf_counter() - t0
 
     def _fresh_retrieve(
         self,
@@ -377,9 +422,10 @@ class ChatSession:
         policy_snapshot = policy.public_dict()
 
         # ① REWRITE
-        search_query, rewrite_t = self._resolve_search_query(
+        resolution, rewrite_t = self._resolve_search_query(
             query, usage_out=rewrite_usage,
         )
+        search_query = resolution.standalone_query
         timings["rewrite"] = rewrite_t
         rewrite_applied = search_query != query
         has_history = bool(self.state.messages)
@@ -411,6 +457,27 @@ class ChatSession:
                 rewrite_applied=rewrite_applied,
                 timings=timings,
                 guard_reason=guard.reason,
+                policy_snapshot=policy_snapshot,
+            )
+            self.last_turn_result = result
+            return result
+
+        if resolution.kind == "clarification_required":
+            self.state.append_turn(query, _CLARIFICATION_MESSAGE, sources_for_ui=[], policy_snapshot=policy_snapshot)
+            timings.update({"retrieve": 0.0, "generate": 0.0})
+            timings["total"] = sum(timings.values())
+            result = TurnResult(
+                answer_text=_CLARIFICATION_MESSAGE,
+                sources=[],
+                search_query=query,
+                fresh_sources=[],
+                final_sources=[],
+                answer=None,
+                history_chars=0,
+                budget=0,
+                rewrite_applied=False,
+                timings=timings,
+                guard_reason="clarification_required",
                 policy_snapshot=policy_snapshot,
             )
             self.last_turn_result = result
@@ -534,9 +601,10 @@ class ChatSession:
         policy_snapshot = policy.public_dict()
 
         # ① REWRITE
-        search_query, rewrite_t = self._resolve_search_query(
+        resolution, rewrite_t = self._resolve_search_query(
             query, usage_out=rewrite_usage,
         )
+        search_query = resolution.standalone_query
         timings["rewrite"] = rewrite_t
         rewrite_applied = search_query != query
         has_history = bool(self.state.messages)
@@ -562,6 +630,7 @@ class ChatSession:
                 no_source_fallback=True,
                 guard_reason=guard.reason,
                 policy_snapshot=policy_snapshot,
+                query_resolution=resolution,
             )
 
             def _fallback_iter() -> Iterator[str]:
@@ -581,6 +650,34 @@ class ChatSession:
                 rewrite_usage=dict(rewrite_usage),
                 guard_reason=guard.reason,
                 policy=policy,
+            )
+            return prep, stream
+
+        if resolution.kind == "clarification_required":
+            prep = StreamingTurnPrep(
+                search_query=query,
+                rewrite_applied=False,
+                fresh_sources=[],
+                final_sources=[],
+                used_sources=[],
+                history_chars=0,
+                budget=0,
+                timings=dict(timings),
+                no_source_fallback=True,
+                guard_reason="clarification_required",
+                policy_snapshot=policy_snapshot,
+                query_resolution=resolution,
+            )
+
+            def _clarification_iter() -> Iterator[str]:
+                yield _CLARIFICATION_MESSAGE
+
+            stream = self._wrap_stream(
+                _clarification_iter(), query=query, search_query=query,
+                rewrite_applied=False, fresh_sources=[], final_sources=[],
+                gen_prep=None, history_chars=0, budget=0,
+                timings_so_far=dict(timings), rewrite_usage=dict(rewrite_usage),
+                guard_reason="clarification_required", policy=policy,
             )
             return prep, stream
 
@@ -609,6 +706,7 @@ class ChatSession:
                 no_source_fallback=True,
                 relevance=relevance,
                 policy_snapshot=policy_snapshot,
+                query_resolution=resolution,
             )
 
             def _fallback_iter() -> Iterator[str]:
@@ -644,6 +742,7 @@ class ChatSession:
                 no_source_fallback=True,
                 relevance=relevance,
                 policy_snapshot=policy_snapshot,
+                query_resolution=resolution,
             )
             def _low_confidence_iter() -> Iterator[str]:
                 yield LOW_CONFIDENCE_MESSAGE
@@ -673,6 +772,7 @@ class ChatSession:
             timings=dict(timings),
             relevance=relevance,
             policy_snapshot=policy_snapshot,
+            query_resolution=resolution,
         )
 
         stream = self._wrap_stream(

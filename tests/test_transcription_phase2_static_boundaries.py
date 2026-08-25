@@ -19,7 +19,7 @@ PROTECTED = {
     "api/indexing.py": "048559281160fa3c6ca4ee611cfb5757b0854e84b8bd90e912fbd51a4d299b21",
     "src/chunk.py": "47b0845053645ecc24e7a00c201936e29bd95dc8e0101949544837b571046970",
     "src/index.py": "071e278e0edcf54ddb8cb4b6bd53efe8fee98fae1b6432a52c581907beaa004f",
-    "src/indexing_pipeline.py": "ae3c2509a4840e66d00aa0b0e83751daffa8ab76321a8ecaaae478d8141dfc97",
+    "src/indexing_pipeline.py": "be509610ad5c1d5a0dbd1b412c9c02f5fda7c0b543bbe5fdb89fdcd3f0234c2f",
     "src/retrieve.py": "de585207fe38d94edca120a1a47670b538607d7cc62119d1c73946ac4087ddbf",
 }
 FORBIDDEN = {

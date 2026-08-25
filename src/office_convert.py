@@ -437,6 +437,31 @@ def recalculate_xlsx(path: Path) -> Path:
     return temp
 
 
+def write_xlsx_preview(path: Path, preview_bytes: bytes) -> Path:
+    """Atomically write a recalculated workbook beside the source file."""
+    preview_path = path.with_suffix(".preview.xlsx")
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            prefix=f".{preview_path.name}.",
+            suffix=".tmp",
+            dir=preview_path.parent,
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            handle.write(preview_bytes)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if not is_valid_xlsx_file(temporary_path):
+            raise RuntimeError("XLSX recalculation failed: invalid OOXML output")
+        os.replace(temporary_path, preview_path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+    return preview_path
+
+
 def _convert_xlsx_to_markdown_impl(path: Path) -> tuple[str, list[dict[str, Any]]]:
     """Convert an XLSX file to Markdown using openpyxl.
 
@@ -574,6 +599,17 @@ def is_valid_pdf_file(path: Path) -> bool:
             return False
         with path.open("rb") as handle:
             return handle.read(5) == b"%PDF-"
+    except OSError:
+        return False
+
+
+def is_valid_xlsx_file(path: Path) -> bool:
+    """Return whether a regular file has an OOXML workbook signature."""
+    try:
+        if not path.is_file() or path.is_symlink():
+            return False
+        with path.open("rb") as handle:
+            return handle.read(4) == b"PK\x03\x04"
     except OSError:
         return False
 

@@ -325,6 +325,17 @@ async def chat(
                 yield event("prep", {
                     "search_query": prep.search_query,
                     "rewrite_applied": prep.rewrite_applied,
+                    "query_resolution": (
+                        {
+                            "original_query": prep.query_resolution.original_query,
+                            "standalone_query": prep.query_resolution.standalone_query,
+                            "kind": prep.query_resolution.kind,
+                            "confidence": prep.query_resolution.confidence,
+                            "referenced_turns": prep.query_resolution.referenced_turns,
+                            "fallback_reason": prep.query_resolution.fallback_reason,
+                        }
+                        if prep.query_resolution else None
+                    ),
                     "history_chars": prep.history_chars,
                     "budget": prep.budget,
                     "fresh_count": len(prep.fresh_sources),
