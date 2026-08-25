@@ -105,17 +105,31 @@ def _legacy_conversion(source_path: Path, target: str) -> Path:
     return converted
 
 
-def _build_legacy_doc(source_path: Path, doc_type: str, on_status: StatusFn, *, parsed_dir: Path, write_preview: bool) -> ParsedDoc:
+def _build_legacy_doc(
+    source_path: Path,
+    doc_type: str,
+    on_status: StatusFn,
+    *,
+    parsed_dir: Path,
+    write_preview: bool,
+    force_parse: bool = False,
+) -> ParsedDoc:
     target = {"doc": "docx", "xls": "xlsx", "ppt": "pptx"}[doc_type]
     converted = _legacy_conversion(source_path, target)
     if doc_type == "doc":
-        doc = _build_docx_doc(converted, on_status, parsed_dir=parsed_dir)
+        doc = _build_docx_doc(converted, on_status, parsed_dir=parsed_dir, force_parse=force_parse)
     elif doc_type == "xls":
-        doc = _build_xlsx_doc(converted, on_status, parsed_dir=parsed_dir, write_preview=write_preview)
+        doc = _build_xlsx_doc(
+            converted, on_status, parsed_dir=parsed_dir,
+            write_preview=write_preview, force_parse=force_parse,
+        )
         if write_preview:
             shutil.copyfile(converted, source_path.with_suffix(".preview.xlsx"))
     else:
-        doc = _build_pptx_doc(converted, on_status, parsed_dir=parsed_dir, write_preview=write_preview)
+        doc = _build_pptx_doc(
+            converted, on_status, parsed_dir=parsed_dir,
+            write_preview=write_preview, force_parse=force_parse,
+        )
         preview = converted.with_suffix(".preview.pdf")
         if write_preview and preview.is_file(): preview.replace(source_path.with_suffix(".preview.pdf"))
     return replace(doc, source_path=source_path, doc_type=doc_type, doc_title=source_path.stem)
@@ -194,12 +208,16 @@ def _build_pdf_doc(
     *,
     parsed_dir: Path = PARSED_DIR,
     cache_stem: str | None = None,
+    force_parse: bool = False,
 ) -> ParsedDoc:
     """Parse a PDF via MinerU and cache the markdown under data/parsed/."""
     parsed_dir.mkdir(parents=True, exist_ok=True)
     stem = cache_stem or _safe_stem(source_path)
     md_path = parsed_dir / f"{stem}.md"
     location_map_path = parsed_dir / f"{stem}.locations.json"
+    if force_parse:
+        md_path.unlink(missing_ok=True)
+        location_map_path.unlink(missing_ok=True)
     # Match `ingest_all`'s preference: cloud if MINERU_API_KEY is set,
     # otherwise the local CLI.
     if md_path.exists():
@@ -297,12 +315,19 @@ def _build_xmind_doc(
 
 
 def _build_docx_doc(
-    source_path: Path, on_status: StatusFn, *, parsed_dir: Path = PARSED_DIR
+    source_path: Path,
+    on_status: StatusFn,
+    *,
+    parsed_dir: Path = PARSED_DIR,
+    force_parse: bool = False,
 ) -> ParsedDoc:
     """Parse a DOCX via Docling Slim and cache the markdown under data/parsed/."""
     parsed_dir.mkdir(parents=True, exist_ok=True)
     md_path = _md_path_for_office(source_path, parsed_dir)
     location_map_path = md_path.with_suffix(".locations.json")
+    if force_parse:
+        md_path.unlink(missing_ok=True)
+        location_map_path.unlink(missing_ok=True)
 
     if md_path.exists():
         on_status("parsing")
@@ -335,6 +360,7 @@ def _build_xlsx_doc(
     *,
     parsed_dir: Path = PARSED_DIR,
     write_preview: bool = True,
+    force_parse: bool = False,
 ) -> ParsedDoc:
     """Parse an XLSX via openpyxl and cache the markdown under data/parsed/.
 
@@ -345,6 +371,9 @@ def _build_xlsx_doc(
     parsed_dir.mkdir(parents=True, exist_ok=True)
     md_path = _md_path_for_office(source_path, parsed_dir)
     location_map_path = md_path.with_suffix(".locations.json")
+    if force_parse:
+        md_path.unlink(missing_ok=True)
+        location_map_path.unlink(missing_ok=True)
 
     if md_path.exists():
         on_status("parsing")
@@ -395,6 +424,7 @@ def _build_pptx_doc(
     *,
     parsed_dir: Path = PARSED_DIR,
     write_preview: bool = True,
+    force_parse: bool = False,
 ) -> ParsedDoc:
     """Parse a PPTX via Docling and cache the markdown under data/parsed/.
 
@@ -403,6 +433,9 @@ def _build_pptx_doc(
     parsed_dir.mkdir(parents=True, exist_ok=True)
     md_path = _md_path_for_office(source_path, parsed_dir)
     location_map_path = md_path.with_suffix(".locations.json")
+    if force_parse:
+        md_path.unlink(missing_ok=True)
+        location_map_path.unlink(missing_ok=True)
 
     if md_path.exists():
         on_status("parsing")
@@ -536,6 +569,9 @@ def index_managed_content(
     doc_type: str,
     metadata: ManagedIndexMetadata,
     on_status: StatusFn = lambda _s: None,
+    *,
+    force_parse: bool = False,
+    write_preview: bool = True,
 ) -> IndexResult:
     """Build a versioned candidate without deriving identity from its folder."""
     if doc_type not in ("pdf", "markdown", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "xmind"):
@@ -546,16 +582,21 @@ def index_managed_content(
     if doc_type == "markdown":
         doc = _build_markdown_doc(source_path)
     elif doc_type in ("doc", "xls", "ppt"):
-        doc = _build_legacy_doc(source_path, doc_type, on_status, parsed_dir=parsed_dir, write_preview=True)
+        doc = _build_legacy_doc(
+            source_path, doc_type, on_status, parsed_dir=parsed_dir,
+            write_preview=write_preview, force_parse=force_parse,
+        )
     elif doc_type == "docx":
-        doc = _build_docx_doc(source_path, on_status, parsed_dir=parsed_dir)
+        doc = _build_docx_doc(source_path, on_status, parsed_dir=parsed_dir, force_parse=force_parse)
     elif doc_type == "xlsx":
         doc = _build_xlsx_doc(
-            source_path, on_status, parsed_dir=parsed_dir, write_preview=True
+            source_path, on_status, parsed_dir=parsed_dir, write_preview=write_preview,
+            force_parse=force_parse,
         )
     elif doc_type == "pptx":
         doc = _build_pptx_doc(
-            source_path, on_status, parsed_dir=parsed_dir, write_preview=True
+            source_path, on_status, parsed_dir=parsed_dir, write_preview=write_preview,
+            force_parse=force_parse,
         )
     elif doc_type == "xmind":
         doc = _build_xmind_doc(source_path, on_status, parsed_dir=parsed_dir)
@@ -565,6 +606,7 @@ def index_managed_content(
             on_status,
             parsed_dir=parsed_dir,
             cache_stem="document",
+            force_parse=force_parse,
         )
     doc = replace(
         doc,

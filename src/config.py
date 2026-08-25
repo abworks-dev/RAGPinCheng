@@ -12,7 +12,7 @@ from src.transcription_admission_config import (
 load_dotenv()
 
 ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT / "data"
+DATA_DIR = Path(os.getenv("RAG_DATA_DIR", str(ROOT / "data"))).resolve()
 CONTENT_ROOT = Path(os.getenv("CONTENT_ROOT", str(ROOT / "content"))).resolve()
 CONTENT_BULK_ARCHIVE_ROOT = Path(
     os.getenv("CONTENT_BULK_ARCHIVE_ROOT", str(CONTENT_ROOT / ".bulk-archives"))
@@ -119,7 +119,7 @@ if EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE < 1:
     raise ValueError("EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE must be positive")
 if EXTERNAL_MEDIA_SCAN_POLL_SECONDS < 10:
     raise ValueError("EXTERNAL_MEDIA_SCAN_POLL_SECONDS must be at least 10")
-PARSED_DIR = DATA_DIR / "parsed"
+PARSED_DIR = Path(os.getenv("RAG_PARSED_DIR", str(DATA_DIR / "parsed"))).resolve()
 QDRANT_DIR = DATA_DIR / "qdrant"  # legacy embedded-mode path; unused after the server migration but kept for the optional cleanup script
 PARENTS_DB = DATA_DIR / "parents.sqlite"
 APP_DB_PATH = Path(os.getenv("APP_DB_PATH", str(DATA_DIR / "app.sqlite")))
@@ -244,7 +244,9 @@ GPU_EXPECTED_API_VERSION = "1"
 GPU_EXPECTED_EMBED_DIM = 1024
 
 # Qdrant
-COLLECTION = "pincheng_docs"
+COLLECTION = os.getenv("QDRANT_COLLECTION", "pincheng_docs").strip()
+if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", COLLECTION):
+    raise ValueError("QDRANT_COLLECTION is invalid")
 # Qdrant server URL. The backend talks to a separate Qdrant process over
 # HTTP — no more embedded file mode, no more file lock. Default points at a
 # local `docker run -p 6333:6333 qdrant/qdrant`. In docker-compose the

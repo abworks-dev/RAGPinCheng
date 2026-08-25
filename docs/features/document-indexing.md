@@ -1,7 +1,7 @@
 # 文档摄取与索引
 
 - 状态：已实现
-- 最后核对：2026-08-20
+- 最后核对：2026-08-26
 
 ## 用户可观察能力
 
@@ -53,6 +53,7 @@
 - 代码支持 `DOCS_DIR`、`MEDIA_DIR`、`DOCS_HOST_PATH`、`MEDIA_HOST_PATH` 和 `TRANSCRIPTION_ARTIFACT_DIR` 显式配置；本地兼容模式的 `DOCS_DIR` 和 Compose 宿主机默认值仍指向 `content/legacy-docs`，仓库 `docs/` 只存放项目文档。生产完成标记为 `true` 时，仓库内最终 Compose overlay 必须位于私有生产 override 之后，并以 `!override` 完整替换 backend volumes：重新声明 `/app/data`、`/app/content`、`/app/media`，把 `/app/docs` 替换为空的只读 tmpfs。生产不再要求 `DOCS_HOST_PATH` 或宿主机 `content/legacy-docs`；部署、失败回滚和手工恢复共用该顺序。
 - `strict` 检索契约按身份分流：普通资料必须命中 `content_item_heads`，带 `transcript_version_id` 的转录由独立 `media_transcript_heads` 快照校验；双重无版本身份的旧 Parent/Child 被拒绝。生产部署会同时核对 strict 配置、受管 head、索引计数和容器 mount source，从容器 mountinfo 核对 `/app/docs` 是带 `ro` 选项的 tmpfs 并执行不可写探针，同时拒绝任何仍来自 `/data/business/ragpincheng/source` 的 `/app/media` 或 `/app/content` 挂载；失败时恢复上一镜像。
 - T12-B 提供精确 plan/apply/verify 和受控生产 workflow：候选 ID、媒体/head、正式版本及审计表均指纹化，活动任务或冻结摘要漂移会在写入前失败；执行仅归档旧媒体记录、删除旧 transcript head 和精确候选 Parent/Point，不重建 collection，也不删除旧文件。
+- 生产全量索引重建只允许通过 `rebuild-production-index-manual.yml`：它从 `content_item_heads` 与 `media_transcript_heads` 冻结正式可见版本，在独立 Parent SQLite、解析目录和 Qdrant collection 中强制重新解析并重建；旧解析缓存不会阻止页码、段落、工作表或主题定位 sidecar 生成。活动任务、head 指纹漂移、正式版本覆盖不完整、可定位文档缺少定位字段、Parent/Child 计数不一致或 Qdrant 非绿色状态都会在切换前终止。
 
 ### 未实现
 
@@ -118,6 +119,8 @@
 - `scripts/plan_source_decoupling_t12.py`
 - `scripts/apply_source_decoupling_t12.py`
 - `scripts/rebuild_content_view.py`
+- `scripts/rebuild_managed_index.py`
+- `.github/workflows/rebuild-production-index-manual.yml`
 - `frontend/src/pages/admin/AdminManagedContentPage.tsx`
 - `frontend/src/pages/admin/AdminCategoriesPage.tsx`
 
@@ -157,6 +160,7 @@
 - 最终 `Child.embed_text` 必须满足 GPU Embedding 服务的 8192 字符上限；超长 HTML/Markdown 表格在 Child 层按行、单元格或安全文本边界拆分并传播表头，Parent 原始证据保持不变；表格摘要只能使用剩余字符预算。超长公式不静默截断，发布任务返回明确的不可重试原因；
 - 真实业务资料送往外部 MinerU 前必须确认授权；
 - Reset、资料删除和运行中存储操作必须按专项规则确认。
+- 全量重建 workflow 在影子构建期间保持线上索引可用，只在最终切换时短暂停止 backend；切换前独立备份两个 SQLite 和正式 Qdrant snapshot。切换后验证失败时自动恢复旧 `parents.sqlite` 与正式 collection，且不会恢复或覆盖持续变化的 `app.sqlite`。
 - 服务器 apply 导入只允许位于 `CONTENT_ROOT/inbox/server` 下的批次；dry-run 不写数据库或对象存储；
 - T10 旧资料预检使用 SQLite `mode=ro` 并只生成脱敏聚合摘要；真实 apply 必须匹配已批准 plan 指纹、候选数、执行身份和确认词；
 - 受管对象路径拒绝越界和符号链接；网页变更必须同时通过 Cookie 鉴权、资料权限和 CSRF；

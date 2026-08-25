@@ -35,6 +35,8 @@ GROUPS = {
         "tests/test_transcription_worker.py",
         "tests/test_transcription_workflow_persistence.py",
         "tests/test_transcript_manual_regression.py",
+        "tests/test_production_full_reindex.py",
+        "tests/test_production_full_reindex_workflow.py",
     ),
     "phase5": (
         "tests/test_transcription_phase5_application_e2e.py",

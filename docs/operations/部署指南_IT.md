@@ -66,6 +66,15 @@ sudo docker compose -p ragpincheng-prod \
 真实资料、删除、索引 Reset、旧目录迁移和严格 head 切换不属于普通 IT
 操作，必须遵守 [受管资料生产迁移 Runbook](../migrations/managed-content-production-runbook.md)。
 
+全量重建不得在主机直接运行 `scripts/build_index.py --reset`。获批后只能从
+`master` 手动运行 `Rebuild Production Index Manual`，输入合并后的完整 SHA
+并选择 `REBUILD_PRODUCTION_INDEX`。该 workflow 会取得生产排他锁、阻止活动
+任务、备份两个 SQLite 和 Qdrant、构建并验证影子索引，再进行短暂停机切换；
+head 在构建期间发生变化时会停止而不会切换。成功证据必须包含
+`REBUILD_BACKUP status=complete`、`REBUILD_SHADOW status=verified` 和
+`REBUILD_CUTOVER status=success`。失败时必须核对
+`REBUILD_ROLLBACK status=complete`，不得改用裸 Reset 继续处理。
+
 ## 网络与 HTTPS
 
 防火墙、反向代理、证书和 Cookie 安全属性由基础设施负责人按公司网络规范
