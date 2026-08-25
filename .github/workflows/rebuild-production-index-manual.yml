@@ -249,13 +249,6 @@ jobs:
             > "${RUN_ROOT}/qdrant-shadow.snapshot"
           [ -s "${RUN_ROOT}/qdrant-shadow.snapshot" ]
 
-          active_job_preflight cutover
-          LIVE_HEAD_SHA256="$(head_snapshot_sha256 "${DATA_PATH}/app.sqlite")"
-          [ "${LIVE_HEAD_SHA256}" = "${HEAD_SNAPSHOT_SHA256}" ] || {
-            echo "HEAD_SNAPSHOT_CHANGED expected=${HEAD_SNAPSHOT_SHA256} actual=${LIVE_HEAD_SHA256}"
-            exit 1
-          }
-
           MUTATED=0
           BACKEND_STOPPED=0
           rollback_rebuild() (
@@ -300,6 +293,12 @@ jobs:
 
           "${COMPOSE[@]}" stop backend
           BACKEND_STOPPED=1
+          active_job_preflight cutover
+          LIVE_HEAD_SHA256="$(head_snapshot_sha256 "${DATA_PATH}/app.sqlite")"
+          [ "${LIVE_HEAD_SHA256}" = "${HEAD_SNAPSHOT_SHA256}" ] || {
+            echo "HEAD_SNAPSHOT_CHANGED expected=${HEAD_SNAPSHOT_SHA256} actual=${LIVE_HEAD_SHA256}"
+            exit 1
+          }
           MUTATED=1
           "${SNAPSHOT_TOOL[@]}" curl -fsS --max-time 1800 -X POST \
             "http://qdrant:6333/collections/pincheng_docs/snapshots/upload?priority=snapshot" \

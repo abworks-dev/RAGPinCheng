@@ -44,7 +44,6 @@ The application database and content objects are never replaced or deleted.
 
 Static tests protect workflow confirmation, exact-SHA checks, locks, backups,
 active-job gates, shadow destinations, rollback, and forbidden volume deletion.
-Python unit tests cover configuration overrides, head enumeration, object hash
-verification, transcript reconstruction, and report validation. CI and the
+Python unit tests cover configuration overrides, ordinary/transcript head
+enumeration, object hash verification, and report validation. CI and the
 production workflow provide the final Linux/container evidence.
-

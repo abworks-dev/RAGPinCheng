@@ -47,6 +47,11 @@ def test_workflow_builds_shadow_then_cuts_over_with_rollback():
     assert "priority=snapshot" in text
     assert "REBUILD_BACKUP status=complete" in text
     assert "http://localhost:8000/api/health" in text
+    trap = text.index("trap on_exit EXIT")
+    stop = text.index('"${COMPOSE[@]}" stop backend', trap)
+    final_gate = text.index("active_job_preflight cutover", stop)
+    mutation = text.index("MUTATED=1", final_gate)
+    assert trap < stop < final_gate < mutation
 
 
 def test_workflow_never_deletes_volumes_or_the_live_collection():
