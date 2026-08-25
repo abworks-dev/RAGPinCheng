@@ -611,6 +611,112 @@ describe("AdminMediaPage wizard", () => {
     await waitFor(() => expect(mocks.deleteFailedMediaAsset).toHaveBeenCalledWith("media-shared-failed"));
   });
 
+  it("finishes stale shared cache cleanup without presenting the active task as failed", async () => {
+    const activeJob = {
+      ...succeededJob,
+      job_id: "job-shared-active",
+      media_id: "media-shared-active",
+      status: "running" as const,
+      finished_at: null,
+    };
+    mocks.listMediaAssets.mockResolvedValue([{
+      ...assets[0],
+      media_id: "media-shared-active",
+      title: "共享视频当前任务",
+      status: "transcribing",
+      storage_kind: "external",
+      available_actions: ["cancel_transcription", "finalize_failed_cleanup"],
+      disabled_actions: {},
+    }]);
+    mocks.listTranscriptionJobs.mockResolvedValue([activeJob]);
+    mocks.deleteFailedMediaAsset.mockResolvedValue({
+      media_id: "media-shared-active",
+      cleanup_mode: "reset",
+    });
+    render(<AdminMediaPage embedded />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "完成缓存清理" }));
+
+    const dialog = screen.getByRole("dialog", { name: "完成缓存清理" });
+    expect(dialog).toHaveTextContent("上次清理遗留的暂存缓存");
+    expect(dialog).toHaveTextContent("不会取消或修改当前转录任务");
+    fireEvent.click(screen.getByRole("button", { name: "确认清理" }));
+    await waitFor(() => expect(mocks.deleteFailedMediaAsset).toHaveBeenCalledWith(
+      "media-shared-active",
+    ));
+  });
+
+  it("lists an uploaded shared source with only a committed cleanup marker", async () => {
+    mocks.listMediaAssets.mockResolvedValue([{
+      ...assets[0],
+      media_id: "media-shared-stale",
+      title: "共享视频遗留缓存",
+      status: "uploaded",
+      storage_kind: "external",
+      transcription_job_id: null,
+      transcription_job_status: null,
+      available_actions: ["finalize_failed_cleanup"],
+      disabled_actions: {},
+    }]);
+    mocks.listTranscriptionJobs.mockResolvedValue([]);
+    render(<AdminMediaPage embedded />);
+
+    expect(await screen.findByText("共享视频遗留缓存")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "完成缓存清理" })).toBeEnabled();
+  });
+
+  it("uses the authoritative finalize action when the shared task failed again", async () => {
+    mocks.listMediaAssets.mockResolvedValue([{
+      ...assets[0],
+      media_id: "media-shared-failed-again",
+      title: "共享视频再次失败",
+      status: "failed",
+      storage_kind: "external",
+      available_actions: ["retry_transcription", "finalize_failed_cleanup"],
+      disabled_actions: {},
+    }]);
+    mocks.listTranscriptionJobs.mockResolvedValue([]);
+    render(<AdminMediaPage embedded />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "完成缓存清理" }));
+
+    const dialog = screen.getByRole("dialog", { name: "完成缓存清理" });
+    expect(dialog).toHaveTextContent("上次清理遗留的暂存缓存");
+    expect(dialog).not.toHaveTextContent("本地失败任务和派生缓存");
+  });
+
+  it("includes authoritative finalize actions in a mixed bulk cleanup", async () => {
+    mocks.listMediaAssets.mockResolvedValue([
+      {
+        ...assets[0],
+        media_id: "media-managed-failed",
+        title: "受管失败视频",
+        status: "failed",
+        available_actions: ["delete_failed"],
+        disabled_actions: {},
+      },
+      {
+        ...assets[0],
+        media_id: "media-shared-stale",
+        title: "共享视频遗留缓存",
+        status: "uploaded",
+        storage_kind: "external",
+        transcription_job_id: null,
+        transcription_job_status: null,
+        available_actions: ["finalize_failed_cleanup"],
+        disabled_actions: {},
+      },
+    ]);
+    mocks.listTranscriptionJobs.mockResolvedValue([]);
+    render(<AdminMediaPage embedded />);
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "选择当前页视频" }));
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "清理所选（2）" }));
+
+    expect(screen.getByRole("dialog", { name: "清理或收尾 2 个对象" })).toBeInTheDocument();
+  });
+
   it("uses backend bulk actions and retains itemized partial failures", async () => {
     const failedAssets = [
       { ...assets[0], media_id: "media-failed-1", title: "失败视频一", status: "failed", available_actions: ["retry_transcription", "delete_failed"], disabled_actions: {} },

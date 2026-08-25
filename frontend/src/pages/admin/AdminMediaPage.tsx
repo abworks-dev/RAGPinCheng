@@ -352,7 +352,10 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
     return job?.status === "failed" || asset.status === "failed" || asset.publication_status === "publication_failed" || asset.publication_index_status === "failed";
   };
   const transcriptionTaskAssets = mediaAssets.filter((asset) =>
-    Boolean(asset.transcription_job_id) || jobsByMediaId.has(asset.media_id) || asset.status === "failed",
+    Boolean(asset.transcription_job_id)
+    || jobsByMediaId.has(asset.media_id)
+    || asset.status === "failed"
+    || asset.available_actions.includes("finalize_failed_cleanup"),
   );
   const visibleMediaAssets = transcriptionTaskAssets.filter((asset) => {
     const query = mediaQuery.trim().toLocaleLowerCase("zh-CN");
@@ -367,7 +370,19 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
     .filter((asset): asset is MediaAsset => Boolean(asset));
   const selectedJobs = selectedMediaIds.map((id) => jobsByMediaId.get(id)).filter((job): job is TranscriptionJob => Boolean(job));
   const retryableSelectedAssets = selectedAssets.filter((asset) => asset.available_actions.includes("retry_transcription"));
-  const cleanableSelectedAssets = selectedAssets.filter((asset) => asset.available_actions.includes("delete_failed"));
+  const cleanableSelectedAssets = selectedAssets.filter((asset) =>
+    asset.available_actions.includes("delete_failed")
+    || asset.available_actions.includes("finalize_failed_cleanup"),
+  );
+  const batchCleanupTargets = batchCleanupTargetIds
+    .map((id) => mediaAssets.find((asset) => asset.media_id === id))
+    .filter((asset): asset is MediaAsset => Boolean(asset));
+  const batchCleanupHasStaleExternalCache = batchCleanupTargets.some(
+    (asset) => asset.available_actions.includes("finalize_failed_cleanup"),
+  );
+  const staleExternalCleanupTarget = deleteTarget?.available_actions.includes(
+    "finalize_failed_cleanup",
+  ) === true;
   const cancellableSelectedJobs = selectedJobs.filter((job) => {
     const asset = mediaAssets.find((item) => item.media_id === job.media_id);
     return asset?.available_actions.includes("cancel_transcription") === true;
@@ -519,7 +534,9 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
       if (result.cleanup_mode === "deleted") removeAsset(asset.media_id);
       setDeleteTarget(null);
       setBatchFeedback({
-        title: result.cleanup_mode === "reset" ? "失败任务已清理，可重新入队" : "失败任务已删除",
+        title: asset.available_actions.includes("finalize_failed_cleanup")
+          ? "遗留缓存已清理"
+          : result.cleanup_mode === "reset" ? "失败任务已清理，可重新入队" : "失败任务已删除",
         succeeded: 1,
         failures: [],
       });
@@ -1051,10 +1068,13 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
                 const canCancel = availableActions.has("cancel_transcription");
                 const canRetry = availableActions.has("retry_transcription");
                 const canDelete = availableActions.has("delete_failed");
+                const canFinalizeCleanup = availableActions.has("finalize_failed_cleanup");
                 const canReplace = availableActions.has("replace_media");
                 const canArchive = availableActions.has("archive_media");
                 const showCancel = canCancel || job?.status === "pending" || job?.status === "running";
                 const showRetry = canRetry || job?.status === "failed" || job?.status === "cancelled";
+                const isStaleExternalCleanup = canFinalizeCleanup;
+                const showDelete = asset.status === "failed" || canDelete || canFinalizeCleanup;
                 const showPublishedActions = canReplace || canArchive || asset.publication_status === "published";
                 return <li key={asset.media_id} className="p-4 sm:p-5" data-testid="media-record-row">
                   <div className="grid gap-4 lg:grid-cols-[2rem_minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] lg:items-start">
@@ -1078,7 +1098,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
                       {showCancel && <IconButton label="取消" tooltip={canCancel ? "取消当前转录任务" : disabledActions.cancel_transcription || "当前状态不可取消"} className="border border-border max-sm:size-control-md" disabled={!job || !canCancel || deletingMediaId === asset.media_id} onClick={() => job && void cancelJob(job)}><Ban className="size-4" /></IconButton>}
                       {showRetry && <IconButton label="重试" tooltip={canRetry ? "由服务端按原转录方案重试" : disabledActions.retry_transcription || "当前状态不可重试"} title={canRetry ? "由服务端按原转录方案重试" : disabledActions.retry_transcription || "当前状态不可重试"} className="border border-border max-sm:size-control-md" disabled={!canRetry || deletingMediaId === asset.media_id} onClick={() => void retryMedia(asset)}><RotateCcw className="size-4" /></IconButton>}
                       {showPublishedActions && <IconButton label="替换视频" tooltip={canReplace ? "上传候选视频并创建转录任务" : disabledActions.replace_media || "当前状态不可替换"} className="border border-border max-sm:size-control-md" disabled={!canReplace || deletingMediaId === asset.media_id} onClick={() => setReplaceSourceMediaId(asset.media_id)}><Repeat2 className="size-4" /></IconButton>}
-                      {asset.status === "failed" && <IconButton label="清理失败任务" tooltip={canDelete ? (isExternal ? "清理本地任务和缓存，保留共享原文件" : "删除失败媒体和本地任务历史") : disabledActions.delete_failed || "当前失败任务不可清理"} className="border border-destructive/40 text-destructive max-sm:size-control-md" disabled={!canDelete || deletingMediaId === asset.media_id} onClick={() => setDeleteTarget(asset)}><Trash2 className="size-4" /></IconButton>}
+                      {showDelete && <IconButton label={isStaleExternalCleanup ? "完成缓存清理" : "清理失败任务"} tooltip={isStaleExternalCleanup ? "只删除上次清理遗留的暂存缓存" : canDelete ? (isExternal ? "清理本地任务和缓存，保留共享原文件" : "删除失败媒体和本地任务历史") : disabledActions.delete_failed || "当前失败任务不可清理"} className="border border-destructive/40 text-destructive max-sm:size-control-md" disabled={(!canDelete && !canFinalizeCleanup) || deletingMediaId === asset.media_id} onClick={() => setDeleteTarget(asset)}><Trash2 className="size-4" /></IconButton>}
                       {showPublishedActions && <IconButton label="移入回收站" tooltip={canArchive ? "移入资料回收站" : disabledActions.archive_media || "当前状态不可归档"} className="border border-border max-sm:size-control-md" disabled={!canArchive || deletingMediaId === asset.media_id} onClick={() => { setArchiveTarget(asset); setArchiveAcknowledged(false); }}><Archive className="size-4" /></IconButton>}
                     </div>
                   </div>
@@ -1124,8 +1144,8 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
       <Dialog open={deleteTarget != null} onOpenChange={(open) => { if (!open && !deletingMediaId) setDeleteTarget(null); }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>清理失败任务</DialogTitle>
-            <DialogDescription>{deleteTarget?.storage_kind === "external" ? `将清理“${deleteTarget?.title}”的本地失败任务和派生缓存，重置为可重新入队；不会删除共享目录原文件。` : `将删除“${deleteTarget?.title}”的失败媒体、本地原始视频和失败任务历史。此操作不可恢复。`}</DialogDescription>
+            <DialogTitle>{staleExternalCleanupTarget ? "完成缓存清理" : "清理失败任务"}</DialogTitle>
+            <DialogDescription>{staleExternalCleanupTarget ? `将只删除“${deleteTarget?.title}”上次清理遗留的暂存缓存；不会取消或修改当前转录任务，也不会删除共享目录原文件。` : deleteTarget?.storage_kind === "external" ? `将清理“${deleteTarget?.title}”的本地失败任务和派生缓存，重置为可重新入队；不会删除共享目录原文件。` : `将删除“${deleteTarget?.title}”的失败媒体、本地原始视频和失败任务历史。此操作不可恢复。`}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deletingMediaId != null}>取消</Button>
@@ -1136,8 +1156,8 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
       <Dialog open={batchCleanupTargetIds.length > 0} onOpenChange={(open) => { if (!open && !batchActionBusy) setBatchCleanupTargetIds([]); }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>清理 {batchCleanupTargetIds.length} 个失败任务</DialogTitle>
-            <DialogDescription>普通受管媒体会删除本地媒体和失败历史；共享来源只清理本地任务与派生缓存并重置为可重新入队，绝不删除共享原文件。服务端会逐项复核活动任务、转录版本、正式版本和发布索引。</DialogDescription>
+            <DialogTitle>{batchCleanupHasStaleExternalCache ? "清理或收尾" : "清理"} {batchCleanupTargetIds.length} 个{batchCleanupHasStaleExternalCache ? "对象" : "失败任务"}</DialogTitle>
+            <DialogDescription>普通受管媒体会删除本地媒体和失败历史；共享来源失败项只清理本地任务与派生缓存并重置为可重新入队，遗留暂存缓存则只完成上次清理收尾。服务端会逐项复核，绝不删除共享原文件或影响收尾对象的当前任务。</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" disabled={batchActionBusy} onClick={() => setBatchCleanupTargetIds([])}>取消</Button>

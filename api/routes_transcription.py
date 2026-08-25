@@ -510,8 +510,13 @@ def cancel_job(
                 job_id, now=max(int(time.time()), job.updated_at + 1)
             )
             conn.execute(
-                "UPDATE media_assets SET status='uploaded',error=NULL,updated_at=? WHERE media_id=?",
-                (int(time.time()), cancelled.media_id),
+                """UPDATE media_assets SET status='uploaded',error=NULL,updated_at=?
+                   WHERE media_id=?
+                     AND NOT EXISTS(
+                         SELECT 1 FROM transcription_jobs
+                         WHERE media_id=? AND status IN ('pending','running')
+                     )""",
+                (int(time.time()), cancelled.media_id, cancelled.media_id),
             )
             conn.commit()
             return _job_dto(cancelled)
@@ -639,15 +644,23 @@ def _retry_media_job(
         raise HTTPException(status_code=409, detail="转录任务状态发生冲突")
     except (ContractValidationError, OSError):
         raise HTTPException(status_code=409, detail="视频音频准备失败，请检查视频后重试")
+    latest_job = job
     try:
         try:
             conn = connect()
             try:
                 conn.execute(
-                    "UPDATE media_assets SET status='transcribing',error=NULL,updated_at=? WHERE media_id=?",
-                    (int(time.time()), media_id),
+                    """UPDATE media_assets
+                       SET status='transcribing',error=NULL,updated_at=?
+                       WHERE media_id=?
+                         AND EXISTS(
+                             SELECT 1 FROM transcription_jobs
+                             WHERE id=? AND media_id=? AND status IN ('pending','running')
+                         )""",
+                    (int(time.time()), media_id, job.id, media_id),
                 )
                 conn.commit()
+                latest_job = SQLiteTranscriptionStore(conn).load_job(job.id)
             finally:
                 conn.close()
         except (OSError, sqlite3.Error):
@@ -656,7 +669,7 @@ def _retry_media_job(
             )
     finally:
         enqueue(job.id)
-    return _job_dto(job)
+    return _job_dto(latest_job)
 
 
 @router.post("/bulk-retry", response_model=BulkTranscriptionActionResponse, status_code=202)

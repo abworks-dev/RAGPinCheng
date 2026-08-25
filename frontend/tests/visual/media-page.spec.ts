@@ -19,8 +19,31 @@ test.describe("转录任务", () => {
     await expect(page.getByText("项目交付培训", { exact: true })).toBeVisible();
     await expect(page.getByText("转录服务当前暂停接收任务，请稍后重试。", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "重试" })).toBeEnabled();
-    await expect(page.getByTestId("media-record-row").nth(1).getByRole("button", { name: "完整删除" })).toBeEnabled();
+    await expect(page.getByTestId("media-record-row").nth(1).getByRole("button", { name: "清理失败任务" })).toBeEnabled();
     await expectNoBodyOverflow(page);
+  });
+
+  test("无任务与再次失败的共享来源都按权威动作完成缓存收尾", async ({ page }, testInfo) => {
+    await installAdminRoutes(page, "media_stale_cleanup");
+    await page.goto("/admin/content?view=transcription");
+
+    const uploadedRow = page.getByText("共享视频遗留缓存", { exact: true }).locator("xpath=ancestor::li");
+    await expect(uploadedRow).toBeVisible();
+    await uploadedRow.getByRole("button", { name: "完成缓存清理" }).click();
+    const dialog = page.getByRole("dialog", { name: "完成缓存清理" });
+    await expect(dialog).toContainText("上次清理遗留的暂存缓存");
+    await expect(dialog).toContainText("不会取消或修改当前转录任务");
+    await expect(dialog).toContainText("不会删除共享目录原文件");
+    await dialog.getByRole("button", { name: "取消" }).click();
+
+    const failedRow = page.getByText("共享视频再次失败", { exact: true }).locator("xpath=ancestor::li");
+    await expect(failedRow).toBeVisible();
+    await failedRow.getByRole("button", { name: "完成缓存清理" }).click();
+    await expect(dialog).toContainText("上次清理遗留的暂存缓存");
+    await expect(dialog).not.toContainText("本地失败任务和派生缓存");
+    await expectNoBodyOverflow(page);
+    const viewport = page.viewportSize()!;
+    await page.screenshot({ path: testInfo.outputPath(`transcription-stale-cleanup-${viewport.width}x${viewport.height}.png`) });
   });
 
   test("媒体空状态和错误状态可恢复", async ({ page }) => {

@@ -14,6 +14,7 @@ import re
 import shutil
 import sqlite3
 import stat
+import threading
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -132,6 +133,34 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 _ADMIN_PREVIEWABLE_MEDIA_STATUSES = frozenset(
     {"uploaded", "transcribing", "transcript_ready", "indexing", "ready", "failed"}
 )
+_FAILED_MEDIA_CLEANUP_LOCK = threading.Lock()
+_FAILED_MEDIA_CLEANUP_COMMITTED_PREFIX = ".cleanup-"
+_FAILED_MEDIA_CLEANUP_PENDING_PREFIX = ".cleanup-pending-"
+
+
+def _finalizable_cleanup_media_ids(
+    media_root: Path,
+    external_media_statuses: dict[str, str],
+) -> set[str]:
+    found: set[str] = set()
+    try:
+        for candidate in media_root.glob(f"{_FAILED_MEDIA_CLEANUP_COMMITTED_PREFIX}*-*"):
+            if candidate.name.startswith(_FAILED_MEDIA_CLEANUP_PENDING_PREFIX):
+                continue
+            identity = candidate.name.removeprefix(
+                _FAILED_MEDIA_CLEANUP_COMMITTED_PREFIX
+            ).rsplit("-", 1)[0]
+            if identity in external_media_statuses:
+                found.add(identity)
+        for candidate in media_root.glob(f"{_FAILED_MEDIA_CLEANUP_PENDING_PREFIX}*-*"):
+            identity = candidate.name.removeprefix(
+                _FAILED_MEDIA_CLEANUP_PENDING_PREFIX
+            ).rsplit("-", 1)[0]
+            if external_media_statuses.get(identity) not in {None, "failed"}:
+                found.add(identity)
+    except OSError:
+        logger.exception("failed to inspect staged media cleanup directories")
+    return found
 
 
 def _media_action_state(
@@ -151,6 +180,7 @@ def _media_action_state(
     has_transcript_head: bool = False,
     has_publication_index_jobs: bool = False,
     has_active_index_job: bool = False,
+    has_committed_cleanup: bool = False,
 ) -> tuple[list[str], dict[str, str]]:
     available: list[str] = []
     disabled: dict[str, str] = {}
@@ -196,7 +226,10 @@ def _media_action_state(
         or has_publication_index_jobs
         or replacement_status == "pending"
     )
-    if status == "failed" and not cleanup_blocked:
+    if storage_kind == "external" and has_committed_cleanup:
+        available.append("finalize_failed_cleanup")
+        disabled["delete_failed"] = "请先完成上次清理遗留缓存的收尾"
+    elif status == "failed" and not cleanup_blocked:
         available.append("delete_failed")
     elif replacement_status == "pending":
         disabled["delete_failed"] = "视频替换任务正在处理，不能清理"
@@ -2002,6 +2035,14 @@ def list_media_assets(
         """,
         (limit,),
     ).fetchall()
+    finalizable_cleanup_media_ids = _finalizable_cleanup_media_ids(
+        MEDIA_DIR,
+        {
+            str(row["media_id"]): str(row["status"])
+            for row in rows
+            if row["storage_kind"] == "external"
+        },
+    )
     result: list[MediaAssetDTO] = []
     for r in rows:
         available_actions, disabled_actions = _media_action_state(
@@ -2020,6 +2061,7 @@ def list_media_assets(
             has_transcript_head=bool(r["has_transcript_head"]),
             has_publication_index_jobs=bool(r["has_publication_index_jobs"]),
             has_active_index_job=bool(r["has_active_index_job"]),
+            has_committed_cleanup=str(r["media_id"]) in finalizable_cleanup_media_ids,
         )
         result.append(MediaAssetDTO(
             media_id=r["media_id"],
@@ -2155,29 +2197,42 @@ def _cleanup_failed_media(
         validate_uuid(media_id, "media_id")
     except ContractValidationError:
         raise HTTPException(status_code=404, detail="媒体不存在")
+    with _FAILED_MEDIA_CLEANUP_LOCK:
+        return _cleanup_failed_media_serialized(media_id, conn)
+
+
+def _cleanup_failed_media_serialized(
+    media_id: str,
+    conn: sqlite3.Connection,
+) -> FailedMediaCleanupDTO:
     media_root = MEDIA_DIR.resolve()
     media_candidate = media_root / media_id
     media_dir = media_candidate
-    stale_dirs: list[Path] = []
-    staged_dir: Path | None = None
+    committed_dirs: list[Path] = []
+    pending_dirs: list[Path] = []
+    staged_pending_dir: Path | None = None
     now = int(time.time())
     try:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             "SELECT status,storage_kind FROM media_assets WHERE media_id=?", (media_id,)
         ).fetchone()
-        stale_dirs = list(media_root.glob(f".cleanup-{media_id}-*"))
+        committed_dirs = list(media_root.glob(f".cleanup-{media_id}-*"))
+        pending_dirs = list(media_root.glob(f".cleanup-pending-{media_id}-*"))
         if row is None:
-            if stale_dirs:
+            if committed_dirs or pending_dirs:
                 conn.rollback()
-                _remove_staged_media_dirs(media_id, stale_dirs)
+                _remove_staged_media_dirs(media_id, [*committed_dirs, *pending_dirs])
                 return FailedMediaCleanupDTO(media_id=media_id, cleanup_mode="deleted")
             raise HTTPException(status_code=404, detail="媒体不存在")
+        finalizable_dirs = [*committed_dirs]
         if row["status"] != "failed":
-            if row["storage_kind"] == "external" and row["status"] == "uploaded" and stale_dirs:
-                conn.rollback()
-                _remove_staged_media_dirs(media_id, stale_dirs)
-                return FailedMediaCleanupDTO(media_id=media_id, cleanup_mode="reset")
+            finalizable_dirs.extend(pending_dirs)
+        if row["storage_kind"] == "external" and finalizable_dirs:
+            conn.rollback()
+            _remove_staged_media_dirs(media_id, finalizable_dirs)
+            return FailedMediaCleanupDTO(media_id=media_id, cleanup_mode="reset")
+        if row["status"] != "failed":
             raise HTTPException(status_code=409, detail="仅可清理失败媒体")
         if conn.execute(
             "SELECT 1 FROM transcription_jobs WHERE media_id=? AND status IN ('pending','running')", (media_id,)
@@ -2215,9 +2270,21 @@ def _cleanup_failed_media(
             media_dir.relative_to(media_root)
         except ValueError:
             raise HTTPException(status_code=500, detail="媒体存储路径异常")
+        if pending_dirs:
+            if len(pending_dirs) != 1 or media_dir.exists():
+                raise HTTPException(status_code=409, detail="媒体暂存状态冲突，不能自动清理")
+            pending_dir = pending_dirs[0]
+            if _is_reparse_point(pending_dir):
+                raise HTTPException(status_code=409, detail="媒体暂存目录不是受管目录")
+            try:
+                pending_dir.resolve(strict=False).relative_to(media_root)
+            except ValueError:
+                raise HTTPException(status_code=500, detail="媒体暂存路径异常")
+            pending_dir.replace(media_dir)
+            pending_dirs = []
         if media_dir.exists():
-            staged_dir = media_root / f".cleanup-{media_id}-{time.time_ns()}"
-            media_dir.replace(staged_dir)
+            staged_pending_dir = media_root / f".cleanup-pending-{media_id}-{time.time_ns()}"
+            media_dir.replace(staged_pending_dir)
         conn.execute(
             "UPDATE upload_batch_entries SET transcription_job_id=NULL WHERE media_id=?",
             (media_id,),
@@ -2255,13 +2322,28 @@ def _cleanup_failed_media(
         conn.commit()
     except Exception:
         conn.rollback()
-        if staged_dir is not None and staged_dir.exists():
+        if staged_pending_dir is not None and staged_pending_dir.exists():
             try:
-                staged_dir.replace(media_dir)
+                staged_pending_dir.replace(media_dir)
             except OSError:
                 logger.exception("failed to restore staged media directory for %s", media_id)
         raise
-    cleanup_dirs = [*stale_dirs, *([staged_dir] if staged_dir is not None else [])]
+    cleanup_dirs = [*committed_dirs]
+    if staged_pending_dir is not None:
+        committed_dir = media_root / staged_pending_dir.name.replace(
+            _FAILED_MEDIA_CLEANUP_PENDING_PREFIX,
+            _FAILED_MEDIA_CLEANUP_COMMITTED_PREFIX,
+            1,
+        )
+        try:
+            staged_pending_dir.replace(committed_dir)
+        except OSError as exc:
+            logger.exception("failed to commit staged media directory for %s", media_id)
+            raise HTTPException(
+                status_code=500,
+                detail="数据库状态已清理，但本地文件删除未完成",
+            ) from exc
+        cleanup_dirs.append(committed_dir)
     _remove_staged_media_dirs(media_id, cleanup_dirs)
     return FailedMediaCleanupDTO(media_id=media_id, cleanup_mode=cleanup_mode)
 

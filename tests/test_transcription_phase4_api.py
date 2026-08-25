@@ -3,9 +3,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
-import os
 import sqlite3
-import subprocess
+import threading
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -224,6 +223,203 @@ def test_failed_media_cleanup_restores_staged_directory_when_database_commit_fai
         conn.close()
 
 
+def test_failed_external_cleanup_recovers_pending_marker_after_commit_and_restore_fail(
+    tmp_path, monkeypatch
+):
+    import api.routes_admin as routes_admin
+
+    media_root = tmp_path / "media"
+    conn, store, _artifacts = make_phase2_store(tmp_path)
+    job = store.create_job(make_pending_job())
+    store.record_failure(
+        job.id,
+        error_code="provider_unavailable",
+        classification=ProviderFailureClassification.transient,
+        error_summary="synthetic controlled failure",
+        now=11,
+    )
+    conn.execute(
+        "UPDATE media_assets SET storage_kind='external',status='failed',error='synthetic' WHERE media_id=?",
+        (job.media_id,),
+    )
+    conn.commit()
+    media_dir = media_root / job.media_id
+    media_dir.mkdir(parents=True)
+    (media_dir / "prepared-audio.wav").write_bytes(b"derived")
+    monkeypatch.setattr(routes_admin, "MEDIA_DIR", media_root)
+    real_replace = Path.replace
+
+    def fail_pending_restore(source, target):
+        if (
+            source.name.startswith(f".cleanup-pending-{job.media_id}-")
+            and Path(target) == media_dir
+        ):
+            raise OSError("synthetic restore failure")
+        return real_replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", fail_pending_restore)
+
+    class FailingCommitConnection:
+        def execute(self, *args, **kwargs):
+            return conn.execute(*args, **kwargs)
+
+        def commit(self):
+            raise sqlite3.OperationalError("synthetic commit failure")
+
+        def rollback(self):
+            return conn.rollback()
+
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="synthetic commit failure"):
+            delete_failed_media_asset(job.media_id, None, FailingCommitConnection())
+
+        pending_dirs = list(media_root.glob(f".cleanup-pending-{job.media_id}-*"))
+        assert len(pending_dirs) == 1
+        assert not media_dir.exists()
+        failed = next(
+            item for item in list_media_assets(500, None, conn) if item.media_id == job.media_id
+        )
+        assert "delete_failed" in failed.available_actions
+        assert "finalize_failed_cleanup" not in failed.available_actions
+
+        monkeypatch.setattr(Path, "replace", real_replace)
+        result = delete_failed_media_asset(job.media_id, None, conn)
+
+        assert result.cleanup_mode == "reset"
+        assert not list(media_root.glob(f".cleanup-pending-{job.media_id}-*"))
+        assert not list(media_root.glob(f".cleanup-{job.media_id}-*"))
+        assert conn.execute(
+            "SELECT status FROM media_assets WHERE media_id=?", (job.media_id,)
+        ).fetchone()[0] == "uploaded"
+        assert conn.execute(
+            "SELECT 1 FROM transcription_jobs WHERE media_id=?", (job.media_id,)
+        ).fetchone() is None
+    finally:
+        conn.close()
+
+
+def test_failed_media_cleanup_serializes_rollback_restoration_with_another_cleanup(
+    tmp_path, monkeypatch
+):
+    import api.routes_admin as routes_admin
+    from api.db import connect as open_db
+
+    media_root = tmp_path / "media"
+    failed_id = "11111111-1111-4111-8111-111111111111"
+    db_path = tmp_path / "app.sqlite"
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    conn.execute(
+        """INSERT INTO media_assets(media_id,title,original_filename,storage_rel_path,mime_type,file_size,
+        transcript_origin,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (failed_id, "Failed", "failed.mp4", f"{failed_id}/failed.mp4", "video/mp4", 1,
+         "generated", "failed", 1, 1),
+    )
+    conn.commit()
+    conn.close()
+    media_dir = media_root / failed_id
+    media_dir.mkdir(parents=True)
+    (media_dir / "failed.mp4").write_bytes(b"video")
+    monkeypatch.setattr(routes_admin, "MEDIA_DIR", media_root)
+
+    first_restore_started = threading.Event()
+    allow_first_restore = threading.Event()
+    first_restored = threading.Event()
+    second_remove_started = threading.Event()
+    allow_second_remove = threading.Event()
+    thread_errors: list[tuple[str, Exception]] = []
+    real_replace = Path.replace
+    real_rmtree = routes_admin.shutil.rmtree
+
+    def coordinated_replace(source, target):
+        if (
+            threading.current_thread().name == "failed-cleanup-first"
+            and source.name.startswith(f".cleanup-pending-{failed_id}-")
+        ):
+            first_restore_started.set()
+            if not allow_first_restore.wait(5):
+                raise AssertionError("first cleanup restoration was not released")
+            result = real_replace(source, target)
+            first_restored.set()
+            return result
+        return real_replace(source, target)
+
+    def coordinated_rmtree(path):
+        if (
+            threading.current_thread().name == "failed-cleanup-second"
+            and Path(path).name.startswith(f".cleanup-{failed_id}-")
+        ):
+            second_remove_started.set()
+            if not allow_second_remove.wait(5):
+                raise AssertionError("second cleanup removal was not released")
+        return real_rmtree(path)
+
+    monkeypatch.setattr(Path, "replace", coordinated_replace)
+    monkeypatch.setattr(routes_admin.shutil, "rmtree", coordinated_rmtree)
+
+    class FailingCommitConnection:
+        def __init__(self):
+            self.inner = open_db(db_path)
+
+        def execute(self, *args, **kwargs):
+            return self.inner.execute(*args, **kwargs)
+
+        def commit(self):
+            raise sqlite3.OperationalError("synthetic commit failure")
+
+        def rollback(self):
+            return self.inner.rollback()
+
+        def close(self):
+            self.inner.close()
+
+    def run_first_cleanup():
+        thread_conn = FailingCommitConnection()
+        try:
+            delete_failed_media_asset(failed_id, None, thread_conn)
+        except Exception as exc:
+            thread_errors.append(("first", exc))
+        finally:
+            thread_conn.close()
+
+    def run_second_cleanup():
+        thread_conn = open_db(db_path)
+        try:
+            delete_failed_media_asset(failed_id, None, thread_conn)
+        except Exception as exc:
+            thread_errors.append(("second", exc))
+        finally:
+            thread_conn.close()
+
+    first = threading.Thread(target=run_first_cleanup, name="failed-cleanup-first")
+    second = threading.Thread(target=run_second_cleanup, name="failed-cleanup-second")
+    first.start()
+    assert first_restore_started.wait(5)
+    second.start()
+    second_reached_removal_before_restore = second_remove_started.wait(1)
+    assert second_reached_removal_before_restore is False
+    allow_first_restore.set()
+    assert first_restored.wait(5)
+    assert second_remove_started.wait(5)
+    allow_second_remove.set()
+    first.join(5)
+    second.join(5)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert len(thread_errors) == 1
+    assert thread_errors[0][0] == "first"
+    assert isinstance(thread_errors[0][1], sqlite3.OperationalError)
+    check = open_db(db_path)
+    try:
+        assert check.execute(
+            "SELECT 1 FROM media_assets WHERE media_id=?", (failed_id,)
+        ).fetchone() is None
+    finally:
+        check.close()
+    assert not media_dir.exists()
+    assert not list(media_root.glob(f".cleanup-{failed_id}-*"))
+
+
 def test_failed_media_cleanup_reports_staged_directory_removal_failure(
     tmp_path, monkeypatch
 ):
@@ -307,7 +503,28 @@ def test_failed_media_cleanup_retry_removes_staged_directory_after_post_commit_f
         conn.close()
 
 
-def test_failed_media_cleanup_rejects_media_directory_symlink(tmp_path, monkeypatch):
+def test_reparse_point_detection_uses_windows_file_attribute(monkeypatch):
+    import api.routes_admin as routes_admin
+
+    reparse_attribute = 1024
+    monkeypatch.setattr(
+        routes_admin.stat,
+        "FILE_ATTRIBUTE_REPARSE_POINT",
+        reparse_attribute,
+        raising=False,
+    )
+
+    class SyntheticReparsePoint:
+        def lstat(self):
+            return SimpleNamespace(st_file_attributes=reparse_attribute)
+
+        def is_symlink(self):
+            return False
+
+    assert routes_admin._is_reparse_point(SyntheticReparsePoint()) is True
+
+
+def test_failed_media_cleanup_rejects_reported_reparse_point(tmp_path, monkeypatch):
     import api.routes_admin as routes_admin
 
     media_root = tmp_path / "media"
@@ -324,19 +541,12 @@ def test_failed_media_cleanup_rejects_media_directory_symlink(tmp_path, monkeypa
     other_media_dir = media_root / "other-media"
     other_media_dir.mkdir()
     (other_media_dir / "must-remain.mp4").write_bytes(b"video")
-    media_link = media_root / failed_id
-    if os.name == "nt":
-        created = subprocess.run(
-            ["cmd", "/c", "mklink", "/J", str(media_link), str(other_media_dir)],
-            capture_output=True,
-            check=False,
-            text=True,
-        )
-        if created.returncode != 0:
-            pytest.skip(f"directory junction is unavailable: {created.stderr}")
-    else:
-        media_link.symlink_to(other_media_dir, target_is_directory=True)
     monkeypatch.setattr(routes_admin, "MEDIA_DIR", media_root)
+    monkeypatch.setattr(
+        routes_admin,
+        "_is_reparse_point",
+        lambda path: path == media_root / failed_id,
+    )
     try:
         with pytest.raises(HTTPException) as caught:
             delete_failed_media_asset(failed_id, None, conn)
@@ -416,6 +626,141 @@ def test_failed_external_media_cleanup_preserves_shared_original_and_resets_enqu
         ).fetchone() is None
         assert not cache_dir.exists()
         assert shared_original.read_bytes() == b"shared-original"
+    finally:
+        conn.close()
+
+
+def test_external_stale_cleanup_remains_available_after_reenqueue_and_preserves_active_cache(
+    tmp_path, monkeypatch
+):
+    import api.routes_admin as routes_admin
+
+    media_root = tmp_path / "media"
+    conn, store, _artifacts = make_phase2_store(tmp_path)
+    job = store.create_job(make_pending_job())
+    store.record_failure(
+        job.id,
+        error_code="provider_unavailable",
+        classification=ProviderFailureClassification.transient,
+        error_summary="synthetic controlled failure",
+        now=11,
+    )
+    conn.execute(
+        "UPDATE media_assets SET storage_kind='external',status='failed',error='synthetic' WHERE media_id=?",
+        (job.media_id,),
+    )
+    conn.commit()
+    old_cache_dir = media_root / job.media_id
+    old_cache_dir.mkdir(parents=True)
+    (old_cache_dir / "prepared-audio-v1.wav").write_bytes(b"old-derived")
+    monkeypatch.setattr(routes_admin, "MEDIA_DIR", media_root)
+    real_rmtree = routes_admin.shutil.rmtree
+    attempts = 0
+
+    def fail_once(path):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("synthetic locked file")
+        return real_rmtree(path)
+
+    monkeypatch.setattr(routes_admin.shutil, "rmtree", fail_once)
+    try:
+        with pytest.raises(HTTPException) as caught:
+            delete_failed_media_asset(job.media_id, None, conn)
+        assert caught.value.status_code == 500
+        stale_dirs = list(media_root.glob(f".cleanup-{job.media_id}-*"))
+        assert len(stale_dirs) == 1
+
+        uploaded = next(
+            item for item in list_media_assets(500, None, conn) if item.media_id == job.media_id
+        )
+        assert "finalize_failed_cleanup" in uploaded.available_actions
+        assert "delete_failed" not in uploaded.available_actions
+
+        active_job = make_pending_job(
+            job_id="99999999-9999-4999-8999-999999999996",
+            request_id="99999999-9999-4999-8999-999999999995",
+            created_at=20,
+        )
+        store.create_job(active_job)
+        conn.execute(
+            "UPDATE media_assets SET status='transcribing',error=NULL WHERE media_id=?",
+            (job.media_id,),
+        )
+        conn.commit()
+        active_cache_dir = media_root / job.media_id
+        active_cache_dir.mkdir()
+        active_cache_file = active_cache_dir / "prepared-audio-v2.wav"
+        active_cache_file.write_bytes(b"current-derived")
+
+        active = next(
+            item for item in list_media_assets(500, None, conn) if item.media_id == job.media_id
+        )
+        assert "finalize_failed_cleanup" in active.available_actions
+        assert "delete_failed" not in active.available_actions
+
+        result = delete_failed_media_asset(job.media_id, None, conn)
+
+        assert result.cleanup_mode == "reset"
+        assert not list(media_root.glob(f".cleanup-{job.media_id}-*"))
+        assert active_cache_file.read_bytes() == b"current-derived"
+        assert conn.execute(
+            "SELECT status FROM transcription_jobs WHERE id=?", (active_job.id,)
+        ).fetchone()[0] == "pending"
+        assert conn.execute(
+            "SELECT status FROM media_assets WHERE media_id=?", (job.media_id,)
+        ).fetchone()[0] == "transcribing"
+    finally:
+        conn.close()
+
+
+def test_external_committed_cleanup_marker_takes_precedence_over_new_failure(
+    tmp_path, monkeypatch
+):
+    import api.routes_admin as routes_admin
+
+    media_root = tmp_path / "media"
+    conn, store, _artifacts = make_phase2_store(tmp_path)
+    job = store.create_job(make_pending_job())
+    store.record_failure(
+        job.id,
+        error_code="provider_unavailable",
+        classification=ProviderFailureClassification.transient,
+        error_summary="synthetic controlled failure",
+        now=11,
+    )
+    conn.execute(
+        "UPDATE media_assets SET storage_kind='external',status='failed',error='synthetic' WHERE media_id=?",
+        (job.media_id,),
+    )
+    conn.commit()
+    committed_dir = media_root / f".cleanup-{job.media_id}-1"
+    committed_dir.mkdir(parents=True)
+    (committed_dir / "old-prepared-audio.wav").write_bytes(b"old-derived")
+    monkeypatch.setattr(routes_admin, "MEDIA_DIR", media_root)
+    try:
+        before = next(
+            item for item in list_media_assets(500, None, conn) if item.media_id == job.media_id
+        )
+        assert "finalize_failed_cleanup" in before.available_actions
+        assert "delete_failed" not in before.available_actions
+
+        result = delete_failed_media_asset(job.media_id, None, conn)
+
+        assert result.cleanup_mode == "reset"
+        assert not committed_dir.exists()
+        assert conn.execute(
+            "SELECT status FROM media_assets WHERE media_id=?", (job.media_id,)
+        ).fetchone()[0] == "failed"
+        assert conn.execute(
+            "SELECT status FROM transcription_jobs WHERE id=?", (job.id,)
+        ).fetchone()[0] == "failed"
+        after = next(
+            item for item in list_media_assets(500, None, conn) if item.media_id == job.media_id
+        )
+        assert "finalize_failed_cleanup" not in after.available_actions
+        assert "delete_failed" in after.available_actions
     finally:
         conn.close()
 
@@ -568,7 +913,11 @@ def test_failed_external_media_without_job_retries_with_source_default_scheme(tm
     class FakeService:
         def create_pending_job(self, **kwargs):
             calls.append(kwargs)
-            return make_pending_job()
+            service_conn = open_db(db_path)
+            try:
+                return SQLiteTranscriptionStore(service_conn).create_job(make_pending_job())
+            finally:
+                service_conn.close()
 
     queued = []
     monkeypatch.setattr(routes_transcription, "ASR_ENABLED", True)
@@ -642,7 +991,7 @@ def test_retry_enqueues_persisted_job_when_media_summary_update_fails(tmp_path, 
             self.inner = open_db(db_path)
 
         def execute(self, sql, *args, **kwargs):
-            if sql.strip().startswith("UPDATE media_assets SET status='transcribing'"):
+            if "UPDATE media_assets" in sql and "SET status='transcribing'" in sql:
                 raise sqlite3.OperationalError("synthetic media summary failure")
             return self.inner.execute(sql, *args, **kwargs)
 
@@ -680,6 +1029,151 @@ def test_retry_enqueues_persisted_job_when_media_summary_update_fails(tmp_path, 
         assert check.execute(
             "SELECT status FROM media_assets WHERE media_id=?", (MEDIA_ID,)
         ).fetchone()[0] == "failed"
+    finally:
+        check.close()
+
+
+def test_retry_does_not_overwrite_media_summary_after_new_job_is_cancelled(
+    tmp_path, monkeypatch
+):
+    import api.routes_transcription as routes_transcription
+    from api.db import connect as open_db
+
+    db_path = tmp_path / "app.sqlite"
+    conn, store, _artifacts = make_phase2_store(tmp_path)
+    previous = store.create_job(make_pending_job())
+    store.record_failure(
+        previous.id,
+        error_code="provider_unavailable",
+        classification=ProviderFailureClassification.transient,
+        error_summary="synthetic controlled failure",
+        now=11,
+    )
+    conn.execute(
+        "UPDATE media_assets SET status='failed',error='synthetic' WHERE media_id=?",
+        (MEDIA_ID,),
+    )
+    conn.commit()
+    conn.close()
+    retry = make_pending_job(
+        job_id="99999999-9999-4999-8999-999999999998",
+        request_id="99999999-9999-4999-8999-999999999997",
+        attempt=2,
+        created_at=20,
+    )
+
+    class CancellingService:
+        def create_retry_job(self, **_kwargs):
+            service_conn = open_db(db_path)
+            try:
+                service_store = SQLiteTranscriptionStore(service_conn)
+                created = service_store.create_job(retry)
+                service_store.cancel_job(retry.id, now=21)
+                service_conn.execute(
+                    "UPDATE media_assets SET status='uploaded',error=NULL,updated_at=? WHERE media_id=?",
+                    (21, MEDIA_ID),
+                )
+                service_conn.commit()
+                return created
+            finally:
+                service_conn.close()
+
+    queued = []
+    monkeypatch.setattr(routes_transcription, "ASR_ENABLED", True)
+    monkeypatch.setattr(routes_transcription, "connect", lambda: open_db(db_path))
+    monkeypatch.setattr(
+        routes_transcription, "build_transcription_service", lambda: CancellingService()
+    )
+    monkeypatch.setattr(routes_transcription, "enqueue", queued.append)
+
+    result = retry_job(
+        MEDIA_ID,
+        RetryTranscriptionRequest(
+            request_idempotency_key="99999999-9999-4999-8999-999999999997"
+        ),
+        ADMIN,
+    )
+
+    assert result.job_id == retry.id
+    assert result.status == "cancelled"
+    assert queued == [retry.id]
+    check = open_db(db_path)
+    try:
+        assert check.execute(
+            "SELECT status FROM transcription_jobs WHERE id=?", (retry.id,)
+        ).fetchone()[0] == "cancelled"
+        assert check.execute(
+            "SELECT status FROM media_assets WHERE media_id=?", (MEDIA_ID,)
+        ).fetchone()[0] == "uploaded"
+    finally:
+        check.close()
+
+
+def test_cancel_does_not_overwrite_media_summary_after_new_retry_is_created(
+    tmp_path, monkeypatch
+):
+    import api.routes_transcription as routes_transcription
+    from api.db import connect as open_db
+
+    db_path = tmp_path / "app.sqlite"
+    conn, store, _artifacts = make_phase2_store(tmp_path)
+    cancelling = store.create_job(make_pending_job())
+    conn.execute(
+        "UPDATE media_assets SET status='transcribing',error=NULL WHERE media_id=?",
+        (MEDIA_ID,),
+    )
+    conn.commit()
+    conn.close()
+    retry = make_pending_job(
+        job_id="99999999-9999-4999-8999-999999999998",
+        request_id="99999999-9999-4999-8999-999999999997",
+        attempt=2,
+        created_at=20,
+    )
+
+    class CancelRaceConnection(sqlite3.Connection):
+        retry_created = False
+
+        def execute(self, sql, *args, **kwargs):
+            if (
+                "UPDATE media_assets SET status='uploaded'" in sql
+                and not self.retry_created
+            ):
+                self.retry_created = True
+                retry_conn = open_db(db_path)
+                try:
+                    SQLiteTranscriptionStore(retry_conn).create_job(retry)
+                    retry_conn.execute(
+                        "UPDATE media_assets SET status='transcribing',error=NULL WHERE media_id=?",
+                        (MEDIA_ID,),
+                    )
+                    retry_conn.commit()
+                finally:
+                    retry_conn.close()
+            return super().execute(sql, *args, **kwargs)
+
+    def race_connect():
+        race = sqlite3.connect(db_path, factory=CancelRaceConnection)
+        race.row_factory = sqlite3.Row
+        race.execute("PRAGMA foreign_keys = ON")
+        return race
+
+    monkeypatch.setattr(routes_transcription, "connect", race_connect)
+
+    result = routes_transcription.cancel_job(cancelling.id, ADMIN)
+
+    assert result.status == "cancelled"
+    check = open_db(db_path)
+    try:
+        assert check.execute(
+            "SELECT status FROM transcription_jobs WHERE id=?", (cancelling.id,)
+        ).fetchone()[0] == "cancelled"
+        assert check.execute(
+            "SELECT status FROM transcription_jobs WHERE id=?", (retry.id,)
+        ).fetchone()[0] == "pending"
+        assert check.execute(
+            "SELECT status FROM media_assets WHERE media_id=?", (MEDIA_ID,)
+        ).fetchone()[0] == "transcribing"
     finally:
         check.close()
 
