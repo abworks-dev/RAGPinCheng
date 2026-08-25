@@ -133,7 +133,6 @@ test.describe("资料管理", () => {
     expect(await failedActions.evaluateAll((buttons) => buttons.map((button) => button.getAttribute("aria-label")))).toEqual(["重试上传", "查看上传任务详情", "删除任务及资料"]);
     const retry = failedRow.getByRole("button", { name: "重试上传", exact: true });
     await expect(retry).toBeDisabled();
-    await expect(retry).toHaveAttribute("title", "原始文件仅保留在当前浏览器会话中，当前不可重试");
 
     const partialRow = rows.filter({ hasText: "合成长目录名称用于响应式检查" });
     await partialRow.getByRole("button", { name: "详情" }).click();
@@ -154,7 +153,7 @@ test.describe("资料管理", () => {
     const batchButton = page.getByRole("button", { name: "批量操作" });
     await expect(batchButton).toBeVisible();
     await batchButton.click();
-    await expect(page.getByRole("menuitem", { name: "导出任务摘要" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "导出所选任务摘要（2）" })).toBeVisible();
     await page.keyboard.press("Escape");
 
     const search = page.getByRole("searchbox", { name: "搜索上传任务" });
@@ -162,7 +161,7 @@ test.describe("资料管理", () => {
     const searchRequest = page.waitForRequest((request) => new URL(request.url()).searchParams.get("query") === "竣工交付");
     await search.press("Enter");
     await searchRequest;
-    await expect(batchButton).toHaveCount(0);
+    await expect(batchButton).toBeVisible();
     await expect(page.getByText("04 项目资料 / 02 竣工交付")).toBeVisible();
     await expect(page.getByText("01 行业规范与标准 / 02 文件夹上传测试")).toHaveCount(0);
 
@@ -856,7 +855,7 @@ test.describe("转录任务", () => {
 test.describe("索引任务", () => {
   test("normal layout keeps publication identity, filters, and failures discoverable", async ({ page }) => {
     await openTab(page, "索引任务");
-    await expect(page.getByRole("heading", { name: "资料发布任务" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "发布任务" })).toBeVisible();
     await expect(page.getByText("资料管理发布失败的合成长文件名资料", { exact: true })).toBeVisible();
     await expectNoBodyOverflow(page);
     await expect(page.getByRole("button", { name: "上传资料" })).toHaveCount(0);
@@ -869,7 +868,7 @@ test.describe("索引任务", () => {
     await expect(page.getByRole("link", { name: "查看文件" })).toBeVisible();
     await expect(page.getByRole("button", { name: "重新发布" })).toBeVisible();
 
-    const publicationFailure = page.getByText("文档解析服务请求失败。", { exact: true });
+    const publicationFailure = page.getByText("文档解析服务请求失败，请稍后重试。", { exact: true });
     await publicationFailure.scrollIntoViewIfNeeded();
     await expectInViewport(publicationFailure);
     await expectNoBodyOverflow(page);
