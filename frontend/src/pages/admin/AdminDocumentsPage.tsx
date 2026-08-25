@@ -140,6 +140,8 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
   const [selectedJobIds, setSelectedJobIds] = useState<string[]>([]);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
+  const bulkMenuRef = useRef<HTMLDivElement | null>(null);
+  const bulkMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setQuery(searchInput.trim()), 250);
@@ -155,12 +157,34 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
     setSelectedJobIds((current) => current.filter((id) => listing.jobs.some((job) => job.id === id && job.is_latest_attempt && !job.is_archived)));
   }, [listing.jobs]);
 
+  useEffect(() => {
+    if (selectedJobIds.length === 0) setBulkMenuOpen(false);
+  }, [selectedJobIds.length]);
+
+  useEffect(() => {
+    if (!bulkMenuOpen) return;
+    const closeOutside = (event: MouseEvent) => {
+      if (!bulkMenuRef.current?.contains(event.target as Node)) setBulkMenuOpen(false);
+    };
+    const closeEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setBulkMenuOpen(false);
+      bulkMenuTriggerRef.current?.focus();
+    };
+    document.addEventListener("mousedown", closeOutside);
+    document.addEventListener("keydown", closeEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOutside);
+      document.removeEventListener("keydown", closeEscape);
+    };
+  }, [bulkMenuOpen]);
+
   const params = useMemo(() => ({
     query: query || undefined,
     category_id: categoryId || undefined,
     doc_type: docType || undefined,
     source_origin: sourceOrigin || undefined,
-    status: status === "all" ? undefined : status,
+    status: status === "all" ? undefined : status === "ready" ? "published" : status,
     history,
     include_archived: includeArchived,
     limit: pageSize,
@@ -309,8 +333,9 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
               <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
               {refreshing ? "刷新中…" : "刷新列表"}
             </Button>
-            <div className="relative">
+            <div ref={bulkMenuRef} className="relative">
               <Button
+                ref={bulkMenuTriggerRef}
                 size="sm"
                 variant="outline"
                 className="h-control-md"

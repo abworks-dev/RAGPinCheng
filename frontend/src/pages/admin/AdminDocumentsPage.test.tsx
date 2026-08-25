@@ -152,6 +152,17 @@ describe("AdminDocumentsPage", () => {
     })));
   });
 
+  it("maps the published filter to the unified publication API status", async () => {
+    render(<AdminDocumentsPage />);
+    await screen.findByText(failedJob.title);
+
+    fireEvent.click(screen.getByRole("button", { name: "已发布 5" }));
+
+    await waitFor(() => expect(mocks.publicationJobs).toHaveBeenLastCalledWith(expect.objectContaining({
+      status: "published",
+    })));
+  });
+
   it("switches between latest and historical attempts", async () => {
     render(<AdminDocumentsPage />);
     await screen.findByText(failedJob.title);
@@ -338,6 +349,37 @@ describe("AdminDocumentsPage", () => {
 
     expect(mocks.bulkPublishManagedContent).toHaveBeenCalledWith(["version-1"]);
     await waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledWith("已提交 1 个任务"));
+  });
+
+  it("closes the bulk actions menu when clicking outside or pressing Escape", async () => {
+    render(<AdminDocumentsPage />);
+    await screen.findByText(failedJob.title);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: `选择${failedJob.title}` }));
+    const bulk = screen.getByRole("button", { name: "批量操作（1）" });
+    fireEvent.click(bulk);
+    expect(screen.getByRole("menu", { name: "发布任务批量操作" })).toBeInTheDocument();
+
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("menu", { name: "发布任务批量操作" })).not.toBeInTheDocument();
+
+    fireEvent.click(bulk);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "发布任务批量操作" })).not.toBeInTheDocument();
+    expect(bulk).toHaveFocus();
+  });
+
+  it("closes the bulk actions menu when the selection is cleared", async () => {
+    render(<AdminDocumentsPage />);
+    await screen.findByText(failedJob.title);
+
+    const selectJob = screen.getByRole("checkbox", { name: `选择${failedJob.title}` });
+    fireEvent.click(selectJob);
+    fireEvent.click(screen.getByRole("button", { name: "批量操作（1）" }));
+    expect(screen.getByRole("menu", { name: "发布任务批量操作" })).toBeInTheDocument();
+
+    fireEvent.click(selectJob);
+    expect(screen.queryByRole("menu", { name: "发布任务批量操作" })).not.toBeInTheDocument();
   });
 
   it("reports retry failures and hides retry on an older attempt", async () => {

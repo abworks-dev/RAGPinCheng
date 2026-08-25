@@ -943,11 +943,24 @@ test.describe("索引任务", () => {
       expect(Math.abs((headerBox!.x + headerBox!.width / 2) - (rowBox!.x + rowBox!.width / 2))).toBeLessThanOrEqual(1);
       await selectPage.click();
       await expect(firstRowCheckbox).toBeChecked();
-      await expect(page.getByRole("button", { name: "批量操作（2）" })).toBeEnabled();
+      const selectedBulk = page.getByRole("button", { name: "批量操作（2）" });
+      await expect(selectedBulk).toBeEnabled();
+      await selectedBulk.click();
+      await expect(page.getByRole("menu", { name: "发布任务批量操作" })).toBeVisible();
+      await page.mouse.click(0, 0);
+      await expect(page.getByRole("menu", { name: "发布任务批量操作" })).toHaveCount(0);
+      await selectedBulk.click();
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("menu", { name: "发布任务批量操作" })).toHaveCount(0);
       await selectPage.click();
       await expect(firstRowCheckbox).not.toBeChecked();
       await expect(page.getByRole("button", { name: "批量操作" })).toBeDisabled();
     }
+
+    const publishedRequest = page.waitForRequest((request) => request.method() === "GET" && request.url().includes("/api/admin/content/publication-jobs") && request.url().includes("status=published"));
+    await page.getByRole("button", { name: "已发布 1" }).click();
+    await publishedRequest;
+    await expect(page.getByText("已发布的合成资料", { exact: true })).toBeVisible();
 
     await page.getByRole("button", { name: "展开发布任务筛选" }).click();
     await expect(page.getByRole("combobox", { name: "按数据库分类筛选" })).toBeVisible();
