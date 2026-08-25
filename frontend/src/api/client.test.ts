@@ -672,13 +672,35 @@ describe("Phase 4B transcription API contracts", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await api.cancelTranscriptionJob("job-1");
-    await api.retryTranscription("media-1", "profile-1", "22222222-2222-4222-8222-222222222222");
+    await api.retryTranscription("media-1", "22222222-2222-4222-8222-222222222222");
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/transcription/jobs/job-1/cancel", expect.objectContaining({ method: "POST", headers: { "X-CSRF-Token": "csrf-asr" } }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/transcription/media/media-1/retry", expect.objectContaining({
       method: "POST",
       headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-asr" },
-      body: JSON.stringify({ profile_id: "profile-1", request_idempotency_key: "22222222-2222-4222-8222-222222222222" }),
+      body: JSON.stringify({ request_idempotency_key: "22222222-2222-4222-8222-222222222222" }),
+    }));
+  });
+
+  it("preserves CSRF protection for bulk transcription recovery actions", async () => {
+    setCsrfToken("csrf-asr-bulk");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ items: [], succeeded: 0, failed: 0 }))
+      .mockResolvedValueOnce(jsonResponse({ items: [], succeeded: 0, failed: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.bulkRetryTranscriptions(["media-1"], "22222222-2222-4222-8222-222222222222");
+    await api.bulkDeleteFailedMediaAssets(["media-1"]);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/transcription/bulk-retry", expect.objectContaining({
+      method: "POST",
+      headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-asr-bulk" },
+      body: JSON.stringify({ media_ids: ["media-1"], request_idempotency_key: "22222222-2222-4222-8222-222222222222" }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/media/bulk-delete-failed", expect.objectContaining({
+      method: "POST",
+      headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-asr-bulk" },
+      body: JSON.stringify({ media_ids: ["media-1"] }),
     }));
   });
 });

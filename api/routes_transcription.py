@@ -1,7 +1,9 @@
 """Admin application API for automatic transcription jobs."""
 from __future__ import annotations
 
+import logging
 import re
+import sqlite3
 import time
 import unicodedata
 import uuid
@@ -44,6 +46,8 @@ from .schemas import (
     RetryTranscriptionRequest,
     StartTranscriptionRequest,
     BulkStartTranscriptionRequest,
+    BulkRetryTranscriptionRequest,
+    BulkTranscriptionActionResponse,
     BulkTranscriptionItemDTO,
     BulkTranscriptionPreflightResponse,
     BulkTranscriptionResponse,
@@ -57,6 +61,7 @@ from .schemas import (
     TranscriptVersionDTO,
     TranscriptionJobDTO,
     TranscriptionFailureDTO,
+    TranscriptionActionItemDTO,
     TranscriptionProfileDTO,
     TranscriptionSchemeOptionDTO,
 )
@@ -75,6 +80,8 @@ from .transcription_service import TranscriptionApplicationService
 from .transcription_store import SQLiteTranscriptionStore, StoreConflictError
 from .transcription_markdown import parse_transcript_segments
 from .transcription_worker import enqueue
+
+logger = logging.getLogger("api.routes_transcription")
 
 router = APIRouter(prefix="/admin/transcription", tags=["admin-transcription"])
 
@@ -503,8 +510,13 @@ def cancel_job(
                 job_id, now=max(int(time.time()), job.updated_at + 1)
             )
             conn.execute(
-                "UPDATE media_assets SET status='uploaded',error=NULL,updated_at=? WHERE media_id=?",
-                (int(time.time()), cancelled.media_id),
+                """UPDATE media_assets SET status='uploaded',error=NULL,updated_at=?
+                   WHERE media_id=?
+                     AND NOT EXISTS(
+                         SELECT 1 FROM transcription_jobs
+                         WHERE media_id=? AND status IN ('pending','running')
+                     )""",
+                (int(time.time()), cancelled.media_id, cancelled.media_id),
             )
             conn.commit()
             return _job_dto(cancelled)
@@ -524,16 +536,33 @@ def retry_job(
     body: RetryTranscriptionRequest,
     admin: CurrentUser = Depends(require_csrf_admin),
 ) -> TranscriptionJobDTO:
+    return _retry_media_job(media_id, body.request_idempotency_key, admin, body.profile_id)
+
+
+def _retry_media_job(
+    media_id: str,
+    request_idempotency_key: str,
+    admin: CurrentUser,
+    profile_id: str | None = None,
+) -> TranscriptionJobDTO:
     if not ASR_ENABLED:
         raise HTTPException(status_code=503, detail="自动转录当前未启用")
+    try:
+        uuid.UUID(media_id)
+        uuid.UUID(request_idempotency_key)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="媒体或重试幂等键不合法")
     conn = connect()
     try:
         existing = conn.execute(
             "SELECT id,media_id,profile_id,scheme_id FROM transcription_jobs WHERE request_idempotency_key=?",
-            (body.request_idempotency_key,),
+            (request_idempotency_key,),
         ).fetchone()
         if existing is not None:
-            if existing["media_id"] != media_id or (existing["scheme_id"] or existing["profile_id"]) != body.profile_id:
+            if existing["media_id"] != media_id or (
+                profile_id is not None
+                and (existing["scheme_id"] or existing["profile_id"]) != profile_id
+            ):
                 raise HTTPException(
                     status_code=409,
                     detail={
@@ -551,35 +580,141 @@ def retry_job(
             (media_id,),
         ).fetchone()
         media = conn.execute(
-            "SELECT status FROM media_assets WHERE media_id=?", (media_id,)
+            """SELECT m.status,m.storage_kind,e.availability,s.default_scheme_id
+               FROM media_assets m
+               LEFT JOIN external_media_entries e ON e.media_id=m.media_id
+               LEFT JOIN external_media_sources s ON s.id=e.source_id
+               WHERE m.media_id=?""",
+            (media_id,),
         ).fetchone()
         if media is None or media["status"] == "archived":
             raise HTTPException(status_code=404, detail="媒体不存在")
         if active is not None:
             raise HTTPException(status_code=409, detail="该媒体已有活动转录任务")
         previous = conn.execute(
-            "SELECT id,status,profile_id,scheme_id FROM transcription_jobs WHERE media_id=? ORDER BY attempt_number DESC LIMIT 1",
+            """SELECT id,status,profile_id,scheme_id,failure_classification
+               FROM transcription_jobs WHERE media_id=?
+               ORDER BY attempt_number DESC,created_at DESC,id DESC LIMIT 1""",
             (media_id,),
         ).fetchone()
-        if previous is None or previous["status"] not in ("failed", "cancelled", "succeeded"):
-            raise HTTPException(status_code=409, detail="该媒体没有可重试的终态任务")
-        if (previous["scheme_id"] or previous["profile_id"]) != body.profile_id:
-            raise HTTPException(status_code=409, detail="重试必须保留原转录方案")
-        previous_job_id = previous["id"]
+        if previous is not None:
+            if previous["status"] not in ("failed", "cancelled"):
+                raise HTTPException(status_code=409, detail="该媒体没有可重试的失败或取消任务")
+            if previous["failure_classification"] == "permanent":
+                raise HTTPException(status_code=409, detail="该转录任务属于永久失败，不能自动重试")
+            if profile_id is not None and (previous["scheme_id"] or previous["profile_id"]) != profile_id:
+                raise HTTPException(status_code=409, detail="重试必须保留原转录方案")
+            retry_kind = "existing_job"
+            previous_job_id = str(previous["id"])
+            retry_scheme_id = None
+            retry_profile_id = None
+        elif (
+            media["storage_kind"] == "external"
+            and media["status"] == "failed"
+            and media["availability"] == "available"
+            and media["default_scheme_id"]
+        ):
+            retry_kind = "external_reservation"
+            retry_scheme_id = str(media["default_scheme_id"])
+            retry_profile_id = _check_start_scheme(conn, retry_scheme_id)
+            if profile_id is not None and profile_id not in {retry_scheme_id, retry_profile_id}:
+                raise HTTPException(status_code=409, detail="重试必须使用共享来源的默认转录方案")
+            previous_job_id = None
+        else:
+            raise HTTPException(status_code=409, detail="该媒体没有可重试的失败或取消任务")
     finally:
         conn.close()
     try:
-        job = build_transcription_service().create_retry_job(
-            previous_job_id=previous_job_id,
-            request_idempotency_key=body.request_idempotency_key,
-            created_by=admin.id,
-        )
+        service = build_transcription_service()
+        if retry_kind == "existing_job":
+            job = service.create_retry_job(
+                previous_job_id=previous_job_id,
+                request_idempotency_key=request_idempotency_key,
+                created_by=admin.id,
+            )
+        else:
+            job = service.create_pending_job(
+                media_id=media_id,
+                profile_id=retry_profile_id,
+                request_idempotency_key=request_idempotency_key,
+                created_by=admin.id,
+                scheme_id=retry_scheme_id,
+            )
     except StoreConflictError:
         raise HTTPException(status_code=409, detail="转录任务状态发生冲突")
-    except ContractValidationError:
-        raise HTTPException(status_code=400, detail="转录请求不符合服务端契约")
-    enqueue(job.id)
-    return _job_dto(job)
+    except (ContractValidationError, OSError):
+        raise HTTPException(status_code=409, detail="视频音频准备失败，请检查视频后重试")
+    latest_job = job
+    try:
+        try:
+            conn = connect()
+            try:
+                conn.execute(
+                    """UPDATE media_assets
+                       SET status='transcribing',error=NULL,updated_at=?
+                       WHERE media_id=?
+                         AND EXISTS(
+                             SELECT 1 FROM transcription_jobs
+                             WHERE id=? AND media_id=? AND status IN ('pending','running')
+                         )""",
+                    (int(time.time()), media_id, job.id, media_id),
+                )
+                conn.commit()
+                latest_job = SQLiteTranscriptionStore(conn).load_job(job.id)
+            finally:
+                conn.close()
+        except (OSError, sqlite3.Error):
+            logger.exception(
+                "retry job %s persisted but media summary update failed", job.id
+            )
+    finally:
+        enqueue(job.id)
+    return _job_dto(latest_job)
+
+
+@router.post("/bulk-retry", response_model=BulkTranscriptionActionResponse, status_code=202)
+def bulk_retry_jobs(
+    body: BulkRetryTranscriptionRequest,
+    admin: CurrentUser = Depends(require_csrf_admin),
+) -> BulkTranscriptionActionResponse:
+    try:
+        namespace = uuid.UUID(body.request_idempotency_key)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="批量重试幂等键不合法")
+    items: list[TranscriptionActionItemDTO] = []
+    seen: set[str] = set()
+    for media_id in body.media_ids:
+        if media_id in seen:
+            continue
+        seen.add(media_id)
+        request_key = str(uuid.uuid5(namespace, media_id))
+        try:
+            job = _retry_media_job(media_id, request_key, admin)
+            items.append(TranscriptionActionItemDTO(
+                media_id=media_id,
+                status="succeeded",
+                transcription_job_id=job.job_id,
+            ))
+        except HTTPException as exc:
+            message = exc.detail.get("message") if isinstance(exc.detail, dict) else str(exc.detail)
+            items.append(TranscriptionActionItemDTO(
+                media_id=media_id,
+                status="failed",
+                message=message,
+            ))
+        except Exception:
+            logger.exception("unexpected transcription retry error for %s", media_id)
+            items.append(TranscriptionActionItemDTO(
+                media_id=media_id,
+                status="failed",
+                message="操作失败，请稍后重试",
+            ))
+    succeeded = sum(item.status == "succeeded" for item in items)
+    return BulkTranscriptionActionResponse(
+        items=items,
+        succeeded=succeeded,
+        failed=len(items) - succeeded,
+    )
 
 
 

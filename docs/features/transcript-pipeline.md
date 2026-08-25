@@ -1,7 +1,7 @@
 # 视频转录链路
 
 - 状态：人工上传/播放链路与多引擎 Phase 5A/5B 应用闭环已实现；faster-whisper 与 WhisperX R3 已通过，生产 ASR 已准入 SenseVoice、faster-whisper 与 WhisperX；WhisperX 服务注册固定使用已资格的 `full-decode`
-- 最后核对：2026-08-20
+- 最后核对：2026-08-25
 
 ## 用户可观察能力
 
@@ -59,8 +59,9 @@ Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审�
 - Phase 3 remote Provider 仍只返回严格 `ProviderCandidate | ProviderFailure`，由 `pipeline.py` 独占 normalizer/Canonical 结果流；
 - 管理端单 MP4 + `profile_id` 上传、任务状态/取消/恢复已接入应用 API 和后台 worker；人工 MP4+Markdown 路径保持独立；
 - 管理端按媒体 lazy 加载版本历史，可校对并渲染预览不可变版本的 Markdown、将修改保存为新的受管人工修订、提交审核备注、批准/拒绝并显式发布；legacy 人工版本不提供可用的受管发布动作；
-- 管理端媒体列表使用真实审核枚举计算唯一当前阶段，独立展示索引状态，并提供处理中、待审核、发布处理中和失败快捷筛选；筛选暂时只作用于最近加载的 100 条；
-- 媒体列表 API 同时返回 `current_phase`、`available_actions` 和逐动作 `disabled_actions` 原因。运行中的任务可取消；失败或取消且非永久失败的任务可重试；已发布且没有待处理替换的媒体可替换或归档；只有从未创建过转录任务的失败上传可完整删除。发布索引处理中不会重复开放发布动作，前端以服务端能力为准。
+- 管理端媒体列表使用真实审核枚举计算唯一当前阶段，独立展示索引状态，并提供处理中、待审核、发布处理中和失败快捷筛选；媒体与最近任务窗口统一为 500 条，避免 500 条媒体响应因只加载 100 条任务而遗漏旧任务状态；
+- 媒体列表 API 同时返回 `current_phase`、`available_actions` 和逐动作 `disabled_actions` 原因，前端只消费服务端能力而不重建权限规则。运行中的任务可取消；失败或取消且非永久失败的既有任务使用原任务运行配置和方案快照重试；共享来源在任务创建前仅 `media_assets` 标记失败时，使用来源当前默认方案创建重试任务。单项和批量重试均由后端逐项返回结果。
+- 失败对象只有在没有活动转录/索引任务、转录版本、正式 head、发布索引历史或活动替换时才开放清理。受管媒体清理会删除本地媒体与失败历史；共享来源只删除本地任务和派生缓存，并把媒体重置为可重新入队状态，不删除共享原文件或 `external_media_entries`。文件暂存使用事务前 `.cleanup-pending-*` 与提交后 `.cleanup-*` 两阶段标记；前者在数据库仍失败时必须恢复并重新走完整清理，后者由服务端优先投影独立的 `finalize_failed_cleanup` 收尾能力，即使媒体已重新入队或再次失败也不会删除当前缓存或任务。前端以这两个服务端动作区分完整失败清理与旧缓存收尾；单项和批量操作均由后端执行相同预检并逐项返回结果，发布索引处理中不会重复开放发布或普通失败清理动作。
 - Remote Provider 的服务请求身份绑定应用任务、媒体与执行指纹；同一应用任务网络重试保持稳定，同一媒体新建应用重试任务生成新身份；
 - 转录任务 API 返回安全的结构化失败 `code/message/retryable`；服务请求身份冲突与契约不匹配分别处理，前端不再直接展示 Provider 技术摘要；
 - publication adapter 只走 `chunk_document → store_parents → index_children`，不调用 purge、reset 或普通 `index_single`；
@@ -363,7 +364,7 @@ candidate manifest 和 promotion workflow evidence 为准，不能把代码就�
   旁路 candidate staging、promotion 和实时验收；尚未使用真实业务媒体完成质量验收；
 - 当前静态目录包含三个 `qualification_approved` WhisperX v2 Profile，但默认关闭；生产应用动作仅在 v2 R3、candidate promotion 和实时哈希验证通过后准入均衡 Profile。Qwen3-ASR experimental Profile 继续为 disabled；
 - 支持范围播放但无 HLS 自适应码率。
-- 媒体快捷筛选是最近 100 条的客户端筛选，不是服务端全库查询；转写工作台的视频校对区域目前只支持已登记媒体的受控视频播放，不生成独立字幕轨道。
+- 媒体快捷筛选是最近 500 条的客户端筛选，不是服务端全库查询；转写工作台的视频校对区域目前只支持已登记媒体的受控视频播放，不生成独立字幕轨道。
 
 ## 相关决策
 

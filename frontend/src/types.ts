@@ -1125,6 +1125,25 @@ export type TranscriptionJob = {
   updated_at: number;
 };
 
+export type FailedMediaCleanup = {
+  media_id: string;
+  cleanup_mode: "deleted" | "reset";
+};
+
+export type TranscriptionActionItem = {
+  media_id: string;
+  status: "succeeded" | "failed";
+  message: string | null;
+  transcription_job_id: string | null;
+  cleanup_mode: "deleted" | "reset" | null;
+};
+
+export type BulkTranscriptionActionResult = {
+  items: TranscriptionActionItem[];
+  succeeded: number;
+  failed: number;
+};
+
 export type BulkTranscriptionItem = {
   media_id: string;
   title: string;
@@ -1252,8 +1271,8 @@ export type MediaAsset = {
   external_source_id?: string | null;
   external_relative_path?: string | null;
   external_availability?: "available" | "missing" | "superseded" | null;
-  available_actions?: string[];
-  disabled_actions?: Record<string, string>;
+  available_actions: string[];
+  disabled_actions: Record<string, string>;
 };
 
 export type ExternalMediaRoot = { alias: string };

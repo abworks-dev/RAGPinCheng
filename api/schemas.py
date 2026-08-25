@@ -1749,8 +1749,40 @@ class DoneEvent(BaseModel):
 class RetryTranscriptionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    profile_id: str
+    profile_id: str | None = None
     request_idempotency_key: str
+
+
+class BulkRetryTranscriptionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    media_ids: list[str] = Field(min_length=1, max_length=100)
+    request_idempotency_key: str = Field(min_length=36, max_length=36)
+
+
+class BulkFailedMediaDeleteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    media_ids: list[str] = Field(min_length=1, max_length=100)
+
+
+class FailedMediaCleanupDTO(BaseModel):
+    media_id: str
+    cleanup_mode: Literal["deleted", "reset"]
+
+
+class TranscriptionActionItemDTO(BaseModel):
+    media_id: str
+    status: Literal["succeeded", "failed"]
+    message: str | None = None
+    transcription_job_id: str | None = None
+    cleanup_mode: Literal["deleted", "reset"] | None = None
+
+
+class BulkTranscriptionActionResponse(BaseModel):
+    items: list[TranscriptionActionItemDTO]
+    succeeded: int
+    failed: int
 
 
 class StartTranscriptionRequest(BaseModel):

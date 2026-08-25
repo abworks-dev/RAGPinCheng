@@ -1,6 +1,6 @@
 import type { Page, Route } from "@playwright/test";
 
-export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "asr_identity_unavailable" | "publication_failure" | "media_progress" | "media_permanent_failure" | "media_upload" | "media_conflict" | "media_library";
+export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "asr_identity_unavailable" | "publication_failure" | "media_progress" | "media_stale_cleanup" | "media_permanent_failure" | "media_upload" | "media_conflict" | "media_library";
 export type WorkspaceUser = "admin" | "bim_engineer" | "member";
 
 const admin = {
@@ -798,6 +798,10 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && path === "/api/admin/media") {
       if (scenario === "empty") return json(route, []);
       if (scenario === "media_progress") return json(route, [{ ...mediaAssets[2], status: "transcribing", current_phase: "transcription", transcription_job_id: "media-running-job", transcription_job_status: "running", transcription_stage: "transcribing", available_actions: ["cancel_transcription"], disabled_actions: { retry_transcription: "仅可重试失败或已取消且允许恢复的转录任务" } }]);
+      if (scenario === "media_stale_cleanup") return json(route, [
+        { ...mediaAssets[2], media_id: "media-stale-uploaded", title: "共享视频遗留缓存", status: "uploaded", storage_kind: "external", current_phase: "upload", transcription_job_id: null, transcription_job_status: null, transcription_stage: null, available_actions: ["finalize_failed_cleanup"], disabled_actions: { retry_transcription: "仅可重试失败或已取消且允许恢复的转录任务", delete_failed: "请先完成上次清理遗留缓存的收尾" } },
+        { ...mediaAssets[0], media_id: "media-stale-failed", title: "共享视频再次失败", status: "failed", storage_kind: "external", current_phase: "transcription", transcription_job_id: null, transcription_job_status: null, transcription_stage: null, available_actions: ["retry_transcription", "finalize_failed_cleanup"], disabled_actions: { delete_failed: "请先完成上次清理遗留缓存的收尾" } },
+      ]);
       if (scenario === "media_permanent_failure") return json(route, [{ ...mediaAssets[0], available_actions: [], disabled_actions: { retry_transcription: "仅可重试失败或已取消且允许恢复的转录任务" } }]);
       if (scenario === "media_library") return json(route, [mediaLibraryAsset]);
       return json(route, mediaAssets);

@@ -37,7 +37,7 @@ describe("useTranscriptionJobs", () => {
     const { result } = renderHook(() => useTranscriptionJobs());
     await waitFor(() => expect(result.current.jobs).toEqual([runningJob]));
     expect(result.current.jobsByMediaId.get("media-1")).toEqual(runningJob);
-    expect(mocks.listTranscriptionJobs).toHaveBeenCalledWith(true, 100);
+    expect(mocks.listTranscriptionJobs).toHaveBeenCalledWith(true, 500);
   });
 
   it("polls active jobs and stops after a terminal result", async () => {
