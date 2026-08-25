@@ -46,6 +46,36 @@ test.describe("转录任务", () => {
     await page.screenshot({ path: testInfo.outputPath(`transcription-stale-cleanup-${viewport.width}x${viewport.height}.png`) });
   });
 
+  test("共享来源重试显示后端结构化失败原因", async ({ page }, testInfo) => {
+    await installAdminRoutes(page, "media_stale_cleanup");
+    await page.route("**/api/admin/transcription/media/media-stale-failed/retry", (route) => route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({
+        detail: {
+          code: "transcription_scheme_unavailable",
+          message: "当前没有可用的转录方案，请先调整共享目录的默认转录方案。",
+          retryable: false,
+        },
+      }),
+    }));
+    await page.goto("/admin/content?view=transcription");
+
+    const failedRow = page.getByText("共享视频再次失败", { exact: true }).locator("xpath=ancestor::li");
+    const retry = failedRow.getByRole("button", { name: "重试" });
+    await expect(retry).toBeEnabled();
+    await retry.click();
+
+    const alert = page.getByRole("alert").filter({ hasText: "当前没有可用的转录方案" });
+    await expect(alert).toContainText("当前没有可用的转录方案，请先调整共享目录的默认转录方案。");
+    await expectInViewport(alert);
+    await expectNoBodyOverflow(page);
+    const viewport = page.viewportSize()!;
+    await page.screenshot({
+      path: testInfo.outputPath(`transcription-shared-retry-error-${viewport.width}x${viewport.height}.png`),
+    });
+  });
+
   test("媒体空状态和错误状态可恢复", async ({ page }) => {
     await installAdminRoutes(page, "empty");
     await page.goto("/admin/content?view=transcription");

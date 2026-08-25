@@ -68,7 +68,7 @@ from .content_store import archive_content_item, normalize_content_filename
 from .db import get_db
 from .feedback import read_records
 from .indexing import create_job, enqueue
-from .routes_transcription import build_transcription_service
+from .routes_transcription import build_transcription_service, resolve_admitted_retry_scheme
 from .transcription_schemes import get_scheme, resolve_scheme_runtime
 from .routes_media import safe_join, stream_media_file
 from .media_storage import MediaStorageError, resolve_media_path
@@ -174,6 +174,7 @@ def _media_action_state(
     replacement_status: str | None = None,
     storage_kind: str = "managed",
     external_availability: str | None = None,
+    transcription_retry_available: bool = True,
     external_retry_scheme_available: bool = False,
     has_active_job: bool = False,
     has_transcript_versions: bool = False,
@@ -188,19 +189,28 @@ def _media_action_state(
         available.append("cancel_transcription")
     else:
         disabled["cancel_transcription"] = "当前没有运行中的转录任务"
-    retryable_external_reservation_failure = (
+    external_reservation_failure = (
         storage_kind == "external"
         and status == "failed"
         and job_status is None
-        and external_availability not in {"missing", "superseded"}
-        and external_retry_scheme_available
+        and external_availability == "available"
     )
-    if (
+    retryable_external_reservation_failure = (
+        external_reservation_failure and external_retry_scheme_available
+    )
+    retryable_existing_job = (
         job_status == "cancelled"
         or (job_status == "failed" and job_failure_classification != "permanent")
-        or retryable_external_reservation_failure
+    )
+    if transcription_retry_available and (
+        retryable_existing_job or retryable_external_reservation_failure
     ):
         available.append("retry_transcription")
+    elif retryable_existing_job or external_reservation_failure:
+        if not transcription_retry_available:
+            disabled["retry_transcription"] = "自动转录当前不可用"
+        else:
+            disabled["retry_transcription"] = "当前没有可用的转录方案，请先调整共享目录的默认转录方案"
     else:
         disabled["retry_transcription"] = "仅可重试失败或已取消且允许恢复的转录任务"
     if review_status in {"awaiting_review", "review_rejected"}:
@@ -1963,17 +1973,6 @@ def list_media_assets(
                m.transcript_origin, m.status, m.created_at, m.updated_at, m.error,
                m.storage_kind, e.source_id AS external_source_id,
                e.relative_path AS external_relative_path, e.availability AS external_availability,
-               EXISTS(
-                   SELECT 1
-                   FROM external_media_entries retry_entry
-                   JOIN external_media_sources retry_source ON retry_source.id=retry_entry.source_id
-                   JOIN transcription_schemes retry_scheme ON retry_scheme.id=retry_source.default_scheme_id
-                   JOIN transcription_bases retry_base ON retry_base.id=retry_scheme.base_id
-                   WHERE retry_entry.media_id=m.media_id
-                     AND retry_entry.availability='available'
-                     AND retry_scheme.enabled=1 AND retry_scheme.archived=0
-                     AND retry_base.admission='enabled' AND retry_base.availability='runtime'
-               ) AS external_retry_scheme_available,
                COALESCE(i.category_id,m.target_category_id) AS category_id,
                i.id AS catalog_item_id,h.current_version_id,
                (SELECT j.id FROM transcription_jobs j
@@ -2043,6 +2042,20 @@ def list_media_assets(
             if row["storage_kind"] == "external"
         },
     )
+    transcription_retry_available = bool(ASR_ENABLED and ASR_SERVICE_TOKEN)
+    admitted_retry_scheme_available = False
+    has_external_reservation_failure = any(
+        row["storage_kind"] == "external"
+        and row["status"] == "failed"
+        and row["transcription_job_status"] is None
+        and row["external_availability"] == "available"
+        for row in rows
+    )
+    if transcription_retry_available and has_external_reservation_failure:
+        retry_service = build_transcription_service()
+        admitted_retry_scheme_available = resolve_admitted_retry_scheme(
+            conn, None, service=retry_service
+        ) is not None
     result: list[MediaAssetDTO] = []
     for r in rows:
         available_actions, disabled_actions = _media_action_state(
@@ -2055,7 +2068,11 @@ def list_media_assets(
             replacement_status=r["replacement_status"],
             storage_kind=str(r["storage_kind"]),
             external_availability=r["external_availability"],
-            external_retry_scheme_available=bool(r["external_retry_scheme_available"]),
+            transcription_retry_available=transcription_retry_available,
+            external_retry_scheme_available=(
+                r["external_availability"] == "available"
+                and admitted_retry_scheme_available
+            ),
             has_active_job=bool(r["has_active_job"]),
             has_transcript_versions=bool(r["has_transcript_versions"]),
             has_transcript_head=bool(r["has_transcript_head"]),

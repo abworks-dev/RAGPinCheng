@@ -847,7 +847,13 @@ def _attach_external_source(conn, media_id: str) -> str:
     return scheme_id
 
 
-def test_failed_external_media_without_job_advertises_server_retry_and_cleanup(tmp_path):
+def test_failed_external_media_without_job_advertises_server_retry_and_cleanup(
+    tmp_path, monkeypatch
+):
+    import api.routes_admin as routes_admin
+
+    monkeypatch.setattr(routes_admin, "ASR_ENABLED", True)
+    monkeypatch.setattr(routes_admin, "ASR_SERVICE_TOKEN", "fixture-token")
     conn, _store, _artifacts = make_phase2_store(tmp_path)
     media_id = MEDIA_ID
     try:
@@ -866,21 +872,103 @@ def test_failed_external_media_without_job_advertises_server_retry_and_cleanup(t
         conn.close()
 
 
-def test_failed_external_media_with_disabled_source_scheme_does_not_advertise_retry(tmp_path):
+def test_failed_external_media_with_disabled_source_scheme_advertises_fallback_retry(
+    tmp_path, monkeypatch
+):
+    import api.routes_admin as routes_admin
+
+    monkeypatch.setattr(routes_admin, "ASR_ENABLED", True)
+    monkeypatch.setattr(routes_admin, "ASR_SERVICE_TOKEN", "fixture-token")
     conn, _store, _artifacts = make_phase2_store(tmp_path)
     try:
-        scheme_id = _attach_external_source(conn, MEDIA_ID)
+        _attach_external_source(conn, MEDIA_ID)
+        disabled_scheme_id = "whisperx-large-v3-zh-balanced-v2"
+        conn.execute(
+            "UPDATE external_media_sources SET default_scheme_id=?",
+            (disabled_scheme_id,),
+        )
         conn.execute(
             "UPDATE media_assets SET storage_kind='external',status='failed',error='synthetic' WHERE media_id=?",
             (MEDIA_ID,),
         )
-        conn.execute("UPDATE transcription_schemes SET enabled=0 WHERE id=?", (scheme_id,))
+        conn.execute(
+            "UPDATE transcription_schemes SET enabled=0 WHERE id=?",
+            (disabled_scheme_id,),
+        )
         conn.commit()
 
         asset = next(item for item in list_media_assets(500, None, conn) if item.media_id == MEDIA_ID)
 
+        assert "retry_transcription" in asset.available_actions
+        assert "delete_failed" in asset.available_actions
+    finally:
+        conn.close()
+
+
+def test_failed_external_media_without_an_admitted_runtime_scheme_hides_retry(tmp_path, monkeypatch):
+    import api.routes_admin as routes_admin
+    from src.transcription.types import ContractValidationError
+
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    try:
+        _attach_external_source(conn, MEDIA_ID)
+        conn.execute(
+            "UPDATE media_assets SET storage_kind='external',status='failed',error='profile_disabled:profile_id' WHERE media_id=?",
+            (MEDIA_ID,),
+        )
+        conn.commit()
+
+        class DisabledService:
+            def resolve_profile(self, _profile_id, _operation):
+                raise ContractValidationError("profile_disabled", "profile_id")
+
+        monkeypatch.setattr(routes_admin, "ASR_ENABLED", True)
+        monkeypatch.setattr(routes_admin, "ASR_SERVICE_TOKEN", "fixture-token")
+        monkeypatch.setattr(routes_admin, "build_transcription_service", lambda: DisabledService())
+
+        asset = next(item for item in list_media_assets(500, None, conn) if item.media_id == MEDIA_ID)
+
         assert "retry_transcription" not in asset.available_actions
-        assert "retry_transcription" in asset.disabled_actions
+        assert asset.disabled_actions["retry_transcription"] == (
+            "当前没有可用的转录方案，请先调整共享目录的默认转录方案"
+        )
+        assert "delete_failed" in asset.available_actions
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize(
+    ("asr_enabled", "service_token"),
+    [(False, "fixture-token"), (True, "")],
+)
+def test_failed_external_media_hides_retry_when_asr_is_unavailable(
+    tmp_path, monkeypatch, asr_enabled, service_token
+):
+    import api.routes_admin as routes_admin
+
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    try:
+        _attach_external_source(conn, MEDIA_ID)
+        conn.execute(
+            "UPDATE media_assets SET storage_kind='external',status='failed',error='synthetic' WHERE media_id=?",
+            (MEDIA_ID,),
+        )
+        conn.commit()
+
+        monkeypatch.setattr(routes_admin, "ASR_ENABLED", asr_enabled)
+        monkeypatch.setattr(routes_admin, "ASR_SERVICE_TOKEN", service_token)
+        monkeypatch.setattr(
+            routes_admin,
+            "build_transcription_service",
+            lambda: (_ for _ in ()).throw(
+                AssertionError("disabled ASR must not build a retry service")
+            ),
+        )
+
+        asset = next(item for item in list_media_assets(500, None, conn) if item.media_id == MEDIA_ID)
+
+        assert "retry_transcription" not in asset.available_actions
+        assert asset.disabled_actions["retry_transcription"] == "自动转录当前不可用"
         assert "delete_failed" in asset.available_actions
     finally:
         conn.close()
@@ -911,6 +999,10 @@ def test_failed_external_media_without_job_retries_with_source_default_scheme(tm
     calls = []
 
     class FakeService:
+        @staticmethod
+        def resolve_profile(_profile_id, _operation):
+            return object()
+
         def create_pending_job(self, **kwargs):
             calls.append(kwargs)
             service_conn = open_db(db_path)
@@ -948,6 +1040,179 @@ def test_failed_external_media_without_job_retries_with_source_default_scheme(tm
         ).fetchone()) == ("transcribing", None)
     finally:
         check.close()
+
+
+def test_failed_external_media_retry_falls_back_to_an_admitted_scheme(tmp_path, monkeypatch):
+    import api.routes_transcription as routes_transcription
+    from api.db import connect as open_db
+    from src.transcription.types import ContractValidationError
+
+    db_path = tmp_path / "app.sqlite"
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    preferred_scheme_id = _attach_external_source(conn, MEDIA_ID)
+    conn.execute(
+        "UPDATE external_media_sources SET default_scheme_id=?",
+        ("whisperx-large-v3-zh-balanced-v2",),
+    )
+    conn.execute(
+        "UPDATE media_assets SET storage_kind='external',status='failed',error='profile_disabled:profile_id' WHERE media_id=?",
+        (MEDIA_ID,),
+    )
+    conn.commit()
+    conn.close()
+
+    calls = []
+
+    class FakeService:
+        def resolve_profile(self, profile_id, _operation):
+            if profile_id != "funasr-sensevoice-zh-experimental-v1":
+                raise ContractValidationError("profile_disabled", "profile_id")
+            return object()
+
+        def create_pending_job(self, **kwargs):
+            calls.append(kwargs)
+            service_conn = open_db(db_path)
+            try:
+                return SQLiteTranscriptionStore(service_conn).create_job(make_pending_job())
+            finally:
+                service_conn.close()
+
+    queued = []
+    monkeypatch.setattr(routes_transcription, "ASR_ENABLED", True)
+    monkeypatch.setattr(routes_transcription, "ASR_SERVICE_TOKEN", "synthetic-token")
+    monkeypatch.setattr(routes_transcription, "connect", lambda: open_db(db_path))
+    monkeypatch.setattr(routes_transcription, "build_transcription_service", lambda: FakeService())
+    monkeypatch.setattr(routes_transcription, "enqueue", queued.append)
+
+    result = retry_job(
+        MEDIA_ID,
+        RetryTranscriptionRequest(
+            request_idempotency_key="67676767-6767-4767-8767-676767676767"
+        ),
+        ADMIN,
+    )
+
+    assert result.job_id == make_pending_job().id
+    assert calls == [{
+        "media_id": MEDIA_ID,
+        "profile_id": "funasr-sensevoice-zh-experimental-v1",
+        "request_idempotency_key": "67676767-6767-4767-8767-676767676767",
+        "created_by": ADMIN.id,
+        "scheme_id": preferred_scheme_id,
+    }]
+    assert queued == [make_pending_job().id]
+
+
+def test_failed_external_media_retry_reports_when_no_runtime_scheme_is_admitted(tmp_path, monkeypatch):
+    import api.routes_transcription as routes_transcription
+    from api.db import connect as open_db
+    from src.transcription.types import ContractValidationError
+
+    db_path = tmp_path / "app.sqlite"
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    _attach_external_source(conn, MEDIA_ID)
+    conn.execute(
+        "UPDATE media_assets SET storage_kind='external',status='failed',error='profile_disabled:profile_id' WHERE media_id=?",
+        (MEDIA_ID,),
+    )
+    conn.commit()
+    conn.close()
+
+    class DisabledService:
+        def resolve_profile(self, _profile_id, _operation):
+            raise ContractValidationError("profile_disabled", "profile_id")
+
+    monkeypatch.setattr(routes_transcription, "ASR_ENABLED", True)
+    monkeypatch.setattr(routes_transcription, "ASR_SERVICE_TOKEN", "synthetic-token")
+    monkeypatch.setattr(routes_transcription, "connect", lambda: open_db(db_path))
+    monkeypatch.setattr(routes_transcription, "build_transcription_service", lambda: DisabledService())
+
+    with pytest.raises(HTTPException) as caught:
+        retry_job(
+            MEDIA_ID,
+            RetryTranscriptionRequest(
+                request_idempotency_key="68686868-6868-4868-8868-686868686868"
+            ),
+            ADMIN,
+        )
+
+    assert caught.value.status_code == 409
+    assert caught.value.detail == {
+        "code": "transcription_scheme_unavailable",
+        "message": "当前没有可用的转录方案，请先调整共享目录的默认转录方案。",
+        "retryable": False,
+    }
+
+
+def test_failed_external_media_retry_reports_when_asr_token_is_missing(monkeypatch):
+    import api.routes_transcription as routes_transcription
+
+    monkeypatch.setattr(routes_transcription, "ASR_ENABLED", True)
+    monkeypatch.setattr(routes_transcription, "ASR_SERVICE_TOKEN", "")
+
+    with pytest.raises(HTTPException) as caught:
+        retry_job(
+            MEDIA_ID,
+            RetryTranscriptionRequest(
+                request_idempotency_key="68686868-6868-4868-8868-686868686869"
+            ),
+            ADMIN,
+        )
+
+    assert caught.value.status_code == 503
+    assert caught.value.detail == {
+        "code": "transcription_service_unavailable",
+        "message": "自动转录当前不可用。",
+        "retryable": True,
+    }
+
+
+def test_retry_reports_a_structured_state_conflict(tmp_path, monkeypatch):
+    import api.routes_transcription as routes_transcription
+    from api.db import connect as open_db
+    from api.transcription_store import StoreConflictError
+
+    db_path = tmp_path / "app.sqlite"
+    conn, store, _artifacts = make_phase2_store(tmp_path)
+    previous = store.create_job(make_pending_job())
+    store.record_failure(
+        previous.id,
+        error_code="provider_unavailable",
+        classification=ProviderFailureClassification.transient,
+        error_summary="synthetic controlled failure",
+        now=11,
+    )
+    conn.execute(
+        "UPDATE media_assets SET status='failed',error='synthetic' WHERE media_id=?",
+        (MEDIA_ID,),
+    )
+    conn.commit()
+    conn.close()
+
+    class ConflictingService:
+        def create_retry_job(self, **_kwargs):
+            raise StoreConflictError("job_uniqueness_conflict")
+
+    monkeypatch.setattr(routes_transcription, "ASR_ENABLED", True)
+    monkeypatch.setattr(routes_transcription, "ASR_SERVICE_TOKEN", "fixture-token")
+    monkeypatch.setattr(routes_transcription, "connect", lambda: open_db(db_path))
+    monkeypatch.setattr(routes_transcription, "build_transcription_service", lambda: ConflictingService())
+
+    with pytest.raises(HTTPException) as caught:
+        retry_job(
+            MEDIA_ID,
+            RetryTranscriptionRequest(
+                request_idempotency_key="69696969-6969-4969-8969-696969696969"
+            ),
+            ADMIN,
+        )
+
+    assert caught.value.status_code == 409
+    assert caught.value.detail == {
+        "code": "transcription_state_conflict",
+        "message": "转录任务状态已变化，请刷新列表后重试。",
+        "retryable": True,
+    }
 
 
 def test_retry_enqueues_persisted_job_when_media_summary_update_fails(tmp_path, monkeypatch):
@@ -1010,6 +1275,7 @@ def test_retry_enqueues_persisted_job_when_media_summary_update_fails(tmp_path, 
 
     queued = []
     monkeypatch.setattr(routes_transcription, "ASR_ENABLED", True)
+    monkeypatch.setattr(routes_transcription, "ASR_SERVICE_TOKEN", "fixture-token")
     monkeypatch.setattr(routes_transcription, "connect", route_connect)
     monkeypatch.setattr(routes_transcription, "build_transcription_service", lambda: FakeService())
     monkeypatch.setattr(routes_transcription, "enqueue", queued.append)
@@ -1080,6 +1346,7 @@ def test_retry_does_not_overwrite_media_summary_after_new_job_is_cancelled(
 
     queued = []
     monkeypatch.setattr(routes_transcription, "ASR_ENABLED", True)
+    monkeypatch.setattr(routes_transcription, "ASR_SERVICE_TOKEN", "fixture-token")
     monkeypatch.setattr(routes_transcription, "connect", lambda: open_db(db_path))
     monkeypatch.setattr(
         routes_transcription, "build_transcription_service", lambda: CancellingService()
@@ -1196,7 +1463,14 @@ def test_bulk_retry_and_cleanup_return_itemized_partial_results(monkeypatch):
 
     def fake_retry(media_id, request_key, admin):
         if media_id != MEDIA_ID:
-            raise HTTPException(status_code=409, detail="synthetic retry failure")
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "transcription_scheme_unavailable",
+                    "message": "synthetic retry failure",
+                    "retryable": False,
+                },
+            )
         return _job_dto(make_pending_job())
 
     def fake_cleanup(media_id, conn):
@@ -1220,6 +1494,7 @@ def test_bulk_retry_and_cleanup_return_itemized_partial_results(monkeypatch):
         (MEDIA_ID, "succeeded"),
         ("11111111-1111-4111-8111-111111111111", "failed"),
     ]
+    assert [item.message for item in retry_result.items] == [None, "synthetic retry failure"]
     assert (delete_result.succeeded, delete_result.failed) == (1, 1)
     assert [item.message for item in delete_result.items] == [None, "synthetic cleanup failure"]
 
