@@ -1,4 +1,4 @@
-import { CheckCircle2, ChevronDown, CircleAlert, Clock3, Eye, ListChecks, RefreshCw, Rocket, Search, SlidersHorizontal } from "lucide-react";
+import { CheckCircle2, CircleAlert, Clock3, ChevronDown, Download, Eye, ListChecks, RefreshCw, Rocket, Search, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { adminContentApi } from "../../api/admin/content";
 import { Badge } from "../../components/ui/badge";
@@ -265,6 +265,13 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
     } catch (caught) { toast.error(caught instanceof Error ? caught.message : "批量重新发布失败"); }
     finally { setBulkBusy(false); }
   };
+  const exportFailures = () => {
+    const failures = listing.jobs.filter((job) => (selectedJobIds.length ? selectedJobIds.includes(job.id) : true) && job.status === "failed");
+    const csv = ["资料名称,文件名,版本,失败时间,失败原因,建议操作", ...failures.map((job) => [job.title || "", job.original_filename || "", job.version_number || "", formatAdminDate(job.updated_at), job.failure?.message || job.error_summary || "", job.failure?.recommended_action || ""].map((value) => `"${String(value).replaceAll('"', '""')}"`).join(","))].join("\r\n");
+    const url = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" }));
+    const anchor = document.createElement("a"); anchor.href = url; anchor.download = "索引失败报告.csv"; anchor.click(); URL.revokeObjectURL(url);
+    setBulkMenuOpen(false);
+  };
 
   const titleId = embedded ? "managed-index-view-title" : "admin-documents-title";
 
@@ -321,6 +328,10 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
                   <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-left text-ui-sm hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50" disabled={actionableJobs.length === 0 || bulkBusy} onClick={() => { setBulkMenuOpen(false); void bulkRepublish(); }}>
                     <Rocket className="size-4" />
                     批量重新发布
+                  </button>
+                  <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-left text-ui-sm hover:bg-surface-muted" onClick={exportFailures}>
+                    <Download className="size-4" />
+                    导出失败报告
                   </button>
                 </div>
               )}

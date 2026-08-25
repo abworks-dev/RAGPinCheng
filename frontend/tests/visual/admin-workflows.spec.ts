@@ -129,11 +129,10 @@ test.describe("资料管理", () => {
     const rows = page.getByTestId("upload-task-row");
     const failedRow = rows.filter({ hasText: "01 行业规范与标准 / 02 文件夹上传测试" });
     const failedActions = failedRow.getByRole("button");
-    await expect(failedActions).toHaveCount(2);
-    expect(await failedActions.allTextContents()).toEqual(["重试", "详情"]);
-    const retry = failedRow.getByRole("button", { name: "重试（原始文件不可用）", exact: true });
+    await expect(failedActions).toHaveCount(3);
+    expect(await failedActions.evaluateAll((buttons) => buttons.map((button) => button.getAttribute("aria-label")))).toEqual(["重试上传", "查看上传任务详情", "删除任务及资料"]);
+    const retry = failedRow.getByRole("button", { name: "重试上传", exact: true });
     await expect(retry).toBeDisabled();
-    await expect(retry).toHaveAttribute("title", "原始文件仅保留在当前浏览器会话中，当前不可重试");
 
     const partialRow = rows.filter({ hasText: "合成长目录名称用于响应式检查" });
     await partialRow.getByRole("button", { name: "详情" }).click();
@@ -154,7 +153,7 @@ test.describe("资料管理", () => {
     const batchButton = page.getByRole("button", { name: "批量操作" });
     await expect(batchButton).toBeVisible();
     await batchButton.click();
-    await expect(page.getByRole("menuitem", { name: "导出任务摘要" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "导出所选任务摘要（2）" })).toBeVisible();
     await page.keyboard.press("Escape");
 
     const search = page.getByRole("searchbox", { name: "搜索上传任务" });
@@ -162,7 +161,7 @@ test.describe("资料管理", () => {
     const searchRequest = page.waitForRequest((request) => new URL(request.url()).searchParams.get("query") === "竣工交付");
     await search.press("Enter");
     await searchRequest;
-    await expect(batchButton).toHaveCount(0);
+    await expect(batchButton).toBeVisible();
     await expect(page.getByText("04 项目资料 / 02 竣工交付")).toBeVisible();
     await expect(page.getByText("01 行业规范与标准 / 02 文件夹上传测试")).toHaveCount(0);
 
@@ -813,7 +812,7 @@ test.describe("转录任务", () => {
     await page.getByRole("tab", { name: "转录任务", exact: true }).click();
     await expect(page.getByRole("heading", { name: "转录任务" })).toBeVisible();
     await expect(page.getByText("同名记录 2 条").first()).toBeVisible();
-    await expect(page.getByRole("button", { name: "全部 3" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "全部任务 3" })).toBeVisible();
     await expect(page.getByRole("button", { name: "失败 2" })).toBeVisible();
     await expect(page.getByRole("button", { name: "刷新媒体资源" })).toBeVisible();
     await expect(page.getByText("转录服务当前暂停接收任务，请稍后重试。")).toBeVisible();
