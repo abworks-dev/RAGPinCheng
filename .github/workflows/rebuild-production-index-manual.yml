@@ -95,6 +95,7 @@ jobs:
           REPORT_PATH=${SHADOW_DATA}/report.json
           [ ! -e "${RUN_ROOT}" ] && [ ! -e "${SHADOW_DATA}" ]
           mkdir -m 700 "${RUN_ROOT}" "${SHADOW_DATA}"
+          echo "REBUILD_PROGRESS phase=backup status=starting"
 
           COMPOSE=(docker compose -p ragpincheng-prod -f "${REPO_PATH}/docker/docker-compose.yml" -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
           MAINTENANCE=("${COMPOSE[@]}" run --rm --no-deps -T -v "${GITHUB_WORKSPACE}:/maintenance-repo:ro" backend)
@@ -209,7 +210,9 @@ jobs:
             > "${RUN_ROOT}/qdrant-before.snapshot"
           [ -s "${RUN_ROOT}/qdrant-before.snapshot" ]
           echo "REBUILD_BACKUP status=complete path=${RUN_ROOT}"
+          echo "REBUILD_PROGRESS phase=backup status=complete"
 
+          echo "REBUILD_PROGRESS phase=build status=starting"
           set +e
           "${COMPOSE[@]}" run --rm --no-deps -T \
             -v "${GITHUB_WORKSPACE}:/maintenance-repo:ro" \
@@ -229,6 +232,7 @@ jobs:
             exit "${BUILD_STATUS}"
           }
           [ -s "${REPORT_PATH}" ]
+          echo "REBUILD_PROGRESS phase=verify status=complete"
           echo "REBUILD_SHADOW status=verified collection=${SHADOW_COLLECTION} report=${REPORT_PATH}"
 
           "${MAINTENANCE[@]}" curl -fsS -X POST \
@@ -291,6 +295,7 @@ jobs:
           }
           trap on_exit EXIT
 
+          echo "REBUILD_PROGRESS phase=cutover status=starting"
           "${COMPOSE[@]}" stop backend
           BACKEND_STOPPED=1
           active_job_preflight cutover
@@ -325,14 +330,23 @@ jobs:
           [ "$(docker inspect --format '{{.State.Health.Status}}' "${BACKEND_CONTAINER}")" = "healthy" ]
           "${COMPOSE[@]}" exec -T backend curl -fsS http://localhost:8000/api/health >/dev/null
 
+          echo "REBUILD_PROGRESS phase=post_verify status=starting"
           "${COMPOSE[@]}" run --rm --no-deps -T \
             -e "REPORT_PATH_ENV=/app/data/${RUN_ID}-shadow/report.json" \
             backend python3 - <<'PY'
           import json, os, sqlite3, urllib.request
           report = json.load(open(os.environ["REPORT_PATH_ENV"], encoding="utf-8"))
           with urllib.request.urlopen("http://qdrant:6333/collections/pincheng_docs", timeout=30) as response:
+              collection = json.load(response)["result"]
+          request = urllib.request.Request(
+              "http://qdrant:6333/collections/pincheng_docs/points/count",
+              data=json.dumps({"exact": True}).encode(),
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
               result = json.load(response)["result"]
-          if result.get("status") != "green" or result.get("points_count") != report["indexed"]["children"]:
+          if collection.get("status") != "green" or result.get("count") != report["indexed"]["children"]:
               raise SystemExit("production Qdrant does not match the verified shadow report")
           with sqlite3.connect("/app/data/parents.sqlite") as conn:
               if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
@@ -342,5 +356,16 @@ jobs:
           PY
           [ "$(head_snapshot_sha256 "${DATA_PATH}/app.sqlite")" = "${HEAD_SNAPSHOT_SHA256}" ]
           MUTATED=0
+          echo "REBUILD_PROGRESS phase=post_verify status=complete"
           echo "REBUILD_CUTOVER status=success target=${EXPECTED_COMMIT} collection=pincheng_docs"
           echo "REBUILD_ROLLBACK_READY status=retained backup=${RUN_ROOT} shadow=${SHADOW_DATA}"
+          cat >> "${GITHUB_STEP_SUMMARY}" <<EOF
+          ## Production full-index rebuild
+
+          - Status: success
+          - Commit: \`${EXPECTED_COMMIT}\`
+          - Run: \`${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}\`
+          - Backup: \`${RUN_ROOT}\`
+          - Shadow data: \`${SHADOW_DATA}\`
+          - Verification: exact Qdrant count, Parent integrity/count, content-head snapshot, backend health
+          EOF

@@ -140,7 +140,11 @@ def test_validate_report_requires_exact_head_coverage_and_green_collection():
             "children": 20,
         },
         "parents_integrity": "ok",
-        "qdrant": {"status": "green", "points_count": 20},
+        "qdrant": {
+            "status": "green",
+            "approximate_points_count": 19,
+            "exact_points_count": 20,
+        },
         "location_head_coverage": {"expected": 2, "located": 2},
     }
     module.validate_report(report)
@@ -153,3 +157,89 @@ def test_validate_report_requires_exact_head_coverage_and_green_collection():
     report["location_head_coverage"]["located"] = 1
     with pytest.raises(ValueError, match="location_head_coverage_mismatch"):
         module.validate_report(report)
+
+
+def test_validate_report_rejects_exact_qdrant_count_mismatch():
+    module = load_script()
+    report = {
+        "expected": {"managed_heads": 2, "transcript_heads": 1},
+        "indexed": {
+            "managed_heads": 2,
+            "transcript_heads": 1,
+            "parents": 10,
+            "children": 20,
+        },
+        "parents_integrity": "ok",
+        "qdrant": {
+            "status": "green",
+            "approximate_points_count": 20,
+            "exact_points_count": 19,
+        },
+        "location_head_coverage": {"expected": 2, "located": 2},
+    }
+
+    with pytest.raises(ValueError, match="qdrant_child_count_mismatch"):
+        module.validate_report(report)
+
+
+def test_qdrant_collection_stats_requests_exact_count():
+    module = load_script()
+
+    class Status:
+        value = "green"
+
+    class Info:
+        status = Status()
+        points_count = 19
+
+    class Count:
+        count = 20
+
+    class Client:
+        def __init__(self):
+            self.exact = None
+
+        def get_collection(self, collection):
+            assert collection == "shadow"
+            return Info()
+
+        def count(self, collection, *, exact):
+            assert collection == "shadow"
+            self.exact = exact
+            return Count()
+
+    client = Client()
+    assert module.qdrant_collection_stats(client, "shadow") == {
+        "status": "green",
+        "approximate_points_count": 19,
+        "exact_points_count": 20,
+    }
+    assert client.exact is True
+
+
+def test_format_rebuild_progress_reports_live_totals():
+    module = load_script()
+
+    line = module.format_rebuild_progress(
+        phase="build",
+        completed=42,
+        total=136,
+        parents=1200,
+        children=8400,
+        elapsed_seconds=123,
+    )
+
+    assert line == (
+        "REBUILD_PROGRESS phase=build completed=42 total=136 percent=30.9 "
+        "parents=1200 children=8400 elapsed_seconds=123"
+    )
+
+
+def test_format_qdrant_verification_exposes_count_difference():
+    module = load_script()
+
+    assert module.format_qdrant_verification(
+        expected=20,
+        approximate=19,
+        exact=20,
+    ) == "REBUILD_VERIFY qdrant expected=20 approximate=19 exact=20"

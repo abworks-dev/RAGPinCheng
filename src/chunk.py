@@ -578,7 +578,9 @@ def chunk_transcript(doc: ParsedDoc) -> tuple[list[Parent], list[Child]]:
         for ts, body in group:
             child_text = f"说话人 {ts}\n{body}"
             embed_text = f"{doc.doc_title} @{ts}\n\n{body}"
-            child_id = _stable_id(parent_id, "transcript", ts, body[:80])
+            child_id = _stable_id(
+                parent_id, "transcript", ts, body, str(len(children))
+            )
             children.append(
                 Child(
                     child_id=child_id,

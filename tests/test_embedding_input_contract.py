@@ -8,7 +8,7 @@ from api import content_publication
 from src import indexing_pipeline, table_summary
 from src.chunk import Child, chunk_document
 from src.config import EMBED_MAX_TEXT_CHARS
-from src.index import EmbeddingInputTooLong, validate_embedding_inputs
+from src.index import DuplicateChildId, EmbeddingInputTooLong, validate_embedding_inputs
 from src.ingest import ParsedDoc
 from src.indexing_pipeline import ManagedIndexMetadata
 
@@ -53,6 +53,14 @@ def test_headingless_document_keeps_stable_intro_section_path(tmp_path):
 
     assert {parent.section_path for parent in parents} == {"(intro)"}
     assert {child.section_path for child in children} == {"(intro)"}
+
+
+def test_duplicate_child_ids_fail_before_embedding(tmp_path):
+    _, children = chunk_document(_document(tmp_path, "第一段。\n\n第二段。"))
+    children.append(children[0])
+
+    with pytest.raises(DuplicateChildId, match="duplicate_child_id"):
+        validate_embedding_inputs(children)
 
 
 def test_single_oversized_html_cell_splits_only_child_not_parent(tmp_path):

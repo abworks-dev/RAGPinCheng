@@ -54,6 +54,30 @@ def test_versioned_transcript_metadata_propagates_and_separates_ids(tmp_path):
     assert old_parents[0].parent_id != new_parents[0].parent_id
     assert [parent.parent_id for parent in old_parents] == ["09638a1d-ffc2-51db-bf85-118125a7f765"]
     assert [child.child_id for child in old_children] == [
-        "5c026c7d-58be-554b-af66-fdc73ffc46a6",
-        "49ed074c-1f2e-529e-aefa-ed85ed3a2f97",
+        "6da58600-2c45-5f6e-bc0f-ba31fe6c1c9c",
+        "e44c70f3-e58b-5509-93af-d534e6b3b6c4",
     ]
+
+
+def test_transcript_child_ids_remain_unique_for_repeated_timestamp_and_prefix(tmp_path):
+    md = tmp_path / "transcript.md"
+    prefix = "same-prefix-" * 8
+    md.write_text(
+        f"说话人 1 00:01\n{prefix}A\n\n说话人 2 00:01\n{prefix}B\n",
+        encoding="utf-8",
+    )
+    doc = ParsedDoc(
+        md,
+        "教学视频",
+        "Video",
+        md,
+        "transcript",
+        media_id=MEDIA,
+        transcript_version_id=VERSION,
+        publication_target_id=TARGET,
+    )
+
+    _, children = chunk_transcript(doc)
+
+    assert len(children) == 2
+    assert len({child.child_id for child in children}) == 2

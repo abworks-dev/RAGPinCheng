@@ -8,6 +8,7 @@ import re
 import shutil
 import sqlite3
 import sys
+import time
 from pathlib import Path
 from typing import NamedTuple
 
@@ -119,6 +120,41 @@ def verify_file_sha256(path: Path, expected: str) -> int:
     return size
 
 
+def qdrant_collection_stats(client, collection: str) -> dict[str, object]:
+    info = client.get_collection(collection)
+    status = getattr(info.status, "value", str(info.status))
+    exact_count = client.count(collection, exact=True).count
+    return {
+        "status": status,
+        "approximate_points_count": info.points_count,
+        "exact_points_count": exact_count,
+    }
+
+
+def format_rebuild_progress(
+    *,
+    phase: str,
+    completed: int,
+    total: int,
+    parents: int,
+    children: int,
+    elapsed_seconds: int,
+) -> str:
+    percent = completed * 100 / total if total else 100.0
+    return (
+        f"REBUILD_PROGRESS phase={phase} completed={completed} total={total} "
+        f"percent={percent:.1f} parents={parents} children={children} "
+        f"elapsed_seconds={elapsed_seconds}"
+    )
+
+
+def format_qdrant_verification(*, expected: int, approximate: int | None, exact: int) -> str:
+    return (
+        f"REBUILD_VERIFY qdrant expected={expected} "
+        f"approximate={approximate} exact={exact}"
+    )
+
+
 def validate_report(report: dict[str, object]) -> None:
     expected = report["expected"]
     indexed = report["indexed"]
@@ -133,7 +169,7 @@ def validate_report(report: dict[str, object]) -> None:
         raise ValueError("parents_integrity_failed")
     if qdrant["status"] != "green":
         raise ValueError("qdrant_not_green")
-    if qdrant["points_count"] != indexed["children"]:
+    if qdrant["exact_points_count"] != indexed["children"]:
         raise ValueError("qdrant_child_count_mismatch")
     location_coverage = report["location_head_coverage"]
     if location_coverage["located"] != location_coverage["expected"]:
@@ -179,9 +215,23 @@ def run_rebuild(
     with sqlite3.connect(f"file:{app_database}?mode=ro", uri=True) as conn:
         snapshot = load_rebuild_snapshot(conn)
 
+    total_heads = len(snapshot.managed) + len(snapshot.transcripts)
+    completed_heads = 0
+    started_at = time.monotonic()
     reset_index()
     managed_parents = managed_children = 0
     transcript_parents = transcript_children = 0
+    print(
+        format_rebuild_progress(
+            phase="build",
+            completed=0,
+            total=total_heads,
+            parents=0,
+            children=0,
+            elapsed_seconds=0,
+        ),
+        flush=True,
+    )
     try:
         for head in snapshot.managed:
             source = _materialize_managed_source(content_root, data_root, head)
@@ -202,6 +252,18 @@ def run_rebuild(
             )
             managed_parents += result.parents
             managed_children += result.children
+            completed_heads += 1
+            print(
+                format_rebuild_progress(
+                    phase="build",
+                    completed=completed_heads,
+                    total=total_heads,
+                    parents=managed_parents + transcript_parents,
+                    children=managed_children + transcript_children,
+                    elapsed_seconds=int(time.monotonic() - started_at),
+                ),
+                flush=True,
+            )
 
         for head in snapshot.transcripts:
             markdown = (artifact_root / head.markdown_rel_path).resolve(strict=False)
@@ -225,6 +287,18 @@ def run_rebuild(
             )
             transcript_parents += result.parents
             transcript_children += result.children
+            completed_heads += 1
+            print(
+                format_rebuild_progress(
+                    phase="build",
+                    completed=completed_heads,
+                    total=total_heads,
+                    parents=managed_parents + transcript_parents,
+                    children=managed_children + transcript_children,
+                    elapsed_seconds=int(time.monotonic() - started_at),
+                ),
+                flush=True,
+            )
 
         with sqlite3.connect(PARENTS_DB) as parents:
             integrity = parents.execute("PRAGMA integrity_check").fetchone()[0]
@@ -250,10 +324,9 @@ def run_rebuild(
                                 OR sheet_name IS NOT NULL OR topic_id IS NOT NULL)"""
                 ).fetchall()
             }
-        info = _client().get_collection(COLLECTION)
-        status = getattr(info.status, "value", str(info.status))
+        qdrant = qdrant_collection_stats(_client(), COLLECTION)
         report = {
-            "schema_version": 1,
+            "schema_version": 2,
             "expected": {
                 "managed_heads": len(snapshot.managed),
                 "transcript_heads": len(snapshot.transcripts),
@@ -275,8 +348,16 @@ def run_rebuild(
                 "located": len(locatable_version_ids & located_version_ids),
             },
             "parents_integrity": integrity,
-            "qdrant": {"status": status, "points_count": info.points_count},
+            "qdrant": qdrant,
         }
+        print(
+            format_qdrant_verification(
+                expected=report["indexed"]["children"],
+                approximate=qdrant["approximate_points_count"],
+                exact=qdrant["exact_points_count"],
+            ),
+            flush=True,
+        )
         validate_report(report)
         report_path.write_text(
             json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2) + "\n",

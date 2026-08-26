@@ -39,8 +39,20 @@ class EmbeddingInputTooLong(ValueError):
         )
 
 
+class DuplicateChildId(ValueError):
+    """Multiple children would overwrite the same Qdrant point."""
+
+    def __init__(self, child_id: str) -> None:
+        self.child_id = child_id
+        super().__init__(f"duplicate_child_id: child_id={child_id}")
+
+
 def validate_embedding_inputs(children: list[Child]) -> None:
+    seen_ids: set[str] = set()
     for index, child in enumerate(children):
+        if child.child_id in seen_ids:
+            raise DuplicateChildId(child.child_id)
+        seen_ids.add(child.child_id)
         length = len(child.embed_text)
         if length > EMBED_MAX_TEXT_CHARS:
             raise EmbeddingInputTooLong(
