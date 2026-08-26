@@ -913,7 +913,7 @@ class BulkOperationItemRef(BaseModel):
 
 
 class BulkOperationPreflightRequest(BaseModel):
-    operation: Literal["move", "submit", "approve", "reject", "publish", "download", "delete", "force_delete"]
+    operation: Literal["move", "publish", "download", "delete", "force_delete"]
     categories: list[BulkOperationCategoryRef] = Field(default_factory=list)
     items: list[BulkOperationItemRef] = Field(default_factory=list)
 

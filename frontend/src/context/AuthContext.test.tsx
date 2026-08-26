@@ -43,8 +43,8 @@ describe("AuthProvider refreshUser", () => {
     fireEvent.click(screen.getByRole("button", { name: "并发刷新" }));
 
     expect(me).toHaveBeenCalledTimes(2);
-    resolveRefresh({ ...user, content_permissions: ["workspace.view", "item.review"] });
-    await screen.findByText("workspace.view,item.review");
+    resolveRefresh({ ...user, content_permissions: ["workspace.view", "item.publish"] });
+    await screen.findByText("workspace.view,item.publish");
   });
 
   it("preserves the last trusted user when refresh fails", async () => {

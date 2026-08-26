@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-CONTENT_PERMISSION_CATALOG_VERSION = 7
+CONTENT_PERMISSION_CATALOG_VERSION = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,15 +31,15 @@ CONTENT_PERMISSION_DEFINITIONS = (
         "category.view", "access", "入口与查看", "查看分类", "查看资料分类树和完整路径。", ("workspace.view",)
     ),
     ContentPermissionDefinition(
-        "item.upload", "organize", "资料整理", "上传资料", "上传文件并创建资料草稿。",
+        "item.upload", "organize", "资料整理", "上传资料", "上传文件并创建待发布资料。",
         ("workspace.view", "item.view", "category.view"),
     ),
     ContentPermissionDefinition(
-        "item.move_draft", "organize", "资料整理", "移动草稿", "移动草稿或退回状态的资料。",
+        "item.move_draft", "organize", "资料整理", "移动待发布资料", "移动待发布资料。",
         ("workspace.view", "item.view", "category.view"),
     ),
     ContentPermissionDefinition(
-        "item.archive_draft", "organize", "资料整理", "归档草稿", "将草稿或退回资料移入回收站。",
+        "item.archive_draft", "organize", "资料整理", "删除待发布资料", "将待发布资料移入回收站。",
         ("workspace.view", "item.view"),
     ),
     ContentPermissionDefinition(
@@ -52,7 +52,7 @@ CONTENT_PERMISSION_DEFINITIONS = (
         ("workspace.view", "item.view", "category.view"),
     ),
     ContentPermissionDefinition(
-        "item.archive_published", "publish", "发布流程", "下架正式资料", "将已确认、发布失败或已发布资料移入回收站。",
+        "item.archive_published", "publish", "发布流程", "下架正式资料", "将发布失败或已发布资料移入回收站。",
         ("workspace.view", "item.view"),
     ),
     ContentPermissionDefinition(

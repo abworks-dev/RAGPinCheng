@@ -754,27 +754,10 @@ def test_content_endpoints_enforce_auth_permissions_csrf_and_role_separation(con
     version_id = entry["version_id"]
 
     submit_url = f"/api/admin/content/versions/{version_id}/submit"
-    assert client.post(
-        submit_url, json={}, **_auth(sessions, "reviewer", csrf=True)
-    ).status_code == 403
-    assert client.post(
-        submit_url, json={}, **_auth(sessions, "organizer", csrf=True)
-    ).status_code == 200
+    assert client.post(submit_url, json={}, **_auth(sessions, "organizer", csrf=True)).status_code == 404
 
     review_url = f"/api/admin/content/versions/{version_id}/review"
-    assert client.post(
-        review_url,
-        json={"approved": True},
-        **_auth(sessions, "organizer", csrf=True),
-    ).status_code == 403
-    assert client.post(
-        review_url, json={"approved": True}, **_auth(sessions, "reviewer")
-    ).status_code == 403
-    assert client.post(
-        review_url,
-        json={"approved": True},
-        **_auth(sessions, "reviewer", csrf=True),
-    ).status_code == 200
+    assert client.post(review_url, json={"approved": True}, **_auth(sessions, "reviewer", csrf=True)).status_code == 404
 
     publish_url = f"/api/admin/content/versions/{version_id}/publish"
     assert client.post(
@@ -977,7 +960,7 @@ def test_download_permission_separates_preview_attachment_and_batch_download(con
     ).status_code == 413
 
 
-def test_delete_draft_requires_organize_csrf_and_preserves_object(content_api):
+def test_delete_pending_publication_requires_organize_csrf_and_preserves_object(content_api):
     client, sessions, _queued, db_path = content_api
     uploaded = client.post(
         "/api/admin/content/uploads",
@@ -1032,7 +1015,7 @@ def test_delete_draft_requires_organize_csrf_and_preserves_object(content_api):
     assert trash.json()["total"] == 1
     trash_item = trash.json()["items"][0]
     assert trash_item["archived_by_name"] == "整理员"
-    assert trash_item["pre_archive_lifecycle_status"] == "draft"
+    assert trash_item["pre_archive_lifecycle_status"] == "pending_publication"
     assert trash_item["category_path"] == "03 公司内部标准"
     assert trash_item["source_rel_path"] == "项目资料/建模/回收路径.md"
     searched_trash = client.get(
@@ -1047,7 +1030,7 @@ def test_delete_draft_requires_organize_csrf_and_preserves_object(content_api):
     assert client.post(restore_url, json=body, **_auth(sessions, "organizer", csrf=True)).status_code == 403
     restored = client.post(restore_url, json=body, **_auth(sessions, "reviewer", csrf=True))
     assert restored.status_code == 200
-    assert restored.json()["restored_status"] == "draft"
+    assert restored.json()["restored_status"] == "pending_publication"
     listing = client.get("/api/admin/content/items-page", **_auth(sessions, "organizer"))
     assert listing.json()["items"][0]["item_id"] == uploaded["item_id"]
     assert client.get("/api/admin/content/trash", **_auth(sessions, "reviewer")).json()["total"] == 0
@@ -1090,7 +1073,7 @@ def test_restore_can_target_an_active_category_when_original_is_inactive(content
     assert restored.json() == {
         "item_id": uploaded["item_id"],
         "version_id": uploaded["version_id"],
-        "restored_status": "draft",
+        "restored_status": "pending_publication",
         "category_id": "cat-04",
         "moved_to_alternate_category": True,
         "replaced_conflict": False,
@@ -1481,7 +1464,7 @@ def test_restore_conflict_requires_archive_permission_and_replaces_atomically(co
         "version_id": conflict["version_id"],
         "title": "same-name",
         "original_filename": "same-name.md",
-        "lifecycle_status": "draft",
+        "lifecycle_status": "pending_publication",
         "has_published_head": False,
     }
 
@@ -1552,7 +1535,7 @@ def test_content_trash_audit_events_are_authorized_and_productized(content_api):
     assert restored_event["target_category_path"] == "03 公司内部标准"
 
 
-def test_move_draft_requires_permission_and_preserves_version(content_api):
+def test_move_pending_publication_requires_permission_and_preserves_version(content_api):
     client, sessions, _queued, db_path = content_api
     uploaded = client.post(
         "/api/admin/content/uploads",
@@ -2146,7 +2129,7 @@ def test_managed_pptx_upload_accepts_case_sensitive_relationship_paths(content_a
         conn.close()
 
 
-def test_managed_xmind_upload_and_draft_preview(content_api):
+def test_managed_xmind_upload_and_pending_publication_preview(content_api):
     client, sessions, _queued, db_path = content_api
     payload = io.BytesIO()
     with zipfile.ZipFile(payload, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -2404,7 +2387,7 @@ def test_upload_task_history_persists_partial_results_and_scopes_users(content_a
         conn.close()
 
 
-def test_delete_reviewed_content_requires_publish_and_checks_version(content_api):
+def test_delete_pending_publication_requires_publish_and_checks_version(content_api):
     client, sessions, _queued, _db_path = content_api
     uploaded = client.post(
         "/api/admin/content/uploads",
@@ -2412,29 +2395,24 @@ def test_delete_reviewed_content_requires_publish_and_checks_version(content_api
         files=[("files", ("reviewed.md", b"# synthetic", "text/markdown"))],
         **_auth(sessions, "organizer", csrf=True),
     ).json()["entries"][0]
-    client.post(
-        f"/api/admin/content/versions/{uploaded['version_id']}/submit",
-        json={},
-        **_auth(sessions, "organizer", csrf=True),
-    )
     url = f"/api/admin/content/items/{uploaded['item_id']}"
     assert client.request(
         "DELETE",
         url,
         json={"expected_version_id": "version-stale"},
-        **_auth(sessions, "publisher", csrf=True),
+        **_auth(sessions, "organizer", csrf=True),
     ).status_code == 409
     assert client.request(
         "DELETE",
         url,
         json={"expected_version_id": uploaded["version_id"]},
-        **_auth(sessions, "organizer", csrf=True),
+        **_auth(sessions, "publisher", csrf=True),
     ).status_code == 403
     assert client.request(
         "DELETE",
         url,
         json={"expected_version_id": uploaded["version_id"]},
-        **_auth(sessions, "publisher", csrf=True),
+        **_auth(sessions, "organizer", csrf=True),
     ).status_code == 200
 
 
@@ -3052,7 +3030,7 @@ def test_permission_catalog_and_dependency_validation(content_api):
     admin_write = _auth(sessions, "admin", csrf=True)
     catalog = client.get("/api/admin/content/permission-catalog", **admin_read)
     assert catalog.status_code == 200
-    assert catalog.json()["schema_version"] == 7
+    assert catalog.json()["schema_version"] == 8
     assert [item["key"] for item in catalog.json()["permissions"]] == [
         "workspace.view", "item.view", "item.download", "category.view", "item.upload",
         "item.move_draft", "item.archive_draft",
@@ -3181,7 +3159,7 @@ def test_managed_content_page_supports_filters_counts_and_category_paths(content
     assert response.status_code == 200
     body = response.json()
     assert body["total"] == 1
-    assert body["status_counts"] == {"awaiting_review": 1}
+    assert body["status_counts"] == {"pending_publication": 1}
     assert body["items"][0]["category_path"] == "03 公司内部标准"
 
 
@@ -3221,106 +3199,6 @@ def test_managed_content_page_filters_and_sorts_file_types_before_pagination(con
     assert descending["items"][0]["doc_type"] == "markdown"
 
 
-def test_review_requires_rejection_reason_and_exposes_latest_audit(content_api):
-    client, sessions, _queued, _db_path = content_api
-    organizer_auth = _auth(sessions, "organizer", csrf=True)
-    reviewer_auth = _auth(sessions, "reviewer", csrf=True)
-    uploaded = client.post(
-        "/api/admin/content/uploads",
-        data={"category_id": "cat-03"},
-        files=[("files", ("review.md", b"# review", "text/markdown"))],
-        **organizer_auth,
-    ).json()["entries"][0]
-    version_id = uploaded["version_id"]
-    client.post(
-        f"/api/admin/content/versions/{version_id}/submit", json={}, **organizer_auth
-    )
-    review_url = f"/api/admin/content/versions/{version_id}/review"
-
-    missing = client.post(
-        review_url, json={"approved": False}, **reviewer_auth
-    )
-    assert missing.status_code == 400
-    assert missing.json()["detail"] == "退回修改时必须填写原因"
-    blank = client.post(
-        review_url, json={"approved": False, "note": "   "}, **reviewer_auth
-    )
-    assert blank.status_code == 400
-
-    rejected = client.post(
-        review_url,
-        json={"approved": False, "note": "  请补充适用范围  "},
-        **reviewer_auth,
-    )
-    assert rejected.status_code == 200
-    rejected_body = rejected.json()
-    assert rejected_body["lifecycle_status"] == "rejected"
-    assert rejected_body["latest_reviewed_by_name"] == "负责人"
-    assert rejected_body["latest_reviewed_at"] is not None
-    assert rejected_body["latest_review_decision"] == "rejected"
-    assert rejected_body["latest_review_note"] == "请补充适用范围"
-
-    listed = client.get(
-        "/api/admin/content/items-page?category_id=cat-03",
-        **_auth(sessions, "reviewer"),
-    )
-    listed_item = next(
-        item for item in listed.json()["items"] if item["version_id"] == version_id
-    )
-    assert listed_item["latest_reviewed_by_name"] == "负责人"
-    assert listed_item["latest_review_decision"] == "rejected"
-    assert listed_item["latest_review_note"] == "请补充适用范围"
-
-    client.post(
-        f"/api/admin/content/versions/{version_id}/submit", json={}, **organizer_auth
-    )
-    approved = client.post(review_url, json={"approved": True}, **reviewer_auth)
-    assert approved.status_code == 200
-    assert approved.json()["latest_review_decision"] == "approved"
-    assert approved.json()["latest_review_note"] is None
-
-
-def test_bulk_rejection_requires_and_persists_reason(content_api):
-    client, sessions, _queued, _db_path = content_api
-    organizer_auth = _auth(sessions, "organizer", csrf=True)
-    uploaded = client.post(
-        "/api/admin/content/uploads",
-        data={"category_id": "cat-03"},
-        files=[("files", ("bulk-reject.md", b"# bulk", "text/markdown"))],
-        **organizer_auth,
-    ).json()["entries"][0]
-    version_id = uploaded["version_id"]
-    client.post(
-        f"/api/admin/content/versions/{version_id}/submit", json={}, **organizer_auth
-    )
-    review_auth = _auth(sessions, "reviewer", csrf=True)
-
-    missing = client.post(
-        "/api/admin/content/bulk-review",
-        json={"version_ids": [version_id], "approved": False, "note": " "},
-        **review_auth,
-    )
-    assert missing.status_code == 400
-    assert missing.json()["detail"] == "批量退回时必须填写原因"
-
-    rejected = client.post(
-        "/api/admin/content/bulk-review",
-        json={
-            "version_ids": [version_id],
-            "approved": False,
-            "note": "统一补充版本说明",
-        },
-        **review_auth,
-    )
-    assert rejected.status_code == 200
-    assert rejected.json()["succeeded"] == 1
-    listed = client.get(
-        "/api/admin/content/items-page?category_id=cat-03",
-        **_auth(sessions, "reviewer"),
-    ).json()["items"]
-    listed_item = next(item for item in listed if item["version_id"] == version_id)
-    assert listed_item["latest_review_decision"] == "rejected"
-    assert listed_item["latest_review_note"] == "统一补充版本说明"
 def test_published_media_transcripts_share_library_listing_without_document_mirrors(content_api):
     client, sessions, _queued, db_path = content_api
     first_media_id = "123e4567-e89b-12d3-a456-426614174110"
@@ -3595,106 +3473,7 @@ def test_media_download_rejects_path_escape_and_integrity_mismatches(content_api
     assert client.get(endpoint, params={"part": "all"}, **auth).status_code == 409
 
 
-def test_bulk_review_and_publish_report_partial_failures(content_api):
-    client, sessions, queued, _db_path = content_api
-    uploaded = client.post(
-        "/api/admin/content/uploads",
-        data={"category_id": "cat-03"},
-        files=[("files", ("bulk.md", b"# bulk", "text/markdown"))],
-        **_auth(sessions, "organizer", csrf=True),
-    ).json()["entries"][0]
-    version_id = uploaded["version_id"]
-    client.post(
-        f"/api/admin/content/versions/{version_id}/submit",
-        json={},
-        **_auth(sessions, "organizer", csrf=True),
-    )
-
-    review = client.post(
-        "/api/admin/content/bulk-review",
-        json={"version_ids": [version_id, "version-missing"], "approved": True},
-        **_auth(sessions, "reviewer", csrf=True),
-    )
-    assert review.status_code == 200
-    assert (review.json()["succeeded"], review.json()["failed"]) == (1, 1)
-
-    publish = client.post(
-        "/api/admin/content/bulk-publish",
-        json={"version_ids": [version_id, "version-missing"]},
-        **_auth(sessions, "publisher", csrf=True),
-    )
-    assert publish.status_code == 200
-    assert (publish.json()["succeeded"], publish.json()["failed"]) == (1, 1)
-    assert len(queued) == 1
-
-
-def test_bulk_submit_reports_partial_failures_and_audits_each_success(content_api):
-    client, sessions, _queued, db_path = content_api
-    entries = client.post(
-        "/api/admin/content/uploads",
-        data={"category_id": "cat-03"},
-        files=[
-            ("files", ("bulk-submit-a.md", b"# a", "text/markdown")),
-            ("files", ("bulk-submit-b.md", b"# b", "text/markdown")),
-        ],
-        **_auth(sessions, "organizer", csrf=True),
-    ).json()["entries"]
-    first_id, second_id = [entry["version_id"] for entry in entries]
-    client.post(
-        f"/api/admin/content/versions/{second_id}/submit",
-        json={},
-        **_auth(sessions, "organizer", csrf=True),
-    )
-
-    response = client.post(
-        "/api/admin/content/bulk-submit",
-        json={"version_ids": [first_id, second_id]},
-        **_auth(sessions, "organizer", csrf=True),
-    )
-
-    assert response.status_code == 200
-    assert (response.json()["succeeded"], response.json()["failed"]) == (1, 1)
-    assert response.json()["results"][1]["message"] == "仅草稿或已退回资料可以提交审核"
-    conn = connect(db_path)
-    assert conn.execute(
-        "SELECT count(*) FROM content_versions WHERE id IN (?,?) AND lifecycle_status='awaiting_review'",
-        (first_id, second_id),
-    ).fetchone()[0] == 2
-    assert conn.execute(
-        "SELECT count(*) FROM content_audit_events WHERE event_type='content.submitted' AND version_id IN (?,?)",
-        (first_id, second_id),
-    ).fetchone()[0] == 2
-    conn.close()
-
-
-def test_bulk_actions_enforce_permissions_csrf_limits_and_unique_ids(content_api):
-    client, sessions, _queued, _db_path = content_api
-    body = {"version_ids": ["version-1"], "approved": True}
-    assert client.post(
-        "/api/admin/content/bulk-review", json=body, **_auth(sessions, "organizer", csrf=True)
-    ).status_code == 403
-    assert client.post(
-        "/api/admin/content/bulk-review", json=body, **_auth(sessions, "reviewer")
-    ).status_code == 403
-    assert client.post(
-        "/api/admin/content/bulk-submit", json=body, **_auth(sessions, "reviewer", csrf=True)
-    ).status_code == 403
-    assert client.post(
-        "/api/admin/content/bulk-submit", json=body, **_auth(sessions, "organizer")
-    ).status_code == 403
-    assert client.post(
-        "/api/admin/content/bulk-review",
-        json={"version_ids": ["same", "same"], "approved": True},
-        **_auth(sessions, "reviewer", csrf=True),
-    ).status_code == 400
-    assert client.post(
-        "/api/admin/content/bulk-publish",
-        json={"version_ids": [f"version-{i}" for i in range(21)]},
-        **_auth(sessions, "publisher", csrf=True),
-    ).status_code == 200
-
-
-def test_rename_creates_a_new_draft_version_and_checks_filename_conflict(content_api):
+def test_rename_creates_a_new_pending_publication_version_and_checks_filename_conflict(content_api):
     client, sessions, _queued, db_path = content_api
     auth = _auth(sessions, "organizer", csrf=True)
     first = client.post(
@@ -3769,7 +3548,7 @@ def test_update_creates_a_followup_version_and_keeps_old_object_history(content_
     assert updated.status_code == 200
     assert updated.json()["version_number"] == 2
     assert updated.json()["original_filename"] == "guide-v2.md"
-    assert updated.json()["lifecycle_status"] == "draft"
+    assert updated.json()["lifecycle_status"] == "pending_publication"
 
     conn = connect(db_path)
     try:
@@ -4536,60 +4315,6 @@ def _upload_bulk_test_document(client: TestClient, sessions, *, category_id: str
     return entry
 
 
-def test_recursive_bulk_workflow_normalizes_roots_and_enforces_owner(content_api):
-    client, sessions, _queued, db_path = content_api
-    parent = _create_bulk_test_category(
-        client, sessions, parent_id="cat-03", code="01", name="递归批量父目录"
-    )
-    child = _create_bulk_test_category(
-        client, sessions, parent_id=parent["id"], code="01", name="递归批量子目录"
-    )
-    uploaded = _upload_bulk_test_document(
-        client, sessions, category_id=child["id"], filename="recursive.md"
-    )
-    body = {
-        "operation": "submit",
-        "categories": [
-            {"category_id": parent["id"], "expected_version": parent["version"]},
-            {"category_id": child["id"], "expected_version": child["version"]},
-        ],
-        "items": [],
-    }
-    preflight = client.post(
-        "/api/admin/content/bulk-operations/preflight",
-        json=body,
-        **_auth(sessions, "admin", csrf=True),
-    )
-    assert preflight.status_code == 200, preflight.text
-    snapshot = preflight.json()
-    assert sum(category["is_root"] for category in snapshot["categories"]) == 1
-    assert {category["category_id"] for category in snapshot["categories"]} == {parent["id"], child["id"]}
-    assert snapshot["items"][0]["item_id"] == uploaded["item_id"]
-    assert snapshot["items"][0]["scope_source"] == "category"
-
-    foreign = client.get(
-        f"/api/admin/content/bulk-operations/{snapshot['id']}",
-        **_auth(sessions, "reviewer"),
-    )
-    assert foreign.status_code == 403
-
-    execute = client.post(
-        f"/api/admin/content/bulk-operations/{snapshot['id']}/execute",
-        json={},
-        **_auth(sessions, "admin", csrf=True),
-    )
-    assert execute.status_code == 200, execute.text
-    assert execute.json()["status"] == "succeeded"
-    conn = connect(db_path)
-    try:
-        status = conn.execute(
-            "SELECT lifecycle_status FROM content_versions WHERE id=?", (uploaded["version_id"],)
-        ).fetchone()[0]
-        assert status == "awaiting_review"
-    finally:
-        conn.close()
-
-
 def test_recursive_bulk_move_keeps_descendant_items_in_their_folder(content_api):
     client, sessions, _queued, db_path = content_api
     parent = _create_bulk_test_category(
@@ -4812,47 +4537,6 @@ def test_recursive_bulk_empty_folder_archive_and_force_delete_are_persistent_job
         ).fetchone()[0] is None
     finally:
         conn.close()
-
-
-def test_recursive_bulk_single_review_finalizes_without_reprocessing(content_api):
-    client, sessions, _queued, _db_path = content_api
-    folder = _create_bulk_test_category(
-        client, sessions, parent_id="cat-03", code="01", name="单项审核目录"
-    )
-    uploaded = _upload_bulk_test_document(
-        client, sessions, category_id=folder["id"], filename="single-review.md"
-    )
-    submitted = client.post(
-        f"/api/admin/content/versions/{uploaded['version_id']}/submit",
-        json={},
-        **_auth(sessions, "admin", csrf=True),
-    )
-    assert submitted.status_code == 200, submitted.text
-
-    preflight = client.post(
-        "/api/admin/content/bulk-operations/preflight",
-        json={
-            "operation": "approve",
-            "categories": [{"category_id": folder["id"], "expected_version": folder["version"]}],
-            "items": [],
-        },
-        **_auth(sessions, "admin", csrf=True),
-    )
-    assert preflight.status_code == 200, preflight.text
-    run = preflight.json()
-
-    reviewed = client.post(
-        f"/api/admin/content/bulk-operations/{run['id']}/items/{uploaded['item_id']}/review",
-        json={"approved": True, "note": "单项确认"},
-        **_auth(sessions, "admin", csrf=True),
-    )
-    assert reviewed.status_code == 200, reviewed.text
-    result = reviewed.json()
-    assert result["status"] == "succeeded"
-    assert result["selected_files"] == 0
-    assert result["completed_files"] == 1
-    assert result["items"][0]["result_status"] == "succeeded"
-    assert result["items"][0]["selected"] is False
 
 
 def test_recursive_bulk_failure_counts_files_and_empty_roots_once(content_api):

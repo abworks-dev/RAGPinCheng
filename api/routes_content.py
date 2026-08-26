@@ -123,8 +123,6 @@ from .content_store import (
     record_upload_batch_entry,
     rename_category,
     review_folder_request,
-    review_version,
-    submit_version_for_review,
     update_category,
     update_category_number,
     update_category_sort_order,
@@ -3142,9 +3140,6 @@ def _bulk_permissions(conn: sqlite3.Connection, user: CurrentUser) -> set[str]:
 
 def _bulk_operation_permission(operation: str) -> str:
     return {
-        "submit": "item.publish",
-        "approve": "item.publish",
-        "reject": "item.publish",
         "publish": "item.publish",
         "download": "item.download",
         "move": "category.view",
@@ -3242,47 +3237,6 @@ def patch_bulk_operation_selection(
             conn, run_id, actor_user_id=user.id, item_ids=body.item_ids, selected=body.selected,
         ))
     except (ValueError, PermissionError) as exc:
-        _raise_bulk_operation_error(exc)
-
-
-@router.post("/bulk-operations/{run_id}/items/{item_id}/review", response_model=BulkOperationDTO)
-def review_bulk_operation_item(
-    run_id: str,
-    item_id: str,
-    body: ReviewManagedContentRequest,
-    user: CurrentUser = Depends(require_content_permission("item.review", csrf=True)),
-    conn: sqlite3.Connection = Depends(get_db),
-) -> BulkOperationDTO:
-    try:
-        run = operation_snapshot(conn, run_id, actor_user_id=user.id)
-        if str(run["operation"]) not in {"approve", "reject"}:
-            raise ValueError("bulk_operation_item_unavailable")
-        if str(run["status"]) != "awaiting_confirmation":
-            raise ValueError("bulk_operation_already_started")
-        target = next((entry for entry in run["items"] if entry["item_id"] == item_id), None)
-        if target is None or not target["eligible"] or target["result_status"] != "pending":
-            raise ValueError("bulk_operation_item_unavailable")
-        review_version(
-            conn,
-            str(target["version_id"]),
-            approved=body.approved,
-            note=body.note,
-            category_id=body.category_id,
-            actor_user_id=user.id,
-        )
-        mark_item_result(conn, run_id, item_id, status="succeeded")
-        remaining = conn.execute(
-            """SELECT count(*) FROM content_bulk_operation_items
-               WHERE run_id=? AND selected=1 AND eligible=1 AND result_status='pending'""",
-            (run_id,),
-        ).fetchone()[0]
-        if int(remaining) == 0:
-            finalize_sync_run(conn, run_id)
-        else:
-            conn.commit()
-        return BulkOperationDTO(**operation_snapshot(conn, run_id, actor_user_id=user.id))
-    except (ValueError, PermissionError, sqlite3.IntegrityError) as exc:
-        conn.rollback()
         _raise_bulk_operation_error(exc)
 
 
@@ -3406,14 +3360,7 @@ def execute_bulk_operation(
                     item_id = str(item["item_id"])
                     version_id = str(item["version_id"])
                     index_job_id = None
-                    if operation == "submit":
-                        submit_version_for_review(conn, version_id, actor_user_id=user.id)
-                    elif operation in {"approve", "reject"}:
-                        review_version(
-                            conn, version_id, approved=operation == "approve", note=body.note,
-                            category_id=None, actor_user_id=user.id,
-                        )
-                    elif operation == "publish":
+                    if operation == "publish":
                         _publication_id, index_job_id = create_publication_job(
                             conn, version_id, actor_user_id=user.id,
                         )
@@ -3513,54 +3460,6 @@ def download_category_content(
         filename=f"{folder_name}-资料打包下载-{time.strftime('%Y%m%d-%H%M%S')}.zip",
         background=BackgroundTask(archive_path.unlink, missing_ok=True),
     )
-
-
-@router.post("/versions/{version_id}/submit", response_model=ManagedContentItemDTO)
-def submit_content_version(
-    version_id: str,
-    user: CurrentUser = Depends(require_content_permission("item.submit", csrf=True)),
-    conn: sqlite3.Connection = Depends(get_db),
-) -> ManagedContentItemDTO:
-    _require_feature()
-    try:
-        row = submit_version_for_review(conn, version_id, actor_user_id=user.id)
-    except ValueError as exc:
-        _raise_domain_error(exc)
-    item = next(
-        (entry for entry in list_content_items(conn) if entry["item_id"] == row["item_id"]),
-        None,
-    )
-    if item is None:
-        raise HTTPException(status_code=404, detail="资料不存在")
-    return _content_item_dto(item)
-
-
-@router.post("/versions/{version_id}/review", response_model=ManagedContentItemDTO)
-def review_content_version(
-    version_id: str,
-    body: ReviewManagedContentRequest,
-    user: CurrentUser = Depends(require_content_permission("item.review", csrf=True)),
-    conn: sqlite3.Connection = Depends(get_db),
-) -> ManagedContentItemDTO:
-    _require_feature()
-    try:
-        row = review_version(
-            conn,
-            version_id,
-            approved=body.approved,
-            note=body.note,
-            category_id=body.category_id,
-            actor_user_id=user.id,
-        )
-    except ValueError as exc:
-        _raise_domain_error(exc)
-    item = next(
-        (entry for entry in list_content_items(conn) if entry["item_id"] == row["item_id"]),
-        None,
-    )
-    if item is None:
-        raise HTTPException(status_code=404, detail="资料不存在")
-    return _content_item_dto(item)
 
 
 @router.post("/versions/{version_id}/publish", response_model=ManagedPublicationDTO)
@@ -3756,71 +3655,6 @@ def bulk_archive_content_items(
             ))
     succeeded = sum(result.status == "succeeded" for result in results)
     return BulkManagedContentResponse(results=results, succeeded=succeeded, failed=len(results) - succeeded)
-
-
-@router.post("/bulk-review", response_model=BulkManagedContentResponse)
-def bulk_review_content_versions(
-    body: BulkManagedContentRequest,
-    user: CurrentUser = Depends(require_content_permission("item.review", csrf=True)),
-    conn: sqlite3.Connection = Depends(get_db),
-) -> BulkManagedContentResponse:
-    _require_feature()
-    if body.approved is None:
-        raise HTTPException(status_code=400, detail="请选择确认或退回")
-    if not body.approved and not (body.note or "").strip():
-        raise HTTPException(status_code=400, detail="批量退回时必须填写原因")
-    results: list[BulkManagedContentResultDTO] = []
-    for version_id in _validate_bulk_version_ids(body.version_ids):
-        try:
-            review_version(
-                conn,
-                version_id,
-                approved=body.approved,
-                note=body.note,
-                category_id=body.category_id,
-                actor_user_id=user.id,
-            )
-            results.append(BulkManagedContentResultDTO(version_id=version_id, status="succeeded"))
-        except (ValueError, sqlite3.IntegrityError):
-            conn.rollback()
-            results.append(BulkManagedContentResultDTO(
-                version_id=version_id,
-                status="failed",
-                message="资料状态已变化，请刷新后重试",
-            ))
-    succeeded = sum(result.status == "succeeded" for result in results)
-    return BulkManagedContentResponse(results=results, succeeded=succeeded, failed=len(results) - succeeded)
-
-
-@router.post("/bulk-submit", response_model=BulkManagedContentResponse)
-def bulk_submit_content_versions(
-    body: BulkManagedContentRequest,
-    user: CurrentUser = Depends(require_content_permission("item.submit", csrf=True)),
-    conn: sqlite3.Connection = Depends(get_db),
-) -> BulkManagedContentResponse:
-    _require_feature()
-    results: list[BulkManagedContentResultDTO] = []
-    for version_id in _validate_bulk_version_ids(body.version_ids):
-        try:
-            row = submit_version_for_review(conn, version_id, actor_user_id=user.id)
-            results.append(BulkManagedContentResultDTO(
-                item_id=row["item_id"],
-                version_id=version_id,
-                status="succeeded",
-            ))
-        except (ValueError, sqlite3.IntegrityError) as exc:
-            conn.rollback()
-            results.append(BulkManagedContentResultDTO(
-                version_id=version_id,
-                status="failed",
-                message=_bulk_failure_message(exc),
-            ))
-    succeeded = sum(result.status == "succeeded" for result in results)
-    return BulkManagedContentResponse(
-        results=results,
-        succeeded=succeeded,
-        failed=len(results) - succeeded,
-    )
 
 
 @router.post("/bulk-publish", response_model=BulkManagedContentResponse)

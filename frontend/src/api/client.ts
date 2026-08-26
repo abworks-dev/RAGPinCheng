@@ -854,16 +854,6 @@ export const api = {
     jsonFetch<FolderRequest>(`/api/admin/content/folder-requests/${encodeURIComponent(requestId)}/review`, {
       method: "POST", body: JSON.stringify({ approved, note: note || null }),
     }),
-  submitManagedContent: (versionId: string) =>
-    jsonFetch<ManagedContentItem>(`/api/admin/content/versions/${encodeURIComponent(versionId)}/submit`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    }),
-  reviewManagedContent: (versionId: string, approved: boolean, note?: string, categoryId?: string) =>
-    jsonFetch<ManagedContentItem>(`/api/admin/content/versions/${encodeURIComponent(versionId)}/review`, {
-      method: "POST",
-      body: JSON.stringify({ approved, note: note?.trim() || null, category_id: categoryId || null }),
-    }),
   publishManagedContent: (versionId: string) =>
     jsonFetch<{ publication_id: string; index_job_id: string; status: string }>(
       `/api/admin/content/versions/${encodeURIComponent(versionId)}/publish`,
@@ -878,16 +868,6 @@ export const api = {
     jsonFetch<XMindPreview>(
       `/api/admin/content/versions/${encodeURIComponent(versionId)}/xmind-preview`,
     ),
-  bulkReviewManagedContent: (versionIds: string[], approved: boolean, note?: string) =>
-    jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-review", {
-      method: "POST",
-      body: JSON.stringify({ version_ids: versionIds, approved, note: note?.trim() || null }),
-    }),
-  bulkSubmitManagedContent: (versionIds: string[]) =>
-    jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-submit", {
-      method: "POST",
-      body: JSON.stringify({ version_ids: versionIds }),
-    }),
   bulkPublishManagedContent: (versionIds: string[]) =>
     jsonFetch<BulkManagedContentResponse>("/api/admin/content/bulk-publish", {
       method: "POST",
@@ -949,11 +929,6 @@ export const api = {
   ) => jsonFetch<BulkOperation>(`/api/admin/content/bulk-operations/${encodeURIComponent(runId)}/execute`, {
     method: "POST", body: JSON.stringify(options),
   }),
-  reviewManagedContentBulkItem: (runId: string, itemId: string, approved: boolean, note?: string) =>
-    jsonFetch<BulkOperation>(
-      `/api/admin/content/bulk-operations/${encodeURIComponent(runId)}/items/${encodeURIComponent(itemId)}/review`,
-      { method: "POST", body: JSON.stringify({ approved, note: note?.trim() || null }) },
-    ),
   cancelManagedContentBulkOperation: (runId: string) =>
     jsonFetch<BulkOperation>(`/api/admin/content/bulk-operations/${encodeURIComponent(runId)}/cancel`, {
       method: "POST", body: JSON.stringify({}),

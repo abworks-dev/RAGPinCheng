@@ -170,14 +170,8 @@ def _item_eligibility(
     if str(row["content_kind"]) != "document":
         return False, "视频转录稿不参与此操作"
     status = str(row["lifecycle_status"])
-    if operation == "submit":
-        return (status in {"draft", "rejected"} and "item.publish" in permissions,
-                None if status in {"draft", "rejected"} else "当前状态无需提交")
-    if operation in {"approve", "reject"}:
-        return (status == "awaiting_review" and "item.publish" in permissions,
-                None if status == "awaiting_review" else "仅待确认资料可审核")
     if operation == "publish":
-        publishable = {"draft", "rejected", "approved", "publication_failed"}
+        publishable = {"pending_publication", "publication_failed"}
         return (status in publishable and "item.publish" in permissions,
                 None if status in publishable else "当前状态不可发布")
     if operation == "download":
@@ -187,10 +181,8 @@ def _item_eligibility(
             return False, "资料文件不可用"
         return True, None
     if operation == "move":
-        if status in {"draft", "rejected"}:
-            return ("item.move_draft" in permissions, None if "item.move_draft" in permissions else "缺少草稿移动权限")
-        if status == "awaiting_review":
-            return (False, "待确认移动流程已移除")
+        if status == "pending_publication":
+            return ("item.move_draft" in permissions, None if "item.move_draft" in permissions else "缺少待发布资料移动权限")
         if status == "published":
             return ("item.reclassify_published" in permissions, None if "item.reclassify_published" in permissions else "缺少正式分类调整权限")
         return False, "当前状态不可移动"

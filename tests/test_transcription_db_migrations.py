@@ -693,6 +693,7 @@ def test_schema_25_grants_force_delete_only_to_system_admin_template(tmp_path, m
     conn.commit()
     conn.close()
 
+
     monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
     init_db(path, backup_dir=tmp_path / "backups")
     conn = sqlite3.connect(path)
@@ -709,6 +710,35 @@ def test_schema_25_grants_force_delete_only_to_system_admin_template(tmp_path, m
            WHERE g.group_key='system_admin' AND i.permission='category.force_delete'"""
     ).fetchone() is not None
     assert conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='category_force_delete_runs'").fetchone() is not None
+    assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
+    conn.close()
+
+
+def test_schema_36_replaces_document_review_statuses(tmp_path, monkeypatch):
+    path = tmp_path / "app.sqlite"
+    migrations = db_migrations.MIGRATIONS
+    monkeypatch.setattr(
+        db_migrations, "MIGRATIONS", tuple(item for item in migrations if item.version <= 35),
+    )
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    category_id = conn.execute("SELECT id FROM category_nodes ORDER BY sort_order LIMIT 1").fetchone()[0]
+    sha256 = "a" * 64
+    conn.execute("INSERT INTO content_objects(sha256,size_bytes,mime_type,storage_rel_path,created_at) VALUES (?,1,'application/pdf','objects/sha',1)", (sha256,))
+    for index, status in enumerate(("draft", "awaiting_review", "approved", "rejected"), 1):
+        item_id = f"item-{index}"
+        conn.execute("INSERT INTO content_items(id,title,content_kind,category_id,created_at,updated_at) VALUES (?,?,'document',?,1,1)", (item_id, item_id, category_id))
+        conn.execute("INSERT INTO content_versions(id,item_id,version_number,object_sha256,original_filename,doc_type,source_origin,lifecycle_status,created_at,updated_at,title) VALUES (?,?,1,?,?,'pdf','web',?,1,1,?)", (f"version-{index}", item_id, sha256, f"{item_id}.pdf", status, item_id))
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(db_migrations, "MIGRATIONS", migrations)
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    assert conn.execute("SELECT DISTINCT lifecycle_status FROM content_versions").fetchall() == [("pending_publication",)]
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE content_versions SET lifecycle_status='draft'")
+    assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
     conn.close()
 

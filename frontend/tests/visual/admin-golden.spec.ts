@@ -82,7 +82,7 @@ test("资料管理文件夹移动 accepted golden", async ({ page }) => {
   }
 });
 
-test.skip("资料管理审核窗口 accepted golden", async ({ page }) => {
+test("资料管理发布窗口 accepted golden", async ({ page }) => {
   await installAdminRoutes(page, "normal");
   await page.goto("/admin");
   if (page.viewportSize()!.width < 1024) {
@@ -92,15 +92,13 @@ test.skip("资料管理审核窗口 accepted golden", async ({ page }) => {
   await openRootFolder(page);
   const title = page.getByText("机电专业协同检查清单", { exact: true }).filter({ visible: true });
   const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
-  await item.getByRole("button", { name: "审核", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "审核资料" });
-  await dialog.getByRole("button", { name: "退回修改", exact: true }).click();
-  await dialog.getByRole("textbox", { name: "退回原因" }).fill("请补充机电碰撞检查范围");
-  await expect(dialog.getByRole("button", { name: "确认退回" })).toBeEnabled();
+  await item.getByRole("button", { name: "发布", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "发布资料" });
+  await expect(dialog.getByRole("button", { name: "确认发布" })).toBeEnabled();
   const viewport = page.viewportSize()!;
   expect(await page.evaluate(() => Math.max(document.body.scrollWidth, document.documentElement.scrollWidth))).toBeLessThanOrEqual(viewport.width);
   if (process.platform === "win32") {
-    await expect(page).toHaveScreenshot(`managed-content-review-${viewport.width}x${viewport.height}.png`);
+    await expect(page).toHaveScreenshot(`managed-content-publish-${viewport.width}x${viewport.height}.png`);
   } else {
     expect((await page.screenshot()).byteLength).toBeGreaterThan(10_000);
   }
