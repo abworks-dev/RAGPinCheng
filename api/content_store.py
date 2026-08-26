@@ -1714,7 +1714,7 @@ def register_uploaded_document(
         """INSERT INTO content_versions
            (id,item_id,version_number,object_sha256,original_filename,doc_type,source_origin,
             source_batch_id,source_rel_path,lifecycle_status,created_by,created_at,updated_at,title)
-           VALUES (?,?,1,?,?,?,?,?,?, 'approved',?,?,?,?)""",
+           VALUES (?,?,1,?,?,?,?,?,?, 'pending_publication',?,?,?,?)""",
         (
             version_id,
             item_id,
@@ -1834,16 +1834,16 @@ _CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
                 )),0) AS version_number,
                m.original_filename,'video' AS doc_type,
                CASE
+                 WHEN h.current_version_id IS NOT NULL THEN 'published'
                  WHEN mj.status IN ('pending','running') THEN 'transcribing'
                  WHEN mj.status='succeeded' THEN 'transcript_ready'
                  WHEN m.status='failed' THEN 'transcription_failed'
                  WHEN mj.status='failed' THEN 'transcription_failed'
-                 WHEN tv.review_status='awaiting_review' THEN 'awaiting_review'
-                 WHEN tv.review_status='review_rejected' THEN 'rejected'
+                 WHEN tv.review_status='awaiting_review' THEN 'transcript_awaiting_review'
+                 WHEN tv.review_status='review_rejected' THEN 'transcript_rejected'
                  WHEN tv.publication_status='publishing' THEN 'publishing'
                  WHEN tv.publication_status='publication_failed' THEN 'publication_failed'
-                 WHEN h.current_version_id=tv.id AND tv.publication_status='published' THEN 'published'
-                 WHEN tv.review_status='review_approved' THEN 'approved'
+                 WHEN tv.review_status='review_approved' THEN 'transcript_approved'
                  WHEN tv.id IS NOT NULL THEN 'transcript_ready'
                  ELSE 'awaiting_transcription'
                END AS lifecycle_status,
@@ -2044,16 +2044,16 @@ def _archive_media_transcript_item_locked(conn: sqlite3.Connection, item_id: str
     row = conn.execute("""SELECT i.media_id,i.archived_at,i.category_id,m.status AS media_status,
                                  h.current_version_id,tv.publication_status,
                                  latest_job.status AS job_status,
-               CASE
+                               CASE
+                                   WHEN h.current_version_id IS NOT NULL THEN 'published'
                                    WHEN latest_job.status IN ('pending','running') THEN 'transcribing'
                                    WHEN latest_job.status='succeeded' THEN 'transcript_ready'
                                    WHEN m.status='failed' OR latest_job.status='failed' THEN 'transcription_failed'
-                                   WHEN tv.review_status='awaiting_review' THEN 'awaiting_review'
-                                   WHEN tv.review_status='review_rejected' THEN 'rejected'
+                                   WHEN tv.review_status='awaiting_review' THEN 'transcript_awaiting_review'
+                                   WHEN tv.review_status='review_rejected' THEN 'transcript_rejected'
                                    WHEN tv.publication_status='publishing' THEN 'publishing'
                                    WHEN tv.publication_status='publication_failed' THEN 'publication_failed'
-                                   WHEN h.current_version_id=tv.id AND tv.publication_status='published' THEN 'published'
-                                   WHEN tv.review_status='review_approved' THEN 'approved'
+                                   WHEN tv.review_status='review_approved' THEN 'transcript_approved'
                                    WHEN tv.id IS NOT NULL THEN 'transcript_ready'
                                    ELSE 'awaiting_transcription'
                                  END AS lifecycle_status
@@ -2205,11 +2205,7 @@ def restore_content_item(
             raise ValueError("content_restore_in_progress")
         metadata = json.loads(row["archive_metadata_json"] or "{}")
         previous_status = str(metadata.get("previous_status") or row["lifecycle_status"])
-        restored_status = (
-            previous_status
-            if previous_status in {"draft", "rejected", "awaiting_review"}
-            else "approved"
-        )
+        restored_status = "pending_publication"
         result = conn.execute(
             """UPDATE content_items SET archived_at=NULL,updated_at=?,normalized_filename=?,category_id=?
                WHERE id=? AND archived_at IS NOT NULL""",
@@ -2297,7 +2293,7 @@ def _archive_content_item_locked(
         raise ValueError("content_item_not_found")
     requires_publish = (
         row["head_publication_id"] is not None
-        or row["lifecycle_status"] not in {"draft", "rejected"}
+        or row["lifecycle_status"] != "pending_publication"
     )
     if (requires_publish and not can_archive_published) or (
         not requires_publish and not can_archive_draft
@@ -2439,10 +2435,8 @@ def move_content_item(
             raise ValueError("content_version_conflict")
         if row["current_version_id"] is not None:
             raise ValueError("content_move_requires_republication")
-        if row["lifecycle_status"] in {"draft", "rejected"}:
+        if row["lifecycle_status"] == "pending_publication":
             allowed = can_move_draft
-        elif row["lifecycle_status"] == "awaiting_review":
-            allowed = can_move_review
         else:
             raise ValueError("content_move_requires_republication")
         if not allowed:
@@ -2680,7 +2674,7 @@ def create_content_revision(
             """INSERT INTO content_versions
                (id,item_id,version_number,object_sha256,original_filename,doc_type,source_origin,
                 source_batch_id,source_rel_path,lifecycle_status,created_by,created_at,updated_at,title)
-               VALUES (?,?,?,?,?,?,?,?,?,'approved',?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,'pending_publication',?,?,?,?)""",
             (
                 version_id,
                 item_id,
@@ -2734,83 +2728,6 @@ def create_content_revision(
         raise
 
 
-def submit_version_for_review(
-    conn: sqlite3.Connection,
-    version_id: str,
-    *,
-    actor_user_id: int,
-) -> sqlite3.Row:
-    now = _now()
-    result = conn.execute(
-        """UPDATE content_versions SET lifecycle_status='awaiting_review',updated_at=?
-           WHERE id=? AND lifecycle_status IN ('draft','rejected')""",
-        (now, version_id),
-    )
-    if result.rowcount != 1:
-        raise ValueError("version_not_submittable")
-    row = conn.execute("SELECT item_id,source_batch_id FROM content_versions WHERE id=?", (version_id,)).fetchone()
-    audit_event(
-        conn,
-        "content.submitted",
-        actor_user_id=actor_user_id,
-        item_id=row["item_id"],
-        version_id=version_id,
-        batch_id=row["source_batch_id"],
-    )
-    conn.commit()
-    return conn.execute("SELECT * FROM content_versions WHERE id=?", (version_id,)).fetchone()
-
-
-def review_version(
-    conn: sqlite3.Connection,
-    version_id: str,
-    *,
-    approved: bool,
-    note: str | None,
-    category_id: str | None,
-    actor_user_id: int,
-) -> sqlite3.Row:
-    row = conn.execute(
-        "SELECT item_id,lifecycle_status,source_batch_id FROM content_versions WHERE id=?",
-        (version_id,),
-    ).fetchone()
-    if row is None or row["lifecycle_status"] != "awaiting_review":
-        raise ValueError("version_not_reviewable")
-    if not approved and not (note or "").strip():
-        raise ValueError("review_note_required")
-    if category_id:
-        category = conn.execute(
-            "SELECT 1 FROM category_nodes WHERE id=? AND is_active=1", (category_id,)
-        ).fetchone()
-        if category is None:
-            raise ValueError("active_category_not_found")
-        conn.execute(
-            "UPDATE content_items SET category_id=?,updated_at=? WHERE id=?",
-            (category_id, _now(), row["item_id"]),
-        )
-    decision = "approved" if approved else "rejected"
-    now = _now()
-    conn.execute(
-        "INSERT INTO content_reviews(id,version_id,decision,reviewer_id,note,created_at) VALUES (?,?,?,?,?,?)",
-        (_id("review"), version_id, decision, actor_user_id, (note or "").strip() or None, now),
-    )
-    conn.execute(
-        "UPDATE content_versions SET lifecycle_status=?,updated_at=? WHERE id=?",
-        (decision, now, version_id),
-    )
-    audit_event(
-        conn,
-        f"content.review_{decision}",
-        actor_user_id=actor_user_id,
-        item_id=row["item_id"],
-        version_id=version_id,
-        batch_id=row["source_batch_id"],
-        category_id=category_id,
-    )
-    conn.commit()
-    return conn.execute("SELECT * FROM content_versions WHERE id=?", (version_id,)).fetchone()
-
-
 def create_publication_job(
     conn: sqlite3.Connection,
     version_id: str,
@@ -2821,7 +2738,7 @@ def create_publication_job(
         "SELECT item_id,lifecycle_status,source_batch_id FROM content_versions WHERE id=?",
         (version_id,),
     ).fetchone()
-    if row is None or row["lifecycle_status"] not in {"draft", "approved", "publication_failed"}:
+    if row is None or row["lifecycle_status"] not in {"pending_publication", "publication_failed"}:
         raise ValueError("version_not_publishable")
     attempt = int(
         conn.execute(

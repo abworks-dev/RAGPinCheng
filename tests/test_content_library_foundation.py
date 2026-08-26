@@ -18,8 +18,6 @@ from api.content_storage import ContentStorage, StoredContentObject
 from api.content_store import archive_content_item, create_category, create_content_revision, create_web_batch, delete_category, force_delete_category, get_category_delete_preview, get_category_force_delete_preview, list_categories, move_category, move_content_item, register_uploaded_document, restore_content_item
 from api.content_store import (
     create_publication_job,
-    review_version,
-    submit_version_for_review,
 )
 from api import content_publication
 from api import content_trash_cleanup
@@ -565,7 +563,7 @@ def test_revision_keeps_published_head_until_the_new_version_is_promoted(tmp_pat
     ).fetchone()[0] == "published"
     assert conn.execute(
         "SELECT lifecycle_status FROM content_versions WHERE id=?", (revised.version_id,)
-    ).fetchone()[0] == "draft"
+    ).fetchone()[0] == "pending_publication"
     with pytest.raises(ValueError, match="content_delete_forbidden"):
         archive_content_item(
             conn,
@@ -642,15 +640,6 @@ def test_review_publish_promotes_only_completed_candidate(tmp_path, monkeypatch)
         stored=stored,
         actor_user_id=actor,
     )
-    submit_version_for_review(conn, uploaded.version_id, actor_user_id=actor)
-    review_version(
-        conn,
-        uploaded.version_id,
-        approved=True,
-        note="确认",
-        category_id=None,
-        actor_user_id=actor,
-    )
     _publication_id, job_id = create_publication_job(
         conn, uploaded.version_id, actor_user_id=actor
     )
@@ -701,8 +690,6 @@ def test_force_deleted_publication_job_cannot_resume_or_promote(tmp_path, monkey
                                    object_path.relative_to(storage.root).as_posix(), object_path, True),
         actor_user_id=actor,
     )
-    submit_version_for_review(conn, uploaded.version_id, actor_user_id=actor)
-    review_version(conn, uploaded.version_id, approved=True, note="确认", category_id=None, actor_user_id=actor)
     _publication_id, job_id = create_publication_job(conn, uploaded.version_id, actor_user_id=actor)
     conn.close()
 
@@ -801,10 +788,10 @@ def test_archiving_published_content_withdraws_head_but_preserves_history_and_ob
         actor_user_id=actor,
         can_restore=True,
     )
-    assert restored.restored_status == "approved"
+    assert restored.restored_status == "pending_publication"
     assert conn.execute(
         "SELECT lifecycle_status FROM content_versions WHERE id=?", (uploaded.version_id,)
-    ).fetchone()[0] == "approved"
+    ).fetchone()[0] == "pending_publication"
     assert conn.execute("SELECT count(*) FROM content_item_heads").fetchone()[0] == 0
     conn.close()
 
@@ -942,11 +929,11 @@ def test_server_batch_apply_imports_into_category_beyond_four_levels(tmp_path):
     assert stored[0] == parent
     assert conn.execute(
         "SELECT lifecycle_status FROM content_versions WHERE id=?", (entries[0].version_id,)
-    ).fetchone()[0] == "awaiting_review"
+    ).fetchone()[0] == "pending_publication"
     conn.close()
 
 
-def test_server_batch_apply_registers_items_for_review(tmp_path):
+def test_server_batch_apply_registers_items_for_publication(tmp_path):
     conn = _db(tmp_path)
     actor = conn.execute("SELECT id FROM users WHERE employee_id='u1'").fetchone()[0]
     storage = ContentStorage(tmp_path / "content")
@@ -966,7 +953,7 @@ def test_server_batch_apply_registers_items_for_review(tmp_path):
     assert entries[0].category_id == "cat-05"
     assert conn.execute(
         "SELECT lifecycle_status FROM content_versions WHERE id=?", (entries[0].version_id,)
-    ).fetchone()[0] == "awaiting_review"
+    ).fetchone()[0] == "pending_publication"
     conn.close()
 
 
@@ -1074,7 +1061,7 @@ def test_read_only_view_exports_published_content_beyond_four_levels(tmp_path):
     conn.close()
 
 
-def test_create_publication_job_accepts_a_newly_uploaded_draft(tmp_path):
+def test_create_publication_job_accepts_a_newly_uploaded_pending_version(tmp_path):
     conn = _db(tmp_path)
     actor = 1
     storage = ContentStorage(tmp_path / "objects")

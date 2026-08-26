@@ -10,8 +10,8 @@ const admin = {
   role: "admin",
   csrf_token: "synthetic-csrf-token",
   content_permissions: [
-    "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
-    "item.move_draft", "item.archive_draft", "item.review", "item.move_review",
+    "workspace.view", "item.view", "item.download", "category.view", "item.upload",
+    "item.move_draft", "item.archive_draft",
     "item.publish", "item.reclassify_published", "item.archive_published", "trash.view", "trash.restore",
     "trash.purge", "trash.policy_manage",
     "category.manage", "category.force_delete", "folder.request", "folder.review", "import.server", "index.view",
@@ -27,7 +27,7 @@ const workspaceUsers = {
     real_name: "合成资料员",
     role: "user",
     content_permissions: [
-      "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
+      "workspace.view", "item.view", "item.download", "category.view", "item.upload",
       "item.move_draft", "item.archive_draft", "folder.request",
     ],
   },
@@ -70,9 +70,9 @@ const folderRequests = [{
 }];
 
 export const items = [
-  ["draft", "建筑信息模型交付标准（合成长文件名用于响应式检查）.pdf"],
-  ["awaiting_review", "机电专业协同检查清单.docx"],
-  ["approved", "项目资料归档指引.xlsx"],
+  ["pending_publication", "建筑信息模型交付标准（合成长文件名用于响应式检查）.pdf"],
+  ["pending_publication", "机电专业协同检查清单.docx"],
+  ["pending_publication", "项目资料归档指引.xlsx"],
   ["publication_failed", "培训资料发布演练.pptx"],
   ["published", "企业知识库使用规范.md"],
 ].map(([status, filename], index) => ({
@@ -154,7 +154,7 @@ const trashItems = [{
   ...items[0], item_id: "item-trash-overdue", version_id: "version-trash-overdue",
   title: "项目交付检查清单", original_filename: "项目交付检查清单.pdf",
   archived_at: 1690000000, archived_by_name: "合成管理员",
-  pre_archive_lifecycle_status: "approved", retention_status: "overdue",
+  pre_archive_lifecycle_status: "pending_publication", retention_status: "overdue",
   retention_days_remaining: -12, purge_eligible_at: 1697776000,
 }];
 
@@ -480,30 +480,27 @@ const permissionUsers = [
     role: "user",
     is_active: true,
     permissions: [
-      "workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit",
-      "item.move_draft", "item.archive_draft", "folder.request", "item.review",
-      "item.move_review", "folder.review", "trash.view", "trash.restore",
+      "workspace.view", "item.view", "item.download", "category.view", "item.upload",
+      "item.move_draft", "item.archive_draft", "folder.request",
+      "folder.review", "trash.view", "trash.restore",
     ],
   },
   { user_id: 9003, employee_id: "TEST-INACTIVE", real_name: "停用测试用户", role: "user", is_active: false, permissions: [] },
 ];
 
 const permissionCatalog = {
-  schema_version: 6,
+  schema_version: 8,
   permissions: [
     { key: "workspace.view", domain: "access", domain_label: "入口与查看", label: "进入资料工作台", description: "进入资料管理工作台。", dependencies: [] },
     { key: "item.view", domain: "access", domain_label: "入口与查看", label: "查看资料", description: "查看资料列表、详情和预览。", dependencies: ["workspace.view"] },
     { key: "item.download", domain: "access", domain_label: "入口与查看", label: "下载资料", description: "下载单份资料或批量打包下载。", dependencies: ["workspace.view", "item.view"] },
     { key: "category.view", domain: "access", domain_label: "入口与查看", label: "查看分类", description: "查看资料分类树和完整路径。", dependencies: ["workspace.view"] },
-    { key: "item.upload", domain: "organize", domain_label: "资料整理", label: "上传资料", description: "上传文件并创建资料草稿。", dependencies: ["workspace.view", "item.view", "category.view"] },
-    { key: "item.submit", domain: "organize", domain_label: "资料整理", label: "提交确认", description: "将草稿或退回资料提交确认。", dependencies: ["workspace.view", "item.view"] },
-    { key: "item.move_draft", domain: "organize", domain_label: "资料整理", label: "移动草稿", description: "移动草稿或退回状态的资料。", dependencies: ["workspace.view", "item.view", "category.view"] },
-    { key: "item.archive_draft", domain: "organize", domain_label: "资料整理", label: "归档草稿", description: "将草稿或退回资料移入回收站。", dependencies: ["workspace.view", "item.view"] },
-    { key: "item.review", domain: "review", domain_label: "确认流程", label: "确认与退回", description: "确认或退回待确认资料。", dependencies: ["workspace.view", "item.view"] },
-    { key: "item.move_review", domain: "review", domain_label: "确认流程", label: "移动待确认资料", description: "移动待确认状态的资料。", dependencies: ["workspace.view", "item.view", "category.view"] },
-    { key: "item.publish", domain: "publish", domain_label: "发布流程", label: "发布资料", description: "发布或重新发布已确认资料。", dependencies: ["workspace.view", "item.view"] },
+    { key: "item.upload", domain: "organize", domain_label: "资料整理", label: "上传资料", description: "上传文件并创建待发布资料。", dependencies: ["workspace.view", "item.view", "category.view"] },
+    { key: "item.move_draft", domain: "organize", domain_label: "资料整理", label: "移动待发布资料", description: "移动待发布资料。", dependencies: ["workspace.view", "item.view", "category.view"] },
+    { key: "item.archive_draft", domain: "organize", domain_label: "资料整理", label: "删除待发布资料", description: "将待发布资料移入回收站。", dependencies: ["workspace.view", "item.view"] },
+    { key: "item.publish", domain: "publish", domain_label: "发布流程", label: "发布资料", description: "发布、重新发布或重试发布资料。", dependencies: ["workspace.view", "item.view"] },
     { key: "item.reclassify_published", domain: "publish", domain_label: "发布流程", label: "调整已发布资料分类", description: "调整已发布普通资料的分类，并同步正式索引和只读目录。", dependencies: ["workspace.view", "item.view", "category.view"] },
-    { key: "item.archive_published", domain: "publish", domain_label: "发布流程", label: "下架正式资料", description: "将已确认、发布失败或已发布资料移入回收站。", dependencies: ["workspace.view", "item.view"] },
+    { key: "item.archive_published", domain: "publish", domain_label: "发布流程", label: "下架正式资料", description: "将发布失败或已发布资料移入回收站。", dependencies: ["workspace.view", "item.view"] },
     { key: "trash.view", domain: "trash", domain_label: "回收站", label: "查看回收站", description: "查看和搜索已归档资料。", dependencies: ["workspace.view", "item.view"] },
     { key: "trash.restore", domain: "trash", domain_label: "回收站", label: "恢复资料", description: "从回收站恢复资料。", dependencies: ["workspace.view", "item.view", "trash.view"] },
     { key: "trash.purge", domain: "trash", domain_label: "回收站", label: "永久删除资料", description: "永久删除回收站中的资料及关联索引。", dependencies: ["workspace.view", "item.view", "trash.view"] },
@@ -520,8 +517,8 @@ const permissionCatalog = {
 const permissionGroups = [
   { id: "permission-group-member", group_key: "member", display_name: "普通成员", permissions: [], is_system: true, is_active: true, updated_at: 1700000000 },
   { id: "permission-group-viewer", group_key: "viewer", display_name: "资料浏览者", permissions: ["workspace.view", "item.view", "item.download", "category.view"], is_system: true, is_active: true, updated_at: 1700000000 },
-  { id: "permission-group-bim-engineer", group_key: "bim_engineer", display_name: "BIM工程师", permissions: ["workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.submit", "item.move_draft", "item.archive_draft", "folder.request"], is_system: true, is_active: true, updated_at: 1700000000 },
-  { id: "permission-group-content-owner", group_key: "content_owner", display_name: "资料负责人", permissions: ["workspace.view", "item.view", "item.download", "category.view", "item.review", "item.move_review", "folder.review", "trash.view", "trash.restore"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-bim-engineer", group_key: "bim_engineer", display_name: "BIM工程师", permissions: ["workspace.view", "item.view", "item.download", "category.view", "item.upload", "item.move_draft", "item.archive_draft", "folder.request"], is_system: true, is_active: true, updated_at: 1700000000 },
+  { id: "permission-group-content-owner", group_key: "content_owner", display_name: "资料负责人", permissions: ["workspace.view", "item.view", "item.download", "category.view", "folder.review", "trash.view", "trash.restore"], is_system: true, is_active: true, updated_at: 1700000000 },
   { id: "permission-group-publisher", group_key: "publisher", display_name: "发布负责人", permissions: ["workspace.view", "item.view", "item.download", "category.view", "item.publish", "item.reclassify_published", "item.archive_published", "trash.view", "index.view"], is_system: true, is_active: true, updated_at: 1700000000 },
   { id: "permission-group-category-admin", group_key: "category_admin", display_name: "分类管理员", permissions: ["workspace.view", "item.view", "item.download", "category.view", "category.manage", "folder.review"], is_system: true, is_active: true, updated_at: 1700000000 },
   { id: "permission-group-system-admin", group_key: "system_admin", display_name: "系统管理员", permissions: admin.content_permissions, is_system: true, is_active: true, updated_at: 1700000000 },
@@ -1014,7 +1011,7 @@ export async function installAdminRoutes(
     }
     if (path === "/api/admin/content/trash") {
       const rows = scenario === "empty" ? [] : trashItems;
-      return json(route, { items: rows, total: rows.length, status_counts: rows.length ? { published: 1, approved: 1 } : {}, retention_counts: rows.length ? { retained: 0, expiring: 1, overdue: 1 } : {} });
+      return json(route, { items: rows, total: rows.length, status_counts: rows.length ? { published: 1, pending_publication: 1 } : {}, retention_counts: rows.length ? { retained: 0, expiring: 1, overdue: 1 } : {} });
     }
     if (path === "/api/admin/content/trash/settings") {
       return json(route, { cleanup_enabled: false, retention_days: 90, warning_days: 7, batch_limit: 20, updated_by: null, updated_at: 1700000000 });
@@ -1181,7 +1178,7 @@ export async function installAdminRoutes(
                 version_id: "existing-version",
                 title: "现有合成资料",
                 original_filename: "synthetic.pdf",
-                lifecycle_status: "draft",
+                lifecycle_status: "pending_publication",
                 has_published_head: false,
                 can_update: true,
               },

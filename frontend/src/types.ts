@@ -150,12 +150,8 @@ export type ContentPermission =
   | "item.download"
   | "category.view"
   | "item.upload"
-  /** Historical values accepted only when rendering legacy records. */
-  | "item.submit"
   | "item.move_draft"
   | "item.archive_draft"
-  | "item.review"
-  | "item.move_review"
   | "item.publish"
   | "item.reclassify_published"
   | "item.archive_published"
@@ -418,7 +414,7 @@ export type CategoryDeleteResult = {
   deleted_object_count: number;
 };
 
-export type BulkOperationAction = "move" | "submit" | "approve" | "reject" | "publish" | "download" | "delete" | "force_delete";
+export type BulkOperationAction = "move" | "publish" | "download" | "delete" | "force_delete";
 
 export type BulkOperationCategory = {
   run_id: string;

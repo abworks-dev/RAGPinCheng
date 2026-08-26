@@ -41,7 +41,6 @@ import {
   RotateCcw,
   Rocket,
   Search,
-  Send,
   SlidersHorizontal,
   Trash2,
   Upload,
@@ -1349,10 +1348,7 @@ function UploadTasksPanel({
 }
 
 const statusLabel: Record<string, string> = {
-  draft: "待提交",
-  awaiting_review: "待确认",
-  approved: "已确认",
-  rejected: "已退回",
+  pending_publication: "待发布",
   publishing: "发布中",
   published: "已发布",
   publication_failed: "发布失败",
@@ -1361,6 +1357,9 @@ const statusLabel: Record<string, string> = {
   transcribing: "转录中",
   transcription_failed: "转录失败",
   transcript_ready: "转录稿待审核",
+  transcript_awaiting_review: "转录稿待审核",
+  transcript_rejected: "审核退回",
+  transcript_approved: "待发布",
 };
 const sourceLabel: Record<string, string> = {
   web: "网页上传",
@@ -1382,9 +1381,9 @@ const documentTypeOptions = [
 
 function statusVariant(status: string) {
   if (status === "published") return "success" as const;
-  if (status.includes("failed") || status === "rejected")
+  if (status.includes("failed"))
     return "destructive" as const;
-  if (status === "awaiting_review" || status === "publishing")
+  if (status === "pending_publication" || status === "publishing")
     return "warning" as const;
   return "secondary" as const;
 }
@@ -1452,15 +1451,10 @@ function ManagedItemIdentity({
 
 type BulkAction =
   | "move"
-  | "submit"
-  | "approve"
-  | "reject"
   | "publish"
   | "download"
   | "archive"
   | "export_upload_summary";
-type BulkWorkbenchResult = "submitted" | "approved" | "rejected";
-
 type FilenameConflict = {
   item_id: string;
   version_id: string;
@@ -2232,14 +2226,6 @@ export function AdminManagedContentPage() {
   const [bulkFailures, setBulkFailures] = useState<
     Array<BulkManagedContentResult & { title: string }>
   >([]);
-  const [bulkNote, setBulkNote] = useState("");
-  const [bulkWorkbenchTargets, setBulkWorkbenchTargets] = useState<
-    ManagedContentItem[]
-  >([]);
-  const [bulkWorkbenchResults, setBulkWorkbenchResults] = useState<
-    Record<string, BulkWorkbenchResult>
-  >({});
-  const [bulkItemBusy, setBulkItemBusy] = useState<string | null>(null);
   const [queryInput, setQueryInput] = useState("");
   const [query, setQuery] = useState("");
   const contentLoadRequestRef = useRef(0);
@@ -2256,14 +2242,6 @@ export function AdminManagedContentPage() {
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [detail, setDetail] = useState<ManagedContentItem | null>(null);
-  const [reviewTarget, setReviewTarget] = useState<ManagedContentItem | null>(
-    null,
-  );
-  const [reviewDecision, setReviewDecision] = useState<"approve" | "reject">(
-    "approve",
-  );
-  const [reviewNote, setReviewNote] = useState("");
-  const [reviewError, setReviewError] = useState<string | null>(null);
   const [publishTarget, setPublishTarget] = useState<ManagedContentItem | null>(
     null,
   );
@@ -3725,50 +3703,12 @@ export function AdminManagedContentPage() {
           : candidate;
       setItems((current) => current.map(applyReadyPreview));
       setDetail((current) => (current ? applyReadyPreview(current) : current));
-      setReviewTarget((current) =>
-        current ? applyReadyPreview(current) : current,
-      );
       toast.success(`${item.doc_type.toUpperCase()} 预览已生成`);
     } catch (previewError) {
       toast.error(
         previewError instanceof Error
           ? previewError.message
           : `${item.doc_type.toUpperCase()} 预览生成失败，请稍后重试`,
-      );
-    } finally {
-      setBusyAction(null);
-    }
-  };
-
-  const openReviewDialog = (item: ManagedContentItem) => {
-    setDetail(null);
-    setReviewTarget(item);
-    setReviewDecision("approve");
-    setReviewNote("");
-    setReviewError(null);
-  };
-
-  const submitReview = async () => {
-    if (!reviewTarget || busyAction === "review") return;
-    const approved = reviewDecision === "approve";
-    if (!approved && !reviewNote.trim()) {
-      setReviewError("退回修改时必须填写原因");
-      return;
-    }
-    setBusyAction("review");
-    setReviewError(null);
-    try {
-      await adminContentApi.review(
-        reviewTarget.version_id,
-        approved,
-        reviewNote,
-      );
-      setReviewTarget(null);
-      toast.success(approved ? "资料已确认" : "资料已退回");
-      await load(true);
-    } catch (actionError) {
-      setReviewError(
-        actionError instanceof Error ? actionError.message : "审核失败，请重试",
       );
     } finally {
       setBusyAction(null);
@@ -3896,7 +3836,7 @@ export function AdminManagedContentPage() {
       });
       setRenameTarget(null);
       setRenameConflict(null);
-      toast.success("已创建重命名草稿，请重新提交确认并发布");
+      toast.success("已创建待发布版本");
       await load(true);
     } catch (renameFailure) {
       const conflict = filenameConflictFrom(renameFailure);
@@ -3939,7 +3879,7 @@ export function AdminManagedContentPage() {
       setUpdateTarget(null);
       setUpdateConflict(null);
       setUpdateFile(null);
-      toast.success("已创建更新草稿，请重新提交确认并发布");
+      toast.success("已创建待发布版本");
       await load(true);
     } catch (updateFailure) {
       const conflict = filenameConflictFrom(updateFailure);
@@ -4415,11 +4355,7 @@ export function AdminManagedContentPage() {
         item.lifecycle_status === "published"
       );
     }
-    return (
-      (can("item.move_draft") &&
-        ["draft", "rejected"].includes(item.lifecycle_status)) ||
-      (item.lifecycle_status === "awaiting_review")
-    );
+    return can("item.move_draft") && item.lifecycle_status === "pending_publication";
   };
   const canStartTranscription = (item: ManagedContentItem) =>
     isSystemAdmin &&
@@ -4436,110 +4372,17 @@ export function AdminManagedContentPage() {
   const canDeleteItem = (item: ManagedContentItem) => {
     if (item.content_kind === "media_transcript")
       return isSystemAdmin && Boolean(item.media_id);
-    const requiresPublish =
-      item.has_published_head ||
-      !["draft", "rejected"].includes(item.lifecycle_status);
-    return requiresPublish
-      ? can("item.archive_published")
-      : can("item.archive_draft");
+    return item.lifecycle_status === "pending_publication"
+      ? can("item.archive_draft")
+      : can("item.archive_published");
   };
   const canPublishItem = (item: ManagedContentItem) =>
     item.content_kind === "document" &&
-    ["approved", "publication_failed"].includes(item.lifecycle_status);
-
-  const openBulkWorkbench = (action: "submit" | "approve" | "reject") => {
-    const targets = selectedItems.filter(
-      (item) =>
-        item.content_kind === "document" &&
-        (action === "submit"
-          ? ["draft", "rejected"].includes(item.lifecycle_status)
-          : item.lifecycle_status === "awaiting_review"),
-    );
-    setBulkWorkbenchTargets(targets);
-    setBulkWorkbenchResults({});
-    setBulkFailures([]);
-    setBulkNote("");
-    setBulkAction(action);
-  };
-
-  const executeBulkWorkbench = async (
-    operation: "submit" | "approve" | "reject",
-    versionIds: string[],
-    single = false,
-  ) => {
-    if (versionIds.length === 0 || busyAction === "bulk" || bulkItemBusy)
-      return;
-    if (operation === "reject" && !bulkNote.trim()) {
-      toast.error("退回资料前请填写退回原因");
-      return;
-    }
-    if (single) setBulkItemBusy(versionIds[0]);
-    else setBusyAction("bulk");
-    setBulkFailures([]);
-    try {
-      const result =
-        operation === "submit"
-          ? await adminContentApi.bulkSubmit(versionIds)
-          : await adminContentApi.bulkReview(
-              versionIds,
-              operation === "approve",
-              bulkNote,
-            );
-      const succeededIds = new Set(
-        result.results
-          .filter((entry) => entry.status === "succeeded")
-          .map((entry) => entry.version_id),
-      );
-      const titleById = new Map(
-        bulkWorkbenchTargets.map((item) => [item.version_id, item.title]),
-      );
-      const failures = result.results
-        .filter((entry) => entry.status === "failed")
-        .map((entry) => ({
-          ...entry,
-          title: titleById.get(entry.version_id) || "未知资料",
-        }));
-      setBulkFailures(failures);
-      setBulkWorkbenchResults((current) => {
-        const next = { ...current };
-        for (const versionId of succeededIds) {
-          next[versionId] =
-            operation === "submit"
-              ? "submitted"
-              : operation === "approve"
-                ? "approved"
-                : "rejected";
-        }
-        return next;
-      });
-      setSelected((current) =>
-        current.filter((versionId) => !succeededIds.has(versionId)),
-      );
-      if (result.failed)
-        toast.error(`成功 ${result.succeeded} 份，失败 ${result.failed} 份`);
-      else
-        toast.success(
-          operation === "submit"
-            ? `已提交 ${result.succeeded} 份资料审核`
-            : operation === "approve"
-              ? `已通过 ${result.succeeded} 份资料`
-              : `已退回 ${result.succeeded} 份资料`,
-        );
-      await load(true);
-    } catch (bulkError) {
-      toast.error(
-        bulkError instanceof Error ? bulkError.message : "批量操作失败",
-      );
-    } finally {
-      if (single) setBulkItemBusy(null);
-      else setBusyAction(null);
-    }
-  };
+    ["pending_publication", "publication_failed"].includes(item.lifecycle_status);
 
   const executeBulk = async () => {
     if (!bulkAction || selectedItems.length === 0 || busyAction === "bulk")
       return;
-    if (bulkAction === "reject" && !bulkNote.trim()) return;
     setBusyAction("bulk");
     setBulkFailures([]);
     try {
@@ -4558,13 +4401,7 @@ export function AdminManagedContentPage() {
           ? selectedMoveOperation === "reclassify"
             ? await adminContentApi.bulkReclassify(moveItems, bulkMoveFolderId)
             : await adminContentApi.bulkMove(moveItems, bulkMoveFolderId)
-          : bulkAction === "publish"
-            ? await adminContentApi.bulkPublish(ids)
-            : await adminContentApi.bulkReview(
-                ids,
-                bulkAction === "approve",
-                bulkNote,
-              );
+          : await adminContentApi.bulkPublish(ids);
       const titles = new Map(
         selectedItems.map((item) => [item.version_id, item.title]),
       );
@@ -4675,14 +4512,6 @@ export function AdminManagedContentPage() {
     selectedItems.every((item) => item.content_kind === "media_transcript");
   const hasTranscribableSelection =
     videoSelection && selectedItems.some(canStartTranscription);
-  const hasSubmittableSelection =
-    documentSelection &&
-    selectedItems.some((item) =>
-      ["draft", "rejected"].includes(item.lifecycle_status),
-    );
-  const hasReviewableSelection =
-    documentSelection &&
-    selectedItems.some((item) => item.lifecycle_status === "awaiting_review");
   const publishableSelectedItems = selectedItems.filter(canPublishItem);
   const skippedPublishSelectedItems = selectedItems.filter(
     (item) => !canPublishItem(item),
@@ -4707,30 +4536,6 @@ export function AdminManagedContentPage() {
   const hasDownloadableSelection =
     documentSelection && selectedItems.length > 1 && can("item.download");
   const bulkDisabled = Boolean(busyAction) || refreshing || !enabled;
-  const bulkWorkbenchFailureById = new Map(
-    bulkFailures.map((entry) => [entry.version_id, entry.message]),
-  );
-  const bulkPendingSubmitIds = bulkWorkbenchTargets
-    .filter(
-      (item) =>
-        ["draft", "rejected"].includes(item.lifecycle_status) &&
-        !bulkWorkbenchResults[item.version_id],
-    )
-    .map((item) => item.version_id);
-  const bulkPendingReviewIds = bulkWorkbenchTargets
-    .filter(
-      (item) =>
-        (item.lifecycle_status === "awaiting_review" ||
-          bulkWorkbenchResults[item.version_id] === "submitted") &&
-        !["approved", "rejected"].includes(
-          bulkWorkbenchResults[item.version_id] || "",
-        ),
-    )
-    .map((item) => item.version_id);
-  const bulkSubmittedCount = Object.values(bulkWorkbenchResults).filter(
-    (value) => value === "submitted",
-  ).length;
-
   const openTranscriptionDialog = (
     targets: ManagedContentItem[],
     scope: "media" | "category" | "batch" = "media",
@@ -4870,7 +4675,7 @@ export function AdminManagedContentPage() {
       item.lifecycle_status !== "publishing" &&
       !reclassifying;
     const workflow =
-      ["draft", "approved", "publication_failed"].includes(
+      ["pending_publication", "publication_failed"].includes(
         item.lifecycle_status,
       ) && can("item.publish")
         ? {
@@ -5018,13 +4823,9 @@ export function AdminManagedContentPage() {
             ? item.is_current && item.lifecycle_status === "published"
               ? "当前账号没有调整已发布资料分类的权限"
               : "存在待处理的新版本，暂时不能调整正式分类"
-            : !["draft", "rejected", "awaiting_review"].includes(
-                  item.lifecycle_status,
-                )
-              ? "仅草稿、已退回或待确认的资料可以移动"
-              : item.lifecycle_status === "awaiting_review"
-                ? "当前账号没有移动待确认资料的权限"
-                : "当前账号没有移动草稿或已退回资料的权限");
+            : item.lifecycle_status !== "pending_publication"
+              ? "仅待发布资料可以移动"
+              : "当前账号没有移动待发布资料的权限");
     const revisionTooltip =
       unavailableReason ||
       (revisionAllowed
@@ -5051,10 +4852,9 @@ export function AdminManagedContentPage() {
           ? "资料正在发布，暂不能移入回收站"
           : reclassifying
             ? "资料正在调整分类，暂不能移入回收站"
-            : item.has_published_head ||
-                !["draft", "rejected"].includes(item.lifecycle_status)
-              ? "当前账号没有删除已审核或已发布资料的权限"
-              : "当前账号没有删除草稿或已退回资料的权限");
+            : item.has_published_head || item.lifecycle_status !== "pending_publication"
+              ? "当前账号没有删除已发布资料的权限"
+              : "当前账号没有删除待发布资料的权限");
     return (
       <div className="ml-auto flex w-full flex-col items-stretch gap-2 lg:w-auto lg:flex-row lg:items-center lg:justify-end">
         {workflow && (
@@ -5457,7 +5257,7 @@ export function AdminManagedContentPage() {
             资料管理
           </h1>
           <p className="mt-1 text-ui-sm text-muted-foreground">
-            统一管理资料的上传、分类、确认和发布。
+            统一管理资料的上传、分类和发布。
           </p>
         </header>
         {viewTabs}
@@ -5478,7 +5278,7 @@ export function AdminManagedContentPage() {
             资料管理
           </h1>
           <p className="mt-1 text-ui-sm text-muted-foreground">
-            统一管理资料的上传、分类、确认和发布。
+          统一管理资料的上传、分类和发布。
           </p>
         </header>
         {viewTabs}
@@ -6042,7 +5842,7 @@ export function AdminManagedContentPage() {
               <DialogTitle>恢复资料</DialogTitle>
               <DialogDescription>
                 “{restoreTarget?.title}
-                ”将恢复到资料库。已发布或发布失败的资料会恢复为“已确认”，重新发布后才会进入检索。
+                ”将恢复到资料库。文档会恢复为“待发布”，重新发布后才会进入检索。
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
@@ -6112,10 +5912,7 @@ export function AdminManagedContentPage() {
                 取消
               </Button>
               {restoreConflict &&
-                (restoreConflict.has_published_head ||
-                !["draft", "rejected"].includes(
-                  restoreConflict.lifecycle_status,
-                )
+                (restoreConflict.has_published_head || restoreConflict.lifecycle_status !== "pending_publication"
                   ? can("item.archive_published")
                   : can("item.archive_draft")) && (
                   <Button
@@ -6544,15 +6341,16 @@ export function AdminManagedContentPage() {
       {viewTabs}
 
       <section
-        className="grid grid-cols-2 gap-3 lg:grid-cols-4"
+        className="grid grid-cols-2 gap-3 lg:grid-cols-5"
         aria-label="资料状态概览"
       >
         {[
           { label: "全部资料", value: Object.values(counts).reduce((sum, value) => sum + value, 0), icon: <FileText className="size-4" /> },
+          { label: "待发布", value: counts.pending_publication || 0, icon: <FileText className="size-4" />, tone: "warning" as const },
           { label: "处理中", value: counts.publishing || 0, icon: <LoaderCircle className="size-4" />, tone: "warning" as const },
           { label: "已发布", value: counts.published || 0, icon: <Rocket className="size-4" />, tone: "success" as const },
           { label: "发布失败", value: counts.publication_failed || 0, icon: <XCircle className="size-4" />, tone: "destructive" as const },
-        ].map((summary) => { const next = summary.label === "全部资料" ? "" : summary.label === "处理中" ? "publishing" : summary.label === "已发布" ? "published" : "publication_failed"; return <ManagedSummaryCard key={summary.label} label={summary.label} value={summary.value} icon={summary.icon} tone={summary.tone} active={statusFilter === next} onClick={() => { setStatusFilter((current) => current === next ? "" : next); setPage(0); }} />; })}
+        ].map((summary) => { const next = summary.label === "全部资料" ? "" : summary.label === "待发布" ? "pending_publication" : summary.label === "处理中" ? "publishing" : summary.label === "已发布" ? "published" : "publication_failed"; return <ManagedSummaryCard key={summary.label} label={summary.label} value={summary.value} icon={summary.icon} tone={summary.tone} active={statusFilter === next} onClick={() => { setStatusFilter((current) => current === next ? "" : next); setPage(0); }} />; })}
       </section>
 
       {!enabled && !loading && (
@@ -6799,7 +6597,6 @@ export function AdminManagedContentPage() {
                           onSelect: () => {
                             setBulkFailures([]);
                             setBulkMoveFolderId("");
-                            setBulkNote("");
                             setBulkAction("move");
                           },
                         },
@@ -6811,7 +6608,6 @@ export function AdminManagedContentPage() {
                             !can("item.publish") || !hasPublishableSelection,
                           onSelect: () => {
                             setBulkFailures([]);
-                            setBulkNote("");
                             setBulkAction("publish");
                           },
                         },
@@ -7721,19 +7517,12 @@ export function AdminManagedContentPage() {
             setBulkAction(null);
             setBulkFailures([]);
             setBulkMoveFolderId("");
-            setBulkNote("");
-            setBulkWorkbenchTargets([]);
-            setBulkWorkbenchResults({});
           }
         }}
       >
         <DialogContent
           className={
-            bulkAction === "move" ||
-            bulkAction === "publish" ||
-            bulkAction === "submit" ||
-            bulkAction === "approve" ||
-            bulkAction === "reject"
+            bulkAction === "move" || bulkAction === "publish"
               ? "max-h-[calc(100vh-2rem)] max-w-3xl overflow-y-auto"
               : undefined
           }
@@ -7742,20 +7531,12 @@ export function AdminManagedContentPage() {
             <DialogTitle>
               {bulkAction === "move"
                 ? bulkMoveLabel
-                : bulkAction === "publish"
-                  ? "批量发布资料"
-                  : bulkAction === "submit"
-                    ? "批量提交审核"
-                    : "批量审核资料"}
+                : "批量发布资料"}
             </DialogTitle>
             <DialogDescription>
               {bulkAction === "publish"
                 ? `已选择 ${selectedItems.length} 份资料，请确认本次实际发布范围。`
-                : bulkAction === "submit" ||
-                    bulkAction === "approve" ||
-                    bulkAction === "reject"
-                  ? `本次工作台包含 ${bulkWorkbenchTargets.length} 份资料。单独处理成功的资料不会再被一键操作重复处理。`
-                  : `已选择 ${selectedItems.length} 份资料。系统会逐项执行，并保留不符合状态或权限要求的失败原因。`}
+                : `已选择 ${selectedItems.length} 份资料。系统会逐项执行，并保留不符合状态或权限要求的失败原因。`}
             </DialogDescription>
           </DialogHeader>
           {bulkAction === "move" && (
@@ -7836,190 +7617,7 @@ export function AdminManagedContentPage() {
               )}
             </>
           )}
-          {(bulkAction === "submit" ||
-            bulkAction === "approve" ||
-            bulkAction === "reject") && (
-            <>
-              <div className="flex flex-wrap gap-2 text-ui-xs" role="status">
-                {bulkPendingSubmitIds.length > 0 && (
-                  <Badge>待提交 {bulkPendingSubmitIds.length}</Badge>
-                )}
-                {bulkPendingReviewIds.length > 0 && (
-                  <Badge variant="warning">
-                    待审核 {bulkPendingReviewIds.length}
-                  </Badge>
-                )}
-                {bulkSubmittedCount > 0 && (
-                  <Badge>已提交 {bulkSubmittedCount}</Badge>
-                )}
-                {Object.values(bulkWorkbenchResults).filter(
-                  (value) => value === "approved",
-                ).length > 0 && (
-                  <Badge variant="success">
-                    已通过{" "}
-                    {
-                      Object.values(bulkWorkbenchResults).filter(
-                        (value) => value === "approved",
-                      ).length
-                    }
-                  </Badge>
-                )}
-                {Object.values(bulkWorkbenchResults).filter(
-                  (value) => value === "rejected",
-                ).length > 0 && (
-                  <Badge variant="warning">
-                    已退回{" "}
-                    {
-                      Object.values(bulkWorkbenchResults).filter(
-                        (value) => value === "rejected",
-                      ).length
-                    }
-                  </Badge>
-                )}
-              </div>
-              <div
-                className="max-h-80 divide-y divide-border overflow-y-auto border-y border-border"
-                aria-label="批量审核文件列表"
-              >
-                {bulkWorkbenchTargets.map((item) => {
-                  const result = bulkWorkbenchResults[item.version_id];
-                  const failure = bulkWorkbenchFailureById.get(item.version_id);
-                  const canSubmitRow =
-                    ["draft", "rejected"].includes(item.lifecycle_status) &&
-                    !result;
-                  const canReviewRow =
-                    (item.lifecycle_status === "awaiting_review" ||
-                      result === "submitted") &&
-                    result !== "approved" &&
-                    result !== "rejected";
-                  const rowBusy = bulkItemBusy === item.version_id;
-                  return (
-                    <div
-                      key={item.version_id}
-                      className="grid gap-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
-                    >
-                      <div className="min-w-0">
-                        <p className="break-words text-ui-sm font-medium">
-                          {item.title}
-                        </p>
-                        <p className="mt-1 break-all text-ui-xs text-muted-foreground">
-                          {item.original_filename} ·{" "}
-                          {item.category_path || item.category_label}
-                        </p>
-                        {failure && (
-                          <p
-                            className="mt-1 break-words text-ui-xs text-destructive"
-                            role="alert"
-                          >
-                            {failure}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex flex-wrap items-center justify-end gap-2">
-                        {result === "approved" ? (
-                          <Badge variant="success">已通过</Badge>
-                        ) : result === "rejected" ? (
-                          <Badge variant="warning">已退回</Badge>
-                        ) : result === "submitted" ? (
-                          <Badge>已提交</Badge>
-                        ) : (
-                          <Badge variant="outline">
-                            {statusLabel[item.lifecycle_status] ||
-                              item.lifecycle_status}
-                          </Badge>
-                        )}
-                        {canSubmitRow && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={
-                              Boolean(busyAction) || Boolean(bulkItemBusy)
-                            }
-                            onClick={() =>
-                              void executeBulkWorkbench(
-                                "submit",
-                                [item.version_id],
-                                true,
-                              )
-                            }
-                          >
-                            <Send className="size-4" />
-                            {rowBusy ? "提交中…" : "提交审核"}
-                          </Button>
-                        )}
-                        {canReviewRow && false && (
-                          <>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={
-                                Boolean(busyAction) || Boolean(bulkItemBusy)
-                              }
-                              onClick={() =>
-                                void executeBulkWorkbench(
-                                  "approve",
-                                  [item.version_id],
-                                  true,
-                                )
-                              }
-                            >
-                              <Check className="size-4" />
-                              {rowBusy ? "处理中…" : "通过"}
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={
-                                Boolean(busyAction) ||
-                                Boolean(bulkItemBusy) ||
-                                !bulkNote.trim()
-                              }
-                              title={
-                                !bulkNote.trim()
-                                  ? "请先填写退回原因"
-                                  : undefined
-                              }
-                              onClick={() =>
-                                void executeBulkWorkbench(
-                                  "reject",
-                                  [item.version_id],
-                                  true,
-                                )
-                              }
-                            >
-                              <X className="size-4" />
-                              退回
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-          {(bulkAction === "submit" ||
-            bulkAction === "approve" ||
-            bulkAction === "reject") &&
-            false && (
-              <label className="block space-y-1.5 text-ui-sm font-medium">
-                <span>退回原因（退回时必填）</span>
-                <textarea
-                  aria-label="批量退回原因"
-                  value={bulkNote}
-                  onChange={(event) => setBulkNote(event.target.value)}
-                  maxLength={2000}
-                  className="min-h-28 w-full resize-y rounded-ui-md border border-input bg-background px-3 py-2 text-ui-sm"
-                  placeholder="请说明需要修改的内容"
-                />
-                <span className="block text-right text-ui-xs font-normal text-muted-foreground">
-                  {bulkNote.length}/2000
-                </span>
-              </label>
-            )}
-          {bulkFailures.length > 0 &&
-            !["submit", "approve", "reject"].includes(bulkAction || "") && (
+          {bulkFailures.length > 0 && (
               <div
                 className="space-y-2 text-ui-sm text-destructive"
                 role="alert"
@@ -8043,58 +7641,7 @@ export function AdminManagedContentPage() {
             >
               取消
             </Button>
-            {["submit", "approve", "reject"].includes(bulkAction || "") ? (
-              <>
-                {bulkPendingSubmitIds.length > 0 && (
-                  <Button
-                    variant="outline"
-                    disabled={Boolean(busyAction) || Boolean(bulkItemBusy)}
-                    onClick={() =>
-                      void executeBulkWorkbench("submit", bulkPendingSubmitIds)
-                    }
-                  >
-                    <Send className="size-4" />
-                    {busyAction === "bulk"
-                      ? "提交中…"
-                      : `一键提交（${bulkPendingSubmitIds.length}）`}
-                  </Button>
-                )}
-                {false && bulkPendingReviewIds.length > 0 && (
-                  <>
-                    <Button
-                      variant="outline"
-                      disabled={
-                        Boolean(busyAction) ||
-                        Boolean(bulkItemBusy) ||
-                        !bulkNote.trim()
-                      }
-                      onClick={() =>
-                        void executeBulkWorkbench(
-                          "reject",
-                          bulkPendingReviewIds,
-                        )
-                      }
-                    >
-                      <X className="size-4" />
-                      一键退回（{bulkPendingReviewIds.length}）
-                    </Button>
-                    <Button
-                      disabled={Boolean(busyAction) || Boolean(bulkItemBusy)}
-                      onClick={() =>
-                        void executeBulkWorkbench(
-                          "approve",
-                          bulkPendingReviewIds,
-                        )
-                      }
-                    >
-                      <Check className="size-4" />
-                      一键通过（{bulkPendingReviewIds.length}）
-                    </Button>
-                  </>
-                )}
-              </>
-            ) : (
-              <Button
+            <Button
                 onClick={() => void executeBulk()}
                 disabled={
                   busyAction === "bulk" ||
@@ -8111,8 +7658,7 @@ export function AdminManagedContentPage() {
                     : bulkAction === "publish"
                       ? `确认发布（${publishableSelectedItems.length}）`
                       : "确认执行"}
-              </Button>
-            )}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -8340,7 +7886,7 @@ export function AdminManagedContentPage() {
                       </Button>
                     )}
                   {can("item.publish") &&
-                    ["draft", "approved", "publication_failed"].includes(
+                    ["pending_publication", "publication_failed"].includes(
                       detail.lifecycle_status,
                     ) && (
                       <Button
@@ -8516,209 +8062,6 @@ export function AdminManagedContentPage() {
         onClose={() => setFolderDeleteTarget(null)}
         onDeleted={categoryDeleted}
       />
-
-      <Dialog
-        open={
-          Boolean(reviewTarget) &&
-          !previewState.parentId &&
-          !previewState.versionId
-        }
-        onOpenChange={(open) => {
-          if (
-            !open &&
-            !previewState.parentId &&
-            !previewState.versionId &&
-            busyAction !== "review"
-          ) {
-            setReviewTarget(null);
-            setReviewError(null);
-          }
-        }}
-      >
-        <DialogContent className="max-h-[calc(100vh-2rem)] max-w-2xl overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>审核资料</DialogTitle>
-            <DialogDescription>
-              确认资料信息并记录本次审核结果。
-            </DialogDescription>
-          </DialogHeader>
-          {reviewTarget && (
-            <div className="space-y-4">
-              <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2 text-ui-sm [&_dt]:whitespace-nowrap">
-                <dt className="text-muted-foreground">资料</dt>
-                <dd className="break-words font-medium">
-                  {reviewTarget.title}
-                </dd>
-                <dt className="text-muted-foreground">目录</dt>
-                <dd className="break-words">
-                  {reviewTarget.category_path || reviewTarget.category_label}
-                </dd>
-                <dt className="text-muted-foreground">文件</dt>
-                <dd className="break-all">{reviewTarget.original_filename}</dd>
-                <dt className="text-muted-foreground">版本</dt>
-                <dd>v{reviewTarget.version_number}</dd>
-                <dt className="text-muted-foreground">来源</dt>
-                <dd>{sourceLabel[reviewTarget.source_origin] || "其他来源"}</dd>
-              </dl>
-              <div>
-                {reviewTarget.doc_type === "xmind" ? (
-                  <Button
-                    variant="outline"
-                    onClick={() =>
-                      openXMind(
-                        reviewTarget.version_id,
-                        reviewTarget.title,
-                        "managed-content-review",
-                      )
-                    }
-                  >
-                    <Eye className="size-4" />
-                    预览文件
-                  </Button>
-                ) : reviewTarget.preview_parent_id &&
-                  ["pdf", "docx", "xlsx", "pptx"].includes(
-                    reviewTarget.doc_type,
-                  ) ? (
-                  <Button
-                    variant="outline"
-                    onClick={() =>
-                      openDocumentPreview(
-                        reviewTarget.preview_parent_id!,
-                        reviewTarget.title,
-                        reviewTarget.doc_type,
-                        1,
-                        {},
-                        "managed-content-review",
-                      )
-                    }
-                  >
-                    <Eye className="size-4" />
-                    预览文件
-                  </Button>
-                ) : reviewTarget.doc_type === "pdf" || can("item.download") ? (
-                  <a
-                    className={buttonVariants({ variant: "outline" })}
-                    href={adminContentApi.fileUrl(reviewTarget.version_id)}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <Eye className="size-4" />
-                    打开文件
-                  </a>
-                ) : (
-                  <Button
-                    variant="outline"
-                    disabled
-                    title="打开文件（需要下载权限）"
-                  >
-                    <Eye className="size-4" />
-                    打开文件
-                  </Button>
-                )}
-              </div>
-              <label className="block space-y-1.5 text-ui-sm font-medium">
-                <span>
-                  {reviewDecision === "approve"
-                    ? "审核备注（可选）"
-                    : "退回原因"}
-                </span>
-                <textarea
-                  aria-label={
-                    reviewDecision === "approve"
-                      ? "审核备注（可选）"
-                      : "退回原因"
-                  }
-                  value={reviewNote}
-                  onChange={(event) => {
-                    setReviewNote(event.target.value);
-                    setReviewError(null);
-                  }}
-                  maxLength={2000}
-                  className="min-h-28 w-full resize-y rounded-ui-md border border-input bg-background px-3 py-2 text-ui-sm"
-                  placeholder={
-                    reviewDecision === "approve"
-                      ? "可记录审核依据"
-                      : "请说明需要修改的内容"
-                  }
-                  autoFocus
-                />
-                <span className="block text-right text-ui-xs font-normal text-muted-foreground">
-                  {reviewNote.length}/2000
-                </span>
-              </label>
-              {reviewError && (
-                <p
-                  className="rounded-ui-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive"
-                  role="alert"
-                >
-                  {reviewError}
-                </p>
-              )}
-            </div>
-          )}
-          <DialogFooter
-            role="group"
-            aria-label="审核操作"
-            className="flex-col items-stretch sm:flex-row sm:items-center"
-          >
-            <Button
-              className="w-full sm:w-auto"
-              variant="outline"
-              disabled={busyAction === "review"}
-              onClick={() => setReviewTarget(null)}
-            >
-              取消
-            </Button>
-            <Button
-              className="w-full sm:w-auto"
-              type="button"
-              variant="outline"
-              disabled={busyAction === "review"}
-              onClick={() => {
-                setReviewDecision(
-                  reviewDecision === "approve" ? "reject" : "approve",
-                );
-                setReviewError(null);
-              }}
-            >
-              {reviewDecision === "approve" ? (
-                <>
-                  <X className="size-4" />
-                  退回修改
-                </>
-              ) : (
-                <>
-                  <Check className="size-4" />
-                  改为确认通过
-                </>
-              )}
-            </Button>
-            <Button
-              className="w-full sm:w-auto"
-              variant={reviewDecision === "reject" ? "destructive" : "default"}
-              disabled={
-                busyAction === "review" ||
-                (reviewDecision === "reject" && !reviewNote.trim())
-              }
-              onClick={() => void submitReview()}
-            >
-              {busyAction === "review" ? (
-                "提交中…"
-              ) : reviewDecision === "approve" ? (
-                <>
-                  <Check className="size-4" />
-                  确认通过
-                </>
-              ) : (
-                <>
-                  <X className="size-4" />
-                  确认退回
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog
         open={Boolean(publishTarget)}
@@ -9107,7 +8450,7 @@ export function AdminManagedContentPage() {
           <DialogHeader>
             <DialogTitle>重命名资料</DialogTitle>
             <DialogDescription>
-              标题和源文件名会作为新草稿版本保存，之后需要重新确认并发布。
+              标题和源文件名会作为新待发布版本保存，之后可直接发布。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -9144,7 +8487,7 @@ export function AdminManagedContentPage() {
                   {renameConflict.title}（{renameConflict.original_filename}）
                 </p>
                 <p className="text-muted-foreground">
-                  替换会将上述资料移入回收站并立即停止检索；当前资料的新版本仍需重新确认和发布。
+                  替换会将上述资料移入回收站并立即停止检索；当前资料的新版本仍需发布。
                 </p>
               </div>
             )}
@@ -9201,7 +8544,7 @@ export function AdminManagedContentPage() {
           <DialogHeader>
             <DialogTitle>更新资料文件</DialogTitle>
             <DialogDescription>
-              上传替换文件后会创建新草稿版本，旧发布版本会继续检索，直到新版本发布成功。
+              上传替换文件后会创建新待发布版本，旧发布版本会继续检索，直到新版本发布成功。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">

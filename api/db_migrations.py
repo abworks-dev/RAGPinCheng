@@ -1311,6 +1311,7 @@ MIGRATIONS = (
             "CREATE INDEX IF NOT EXISTS idx_category_nodes_kind ON category_nodes(category_kind)",
         ),
     ),
+    Migration(36, "document_pending_publication_status", ("REPLACE_DOCUMENT_REVIEW_STATUSES",)),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -1480,6 +1481,47 @@ def split_sql_statements(script: str) -> tuple[str, ...]:
 
 
 def execute_migration_statement(conn: sqlite3.Connection, statement: str) -> None:
+    if statement == "REPLACE_DOCUMENT_REVIEW_STATUSES":
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='content_versions'"
+        ).fetchone()
+        if row is None or not row[0]:
+            raise RuntimeError("migration_schema_mismatch")
+        old = "'draft','awaiting_review','approved','rejected','publishing','published',\n            'publication_failed','superseded'"
+        transitional = "'draft','awaiting_review','approved','rejected','pending_publication','publishing','published',\n            'publication_failed','superseded'"
+        final = "'pending_publication','publishing','published',\n            'publication_failed','superseded'"
+        sql = str(row[0])
+        if final in sql and not any(value in sql for value in ("'draft'", "'awaiting_review'", "'approved'", "'rejected'")):
+            return
+        if old not in sql:
+            raise RuntimeError("migration_schema_mismatch")
+        conn.execute("PRAGMA writable_schema=ON")
+        try:
+            conn.execute(
+                "UPDATE sqlite_master SET sql=? WHERE type='table' AND name='content_versions'",
+                (sql.replace(old, transitional),),
+            )
+        finally:
+            conn.execute("PRAGMA writable_schema=RESET")
+        schema_version = int(conn.execute("PRAGMA schema_version").fetchone()[0])
+        conn.execute(f"PRAGMA schema_version={schema_version + 1}")
+        conn.execute(
+            """UPDATE content_versions SET lifecycle_status='pending_publication'
+               WHERE lifecycle_status IN ('draft','awaiting_review','approved','rejected')"""
+        )
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='content_versions'"
+        ).fetchone()
+        conn.execute("PRAGMA writable_schema=ON")
+        try:
+            conn.execute(
+                "UPDATE sqlite_master SET sql=? WHERE type='table' AND name='content_versions'",
+                (str(row[0]).replace(transitional, final),),
+            )
+        finally:
+            conn.execute("PRAGMA writable_schema=RESET")
+        conn.execute(f"PRAGMA schema_version={schema_version + 2}")
+        return
     if statement == "RELAX_CATEGORY_NODE_LEVEL_CHECK":
         row = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='category_nodes'"

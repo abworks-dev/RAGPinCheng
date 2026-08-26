@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminUsersPage } from "./AdminUsersPage";
 
@@ -41,9 +41,9 @@ const permissionDefinitions = [
   { key: "item.view", domain: "access", domain_label: "入口与查看", label: "查看资料", description: "查看资料列表、详情和预览。", dependencies: ["workspace.view"] },
   { key: "item.download", domain: "access", domain_label: "入口与查看", label: "下载资料", description: "下载单份资料或批量打包下载。", dependencies: ["workspace.view", "item.view"] },
   { key: "category.view", domain: "access", domain_label: "入口与查看", label: "查看分类", description: "查看资料分类树。", dependencies: ["workspace.view"] },
-  { key: "item.upload", domain: "organize", domain_label: "资料整理", label: "上传资料", description: "上传文件并创建资料草稿。", dependencies: ["workspace.view", "item.view", "category.view"] },
-  { key: "item.move_draft", domain: "organize", domain_label: "资料整理", label: "移动草稿", description: "移动草稿。", dependencies: ["workspace.view", "item.view", "category.view"] },
-  { key: "item.archive_draft", domain: "organize", domain_label: "资料整理", label: "归档草稿", description: "归档草稿。", dependencies: ["workspace.view", "item.view"] },
+  { key: "item.upload", domain: "organize", domain_label: "资料整理", label: "上传资料", description: "上传文件并创建待发布资料。", dependencies: ["workspace.view", "item.view", "category.view"] },
+  { key: "item.move_draft", domain: "organize", domain_label: "资料整理", label: "移动待发布资料", description: "移动待发布资料。", dependencies: ["workspace.view", "item.view", "category.view"] },
+  { key: "item.archive_draft", domain: "organize", domain_label: "资料整理", label: "删除待发布资料", description: "将待发布资料移入回收站。", dependencies: ["workspace.view", "item.view"] },
   { key: "item.publish", domain: "publish", domain_label: "发布流程", label: "发布资料", description: "发布或重新发布资料。", dependencies: ["workspace.view", "item.view"] },
   { key: "trash.view", domain: "trash", domain_label: "回收站", label: "查看回收站", description: "查看回收站。", dependencies: ["workspace.view", "item.view"] },
   { key: "trash.restore", domain: "trash", domain_label: "回收站", label: "恢复资料", description: "恢复资料。", dependencies: ["workspace.view", "item.view", "trash.view"] },
@@ -205,7 +205,7 @@ describe("AdminUsersPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "权限组管理" }));
     fireEvent.click(screen.getByRole("button", { name: "新建权限组" }));
     fireEvent.change(screen.getByLabelText("权限组名称"), { target: { value: "项目发布员" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: /发布资料/ }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "权限组管理" })).getByRole("checkbox", { name: "发布资料" }));
     fireEvent.click(screen.getByRole("button", { name: "创建模板" }));
     await waitFor(() => expect(mocks.createGroup).toHaveBeenCalledWith({ display_name: "项目发布员", permissions: ["workspace.view", "item.view", "item.publish"] }));
   });

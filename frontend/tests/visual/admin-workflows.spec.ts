@@ -96,9 +96,9 @@ test.describe("资料管理", () => {
     await expectInViewport(page.getByRole("menu", { name: "批量操作" }));
     await expect(page.getByRole("menuitem", { name: "批量移动" })).toBeFocused();
     await page.getByRole("menuitem", { name: "批量移动" }).press("ArrowDown");
-    await expect(page.getByRole("menuitem", { name: "批量提交审核" })).toBeFocused();
-    await page.getByRole("menuitem", { name: "批量提交审核" }).press("ArrowDown");
-    await expect(page.getByRole("menuitem", { name: "批量确认" })).toBeFocused();
+    await expect(page.getByRole("menuitem", { name: "批量发布" })).toBeFocused();
+    await page.getByRole("menuitem", { name: "批量发布" }).press("ArrowDown");
+    await expect(page.getByRole("menuitem", { name: "批量下载" })).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(batchButton).toBeFocused();
   });
@@ -201,28 +201,6 @@ test.describe("资料管理", () => {
     await expect(page.getByRole("navigation", { name: "资料路径" })).toContainText("01 建模标准（长名称用于响应式检查）");
   });
 
-  test.skip("recursive folder review shows the complete impact workbench", async ({ page }, testInfo) => {
-    await openTab(page, "资料管理", "normal", "admin", { includeChildFolder: true });
-    await openRootFolder(page);
-    const folderCheckbox = page.getByRole("checkbox", { name: /选择文件夹01 建模标准/ }).filter({ visible: true });
-    await folderCheckbox.check();
-    await page.getByRole("button", { name: "批量操作" }).click();
-    await page.getByRole("menuitem", { name: "批量确认" }).click();
-
-    const dialog = page.getByRole("dialog", { name: "批量确认" });
-    await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText("03 公司内部标准 / 01 建模标准（长名称用于响应式检查）");
-    await expect(dialog.getByText("不受影响 1 份")).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "通过" })).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "退回" })).toBeDisabled();
-    await expect(dialog.getByText("仅待确认资料可审核")).toBeVisible();
-    await page.screenshot({
-      path: testInfo.outputPath(`managed-content-recursive-review-${page.viewportSize()!.width}x${page.viewportSize()!.height}.png`),
-      fullPage: true,
-    });
-    await expectNoBodyOverflow(page);
-  });
-
   test("single-file actions expose independent move, download, rename, and update flows", async ({ page }, testInfo) => {
     await openTab(page, "资料管理");
     await openRootFolder(page);
@@ -249,7 +227,7 @@ test.describe("资料管理", () => {
     const renameDialog = page.getByRole("dialog", { name: "重命名资料" });
     await expect(renameDialog.getByRole("textbox", { name: "资料标题" })).toHaveValue(longTitle);
     await expect(renameDialog.getByRole("textbox", { name: /^源文件名/ })).toHaveValue(`${longTitle}.pdf`);
-    await expect(renameDialog).toContainText("需要重新确认并发布");
+    await expect(renameDialog).toContainText("新待发布版本保存，之后可直接发布");
     await renameDialog.getByRole("button", { name: "取消" }).click();
 
     await item.getByRole("button", { name: `更新“${longTitle}”`, exact: true }).click();
@@ -609,61 +587,6 @@ test.describe("资料管理", () => {
     await expect(confirmation).toContainText("完成后资料才会进入知识库检索");
     await confirmation.getByRole("button", { name: "确认重新发布" }).click();
     await expect(confirmation.getByRole("button", { name: "发布中…" })).toBeDisabled();
-    await expectNoBodyOverflow(page);
-  });
-
-  test.skip("review workflow requires a rejection reason and preserves its busy layout", async ({ page }) => {
-    await openTab(page, "资料管理");
-    await openRootFolder(page);
-    const title = page.getByText("机电专业协同检查清单", { exact: true }).filter({ visible: true });
-    const item = page.viewportSize()!.width < 1024 ? title.locator("xpath=ancestor::li") : title.locator("xpath=ancestor::tr");
-    const workflow = item.getByRole("button", { name: "审核", exact: true });
-    const previewButton = item.getByRole("button", { name: "预览“机电专业协同检查清单”" });
-    const detailButton = item.getByRole("button", { name: "查看“机电专业协同检查清单”的详细信息" });
-    const trailingAction = item.getByRole("button", { name: "删除“机电专业协同检查清单”" });
-    await expect(workflow).toBeVisible();
-    if (page.viewportSize()!.width >= 1024) {
-      const workflowBox = await workflow.boundingBox();
-      const firstActionBox = await previewButton.boundingBox();
-      const actionCellBox = await item.locator("td").last().boundingBox();
-      const trailingActionBox = await trailingAction.boundingBox();
-      expect(workflowBox).not.toBeNull();
-      expect(firstActionBox).not.toBeNull();
-      expect(actionCellBox).not.toBeNull();
-      expect(trailingActionBox).not.toBeNull();
-      const actionGap = firstActionBox!.x - (workflowBox!.x + workflowBox!.width);
-      expect(actionGap).toBeGreaterThanOrEqual(4);
-      expect(actionGap).toBeLessThanOrEqual(12);
-      const rightGap = actionCellBox!.x + actionCellBox!.width - (trailingActionBox!.x + trailingActionBox!.width);
-      expect(rightGap).toBeGreaterThanOrEqual(8);
-      expect(rightGap).toBeLessThanOrEqual(16);
-    } else if (page.viewportSize()!.width === 390) {
-      const workflowBox = await workflow.boundingBox();
-      const detailBox = await detailButton.boundingBox();
-      expect(workflowBox).not.toBeNull();
-      expect(detailBox).not.toBeNull();
-      expect(workflowBox!.y + workflowBox!.height).toBeLessThanOrEqual(detailBox!.y);
-      await expectTouchTarget(workflow);
-    }
-    await workflow.click();
-
-    const dialog = page.getByRole("dialog", { name: "审核资料" });
-    await expect(dialog).toContainText("04 项目资料 / 02 竣工交付 / 01 模型成果");
-    await expect(dialog).toContainText("v2");
-    await expect(dialog.getByRole("button", { name: "预览文件" })).toBeVisible();
-    await dialog.getByRole("button", { name: "预览文件" }).click();
-    await expect(page.getByRole("button", { name: "返回资料审核" })).toBeVisible();
-    await page.getByRole("button", { name: "返回资料审核" }).click();
-    await expect(dialog).toBeVisible();
-
-    await dialog.getByRole("button", { name: "退回修改" }).click();
-    const confirm = dialog.getByRole("button", { name: "确认退回" });
-    await expect(confirm).toBeDisabled();
-    const reason = dialog.getByRole("textbox", { name: "退回原因" });
-    await reason.fill("请补充机电碰撞检查范围");
-    await confirm.click();
-    await expect(dialog.getByRole("button", { name: "提交中…" })).toBeDisabled();
-    await expect(reason).toHaveValue("请补充机电碰撞检查范围");
     await expectNoBodyOverflow(page);
   });
 

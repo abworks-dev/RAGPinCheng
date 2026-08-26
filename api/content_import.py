@@ -12,7 +12,6 @@ from .content_storage import ContentStorage
 from .content_store import (
     create_batch,
     register_uploaded_document,
-    submit_version_for_review,
 )
 
 
@@ -154,7 +153,6 @@ def import_server_batch(
                 source_origin="server",
                 source_rel_path=rel_text,
             )
-            submit_version_for_review(conn, uploaded.version_id, actor_user_id=actor_user_id)
             entries.append(
                 ImportEntry(
                     rel_text,

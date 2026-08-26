@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Download, FileText, Folder, FolderInput, Rocket, Send, Trash2, X } from "lucide-react";
+import { Download, FileText, Folder, FolderInput, Rocket, Trash2 } from "lucide-react";
 import { adminContentApi } from "../../api/admin/content";
 import type { BulkOperation, BulkOperationAction, ManagedCategory, ManagedContentItem } from "../../types";
 import { Badge } from "../ui/badge";
@@ -12,9 +12,6 @@ import { CategoryDestinationPicker } from "./CategoryDestinationPicker";
 
 const actionLabels: Record<BulkOperationAction, string> = {
   move: "批量调整目录",
-  submit: "批量提交审核",
-  approve: "批量确认",
-  reject: "批量退回",
   publish: "批量发布",
   download: "批量打包下载",
   delete: "批量删除文件夹",
@@ -22,7 +19,7 @@ const actionLabels: Record<BulkOperationAction, string> = {
 };
 
 const statusLabels: Record<string, string> = {
-  draft: "待提交", awaiting_review: "待确认", approved: "已确认", rejected: "已退回",
+  pending_publication: "待发布",
   publishing: "发布中", published: "已发布", publication_failed: "发布失败", superseded: "历史版本",
 };
 
@@ -55,10 +52,8 @@ export function ManagedContentBulkOperationDialog({
   const [run, setRun] = useState<BulkOperation | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [itemBusy, setItemBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [targetCategoryId, setTargetCategoryId] = useState("");
-  const [note, setNote] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const completedRunRef = useRef<string | null>(null);
 
@@ -68,7 +63,6 @@ export function ManagedContentBulkOperationDialog({
       setRun(null);
       setError(null);
       setTargetCategoryId("");
-      setNote("");
       setConfirmation("");
       completedRunRef.current = null;
       return;
@@ -154,19 +148,6 @@ export function ManagedContentBulkOperationDialog({
     finally { setBusy(false); }
   };
 
-  const reviewOne = async (itemId: string, approved: boolean) => {
-    if (!run || (!approved && !note.trim())) return;
-    setItemBusy(itemId);
-    setError(null);
-    try {
-      const result = await adminContentApi.reviewBulkItem(run.id, itemId, approved, note);
-      setRun(result);
-      if (["succeeded", "partial"].includes(result.status)) await onCompleted();
-    }
-    catch (reviewError) { setError(reviewError instanceof Error ? reviewError.message : "单项审核失败"); }
-    finally { setItemBusy(null); }
-  };
-
   const execute = async () => {
     if (!run || !action) return;
     setBusy(true);
@@ -174,7 +155,6 @@ export function ManagedContentBulkOperationDialog({
     try {
       const result = await adminContentApi.executeBulkOperation(run.id, {
         target_category_id: action === "move" ? targetCategoryId : undefined,
-        note: note.trim() || undefined,
         confirmation: action === "force_delete" ? confirmation : undefined,
       });
       setRun(result);
@@ -199,15 +179,8 @@ export function ManagedContentBulkOperationDialog({
   const canExecute = Boolean(run && run.status === "awaiting_confirmation"
     && (action === "delete" || action === "force_delete" ? eligibleRootCount > 0 : action === "download" ? selectedEligible.length > 0 || rootCount > 0 : selectedEligible.length > 0)
     && (action !== "move" || targetCategoryId)
-    && (action !== "reject" || note.trim())
     && (action !== "force_delete" || confirmation === run.confirmation_phrase)
     && !archiveTooLarge);
-
-  const reviewActions = (item: BulkOperation["items"][number]) => (
-    (action === "approve" || action === "reject") && item.eligible && item.result_status === "pending"
-      ? <><Button size="sm" variant="outline" disabled={Boolean(itemBusy) || busy} onClick={() => void reviewOne(item.item_id, true)}><Check className="size-4" />通过</Button><Button size="sm" variant="outline" disabled={Boolean(itemBusy) || busy || !note.trim()} onClick={() => void reviewOne(item.item_id, false)}><X className="size-4" />退回</Button></>
-      : null
-  );
 
   return <Dialog open={Boolean(action)} onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
     <DialogContent className="flex max-h-[calc(100vh-2rem)] max-w-4xl flex-col overflow-hidden">
@@ -231,10 +204,6 @@ export function ManagedContentBulkOperationDialog({
             onCreateFolder={onCreateFolder}
             disabledCategoryReasons={disabledMoveDestinations}
           />}
-          {(action === "reject" || action === "approve") && <label className="block space-y-1.5 text-ui-sm font-medium">
-            <span>退回原因{action === "reject" ? "（必填）" : "（用于单项退回）"}</span>
-            <textarea className="min-h-24 w-full resize-y rounded-ui-md border border-input bg-background px-3 py-2 text-ui-sm" value={note} maxLength={2000} onChange={(event) => setNote(event.target.value)} />
-          </label>}
           {action === "force_delete" && <div className="space-y-2 rounded-ui-md border border-destructive/40 bg-destructive/5 p-3">
             <p className="text-ui-sm font-medium text-destructive">此操作不可恢复</p>
             <p className="text-ui-xs text-muted-foreground">请输入：{run.confirmation_phrase}</p>
@@ -266,7 +235,6 @@ export function ManagedContentBulkOperationDialog({
                 <div className="min-w-0"><p className="break-words text-ui-sm font-medium">{item.title}</p><p className="break-all text-ui-xs text-muted-foreground">{item.original_filename} · {statusLabels[item.lifecycle_status] || item.lifecycle_status}</p>{(item.reason || item.result_message) && <p className={`mt-1 text-ui-xs ${item.eligible ? "text-destructive" : "text-muted-foreground"}`}>{item.result_message || item.reason}</p>}</div>
                 <div className="flex flex-wrap items-center justify-end gap-2">
                   {item.result_status === "succeeded" ? <Badge variant="success">已处理</Badge> : item.eligible ? <Badge variant="outline">可处理</Badge> : <Badge variant="secondary">不处理</Badge>}
-                  {reviewActions(item)}
                 </div>
               </div>)}
             </div>)}
@@ -278,7 +246,7 @@ export function ManagedContentBulkOperationDialog({
               {directItemsOutsideSelectedFolders.map((item) => <div key={item.item_id} className="grid gap-2 border-t border-border/70 px-3 py-2.5 pl-8 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center">
                 <Checkbox aria-label={`选择${item.title}`} checked={item.selected} disabled={!item.eligible || busy || item.result_status !== "pending"} onChange={() => void updateSelection([item.item_id], !item.selected)} />
                 <div className="min-w-0"><p className="break-words text-ui-sm font-medium">{item.title}</p><p className="break-all text-ui-xs text-muted-foreground">{item.category_path} / {item.original_filename} · {statusLabels[item.lifecycle_status] || item.lifecycle_status}</p>{(item.reason || item.result_message) && <p className={`mt-1 text-ui-xs ${item.eligible ? "text-destructive" : "text-muted-foreground"}`}>{item.result_message || item.reason}</p>}</div>
-                <div className="flex flex-wrap items-center justify-end gap-2">{item.result_status === "succeeded" ? <Badge variant="success">已处理</Badge> : item.eligible ? <Badge variant="outline">可处理</Badge> : <Badge variant="secondary">不处理</Badge>}{reviewActions(item)}</div>
+                <div className="flex flex-wrap items-center justify-end gap-2">{item.result_status === "succeeded" ? <Badge variant="success">已处理</Badge> : item.eligible ? <Badge variant="outline">可处理</Badge> : <Badge variant="secondary">不处理</Badge>}</div>
               </div>)}
             </div>}
           </div>
@@ -289,7 +257,7 @@ export function ManagedContentBulkOperationDialog({
         <Button variant="outline" disabled={busy} onClick={onClose}>关闭</Button>
         {run && (["queued", "packaging"].includes(run.status) || (run.status === "running" && action === "force_delete")) && <Button variant="outline" disabled={busy} onClick={() => void adminContentApi.cancelBulkOperation(run.id).then(setRun)}>取消任务</Button>}
         {run?.status === "awaiting_confirmation" && <Button variant={action === "force_delete" ? "destructive" : "default"} disabled={!canExecute || busy} onClick={() => void execute()}>
-          {action === "move" ? <FolderInput className="size-4" /> : action === "submit" ? <Send className="size-4" /> : action === "publish" ? <Rocket className="size-4" /> : action === "download" ? <Download className="size-4" /> : action === "delete" || action === "force_delete" ? <Trash2 className="size-4" /> : <Check className="size-4" />}
+          {action === "move" ? <FolderInput className="size-4" /> : action === "publish" ? <Rocket className="size-4" /> : action === "download" ? <Download className="size-4" /> : <Trash2 className="size-4" />}
           {busy ? "处理中…" : action === "download" ? `开始打包（${rootCount} 个目录，${selectedEligible.length} 份资料）` : `确认执行（${action === "delete" || action === "force_delete" ? eligibleRootCount : selectedEligible.length}）`}
         </Button>}
       </DialogFooter>
