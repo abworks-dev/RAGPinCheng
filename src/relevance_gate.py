@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import re
 
 from .config import (
     RELEVANCE_GATE_ENABLED,
@@ -31,6 +32,8 @@ class RelevanceDecision:
     top2_score: float | None
     score_margin: float | None
     top1_rrf: float | None
+    classification: str = "no_match"
+    exact_match: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -39,6 +42,7 @@ class RelevanceDecision:
 def evaluate_relevance(
     sources: list[RetrievedParent],
     *,
+    query: str = "",
     has_history: bool,
     decomposition_applied: bool,
     policy: AnswerPolicy | None = None,
@@ -78,6 +82,16 @@ def evaluate_relevance(
     elif enabled and eligible:
         reason = "thresholds_passed"
 
+    exact_match = _has_exact_match(query, ranked)
+    if not ranked:
+        classification = "no_match"
+    elif action == "low_confidence":
+        classification = "low_confidence"
+    elif exact_match:
+        classification = "exact_match"
+    else:
+        classification = "normal"
+
     return RelevanceDecision(
         action=action,
         reason=reason,
@@ -91,4 +105,33 @@ def evaluate_relevance(
         top2_score=top2,
         score_margin=margin,
         top1_rrf=top1_rrf,
+        classification=classification,
+        exact_match=exact_match,
     )
+
+
+_STANDARD_CODE_RE = re.compile(
+    r"(?<![A-Za-z])(?:T[/／](?:CECS|CCES|CSCS|CCS)|"
+    r"(?:GB|JGJ|JG|CJJ|YB|TB|JC|CECS|DBJ|DB)(?:[/／]T)?|ISO)"
+    r"\s*[-—/／\s]?\s*\d{2,5}(?:[-．\.]\d+)*",
+    re.IGNORECASE,
+)
+
+
+def _has_exact_match(query: str, sources: list[RetrievedParent]) -> bool:
+    """Detect high-signal lexical hits without changing retrieval ranking."""
+    if not query or not sources:
+        return False
+    query_codes = {
+        re.sub(r"\s+", "", match.group(0)).replace("／", "/").lower()
+        for match in _STANDARD_CODE_RE.finditer(query)
+    }
+    if not query_codes:
+        return False
+    for parent in sources:
+        haystack = re.sub(r"\s+", "", " ".join(
+            (parent.doc_title, parent.section_path, parent.text)
+        )).replace("／", "/").lower()
+        if any(code in haystack for code in query_codes):
+            return True
+    return False

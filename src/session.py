@@ -228,6 +228,25 @@ def _aggregate_usage(rewrite: dict, generate: dict) -> tuple[dict, dict]:
     return total, by_call
 
 
+def _retrieval_diagnostics(
+    relevance: dict,
+    fresh_sources: list[RetrievedParent],
+    final_sources: list[RetrievedParent],
+    *,
+    model_context_count: int = 0,
+    cited_count: int = 0,
+) -> dict:
+    diagnostics = dict(relevance)
+    diagnostics.update({
+        "fresh_count": len(fresh_sources),
+        "merged_count": len(final_sources),
+        "reranked_count": len(final_sources),
+        "model_context_count": model_context_count,
+        "cited_count": cited_count,
+    })
+    return diagnostics
+
+
 def retrieve_for_turn(
     fresh: list[RetrievedParent],
     last_sources: list[RetrievedParent] | None,
@@ -491,7 +510,10 @@ class ChatSession:
             categories=categories,
         )
         timings["retrieve"] = perf_counter() - t
-        relevance = evaluate_relevance(final_sources, has_history=has_history, decomposition_applied=any(p.subquery_idx is not None for p in final_sources), policy=policy).to_dict()
+        relevance = _retrieval_diagnostics(
+            evaluate_relevance(final_sources, query=search_query, has_history=has_history, decomposition_applied=any(p.subquery_idx is not None for p in final_sources), policy=policy).to_dict(),
+            fresh_sources, final_sources,
+        )
 
         # No-source escape hatch.
         if not final_sources:
@@ -553,6 +575,10 @@ class ChatSession:
             history=history_msgs,
             budget=budget,
             policy=policy,
+        )
+        relevance = _retrieval_diagnostics(
+            relevance, fresh_sources, final_sources,
+            model_context_count=len(final_sources), cited_count=len(answer.sources),
         )
         timings["generate"] = perf_counter() - t
         timings["total"] = sum(timings.values())
@@ -689,7 +715,10 @@ class ChatSession:
             categories=categories,
         )
         timings["retrieve"] = perf_counter() - t
-        relevance = evaluate_relevance(final_sources, has_history=has_history, decomposition_applied=any(p.subquery_idx is not None for p in final_sources), policy=policy).to_dict()
+        relevance = _retrieval_diagnostics(
+            evaluate_relevance(final_sources, query=search_query, has_history=has_history, decomposition_applied=any(p.subquery_idx is not None for p in final_sources), policy=policy).to_dict(),
+            fresh_sources, final_sources,
+        )
 
         # No-source path: stream the fallback message and finalize.
         if not final_sources:
@@ -759,6 +788,10 @@ class ChatSession:
             history=history_msgs,
             budget=budget,
             policy=policy,
+        )
+        relevance = _retrieval_diagnostics(
+            relevance, fresh_sources, final_sources,
+            model_context_count=len(gen_prep.used_sources),
         )
 
         prep = StreamingTurnPrep(

@@ -1,6 +1,6 @@
 # 知识库问答增强实施方案
 
-- 状态：阶段 1 代码完成待验证
+- 状态：阶段 2 代码完成，待固定黄金集和用户验收
 - 风险等级：R2
 - 范围：问答上下文、检索策略、回答引用、知识治理、评测和 BIM/CAD 专项能力
 - 参考：MaxKB `v2` 的流程化问答、问题优化、数据集检索、Reranker、直接回复、反馈和应用配置思路
@@ -86,6 +86,18 @@ HTTP conversation_id
 ### 阶段 2：检索策略和置信度增强
 
 目标：减少无关资料进入生成模型，并让不同类型问题使用合适的检索策略。
+
+当前进度（2026-08-26）：
+
+- 已在 `RelevanceDecision` 中增加 `exact_match`、`classification`，分类为 `exact_match`、`normal`、`low_confidence`、`no_match`；
+- 规范编号命中使用查询与来源标题、章节和正文的词法交集判定，不改变 Dense/Sparse/RRF/Reranker 或索引契约；
+- 已在 `relevance` 诊断中记录 `fresh_count`、`merged_count`、`reranked_count`、`model_context_count` 和 `cited_count`；
+- 同步和流式问答均携带该诊断，SSE `prep`/`done`、前端类型和 DebugPanel 已同步；
+- 空来源、规范编号精确命中、普通命中、低置信度和历史/分解路径测试已补充，阶段 1 相关测试回归通过；
+- 尚未完成固定黄金集 Recall@1、Recall@5、MRR 和 no-answer 对比，原因是当前 linked worktree 未配置可运行的本地索引/模型环境；
+- 前端构建尚未完成，原因是 linked worktree 未安装 `frontend/node_modules`，未为本阶段改变依赖。
+
+本阶段不做：不修改 Chunk、Embedding、Qdrant Payload/Collection、数据库 Schema、认证、部署配置和生产数据；不实现独立的直接回答路径，规范编号精确命中仅作为可观测分类。
 
 计划：
 

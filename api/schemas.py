@@ -1746,6 +1746,7 @@ class DoneEvent(BaseModel):
     history_chars: int
     budget: int
     finish_reason: str = "stop"
+    relevance: dict = Field(default_factory=dict)
     policy_version: str | None = None
     answer_max_output_tokens: int | None = None
     answer_context_chars: int | None = None

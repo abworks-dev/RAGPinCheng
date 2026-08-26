@@ -414,6 +414,7 @@ async def chat(
                         "history_chars": result.history_chars,
                         "budget": result.budget,
                         "finish_reason": "retrieval_low_confidence" if result.relevance.get("action") == "low_confidence" else "stop",
+                        "relevance": dict(result.relevance),
                         "policy_version": result.policy_snapshot.get("policy_version"),
                         "answer_max_output_tokens": result.policy_snapshot.get("answer_max_output_tokens"),
                         "answer_context_chars": result.policy_snapshot.get("answer_context_chars"),

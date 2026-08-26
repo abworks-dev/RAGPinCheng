@@ -58,6 +58,7 @@ export type DoneData = {
   history_chars: number;
   budget: number;
   finish_reason?: string;
+  relevance?: Record<string, unknown>;
   policy_version?: string;
   answer_max_output_tokens?: number;
   answer_context_chars?: number;
