@@ -54,6 +54,18 @@ def test_workflow_builds_shadow_then_cuts_over_with_rollback():
     assert trap < stop < final_gate < mutation
 
 
+def test_workflow_exposes_progress_and_verifies_exact_production_count():
+    text = workflow_text()
+    assert "REBUILD_PROGRESS phase=backup" in text
+    assert "REBUILD_PROGRESS phase=verify" in text
+    assert "REBUILD_PROGRESS phase=cutover" in text
+    assert "REBUILD_PROGRESS phase=post_verify" in text
+    assert "/collections/pincheng_docs/points/count" in text
+    assert 'json.dumps({"exact": True})' in text
+    assert 'result.get("count") != report["indexed"]["children"]' in text
+    assert "GITHUB_STEP_SUMMARY" in text
+
+
 def test_workflow_never_deletes_volumes_or_the_live_collection():
     text = workflow_text()
     assert "down -v" not in text
