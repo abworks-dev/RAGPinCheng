@@ -134,6 +134,67 @@ def test_table_summary_respects_final_embedding_limit(tmp_path, monkeypatch):
     validate_embedding_inputs([child])
 
 
+def test_table_summary_preserves_unique_ids_for_repeated_table_children(
+    tmp_path, monkeypatch
+):
+    def make_children():
+        return [
+            Child(
+                child_id=f"child-{index}",
+                parent_id="parent-1",
+                text="重复表格内容" * 200,
+                embed_text="资料 > 章节\n\n" + "重复表格内容" * 200,
+                doc_title="资料",
+                category="客户标准与要求",
+                section_path="章节",
+                source_path="content://item/version",
+                content_type="table",
+            )
+            for index in range(2)
+        ]
+
+    children = make_children()
+    monkeypatch.setattr(table_summary, "PARENTS_DB", tmp_path / "parents.sqlite")
+    monkeypatch.setattr(table_summary, "_call_llm", lambda *_args: "相同摘要")
+    monkeypatch.setattr(table_summary, "_client", lambda: object())
+
+    table_summary.summarize_table_children(children)
+    repeated = make_children()
+    table_summary.summarize_table_children(repeated)
+
+    assert len({child.child_id for child in children}) == 2
+    assert [child.child_id for child in repeated] == [
+        child.child_id for child in children
+    ]
+    validate_embedding_inputs(children)
+
+
+def test_table_summary_id_uses_text_beyond_legacy_prefix(tmp_path, monkeypatch):
+    def summarized_id(summary: str, database_name: str) -> str:
+        child = Child(
+            child_id="child-1",
+            parent_id="parent-1",
+            text="表格正文" * 200,
+            embed_text="资料 > 章节\n\n" + "表格正文" * 200,
+            doc_title="资料",
+            category="客户标准与要求",
+            section_path="章节",
+            source_path="content://item/version",
+            content_type="table",
+        )
+        monkeypatch.setattr(table_summary, "PARENTS_DB", tmp_path / database_name)
+        monkeypatch.setattr(table_summary, "_call_llm", lambda *_args: summary)
+        monkeypatch.setattr(table_summary, "_client", lambda: object())
+        table_summary.summarize_table_children([child])
+        return child.child_id
+
+    prefix = "相同摘要" * 40
+
+    assert summarized_id(prefix + "甲", "first.sqlite") != summarized_id(
+        prefix + "乙", "second.sqlite"
+    )
+
+
 def test_oversized_formula_fails_before_parent_store(tmp_path, monkeypatch):
     source = tmp_path / "formula.md"
     source.write_text("# 公式\n\n$$" + ("x" * 9000) + "$$", encoding="utf-8")

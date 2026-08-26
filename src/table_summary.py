@@ -228,7 +228,9 @@ def summarize_table_children(
             # remain in Qdrant only if the doc was indexed before this
             # feature shipped — the admin pipeline's _purge_existing()
             # handles that, build_index.py users need --reset.
-            child.child_id = _stable_id(child.parent_id, "table", new_text[:120])
+            child.child_id = _stable_id(
+                child.parent_id, "table-summary", child.child_id, new_text
+            )
     finally:
         conn.close()
 
