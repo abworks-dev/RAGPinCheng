@@ -73,6 +73,7 @@ const mocks = vi.hoisted(() => ({
   openPreview: vi.fn(),
   openXMind: vi.fn(),
   openVideo: vi.fn(),
+  externalEntries: vi.fn(),
   previewState: { parentId: null as string | null, versionId: null as string | null },
 }));
 
@@ -170,6 +171,7 @@ vi.mock("../../api/client", () => ({
     restoreManagedContent: mocks.restoreContent,
     managedContentAuditEvents: mocks.auditEvents,
     managedContentFileUrl: mocks.fileUrl,
+    listExternalMediaEntries: mocks.externalEntries,
   },
 }));
 
