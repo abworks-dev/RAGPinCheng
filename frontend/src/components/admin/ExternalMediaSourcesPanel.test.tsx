@@ -12,10 +12,10 @@ describe("ExternalMediaSourcesPanel", () => {
     const { ExternalFolderBrowser } = await import("./ExternalFolderBrowser");
     render(<ExternalFolderBrowser sourceId="source-1" title="共享目录远程目录" />);
     expect((await screen.findAllByText("第一章")).length).toBeGreaterThan(0);
-    expect(screen.getAllByText("远程子文件夹").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("共享").length).toBeGreaterThan(0);
     expect(screen.getByRole("columnheader", { name: "类型" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "资料" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "共享目录远程目录" })).not.toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText("远程只读")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText(/共享只读/).length).toBeGreaterThan(0));
   });
 });

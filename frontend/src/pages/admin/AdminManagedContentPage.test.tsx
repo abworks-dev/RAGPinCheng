@@ -329,6 +329,43 @@ describe("AdminManagedContentPage", () => {
       availability: "available", unavailable_reason_code: null, requires_review: true,
       auto_publish: false, auto_index: false,
     }]);
+    mocks.externalEntries.mockResolvedValue({ source_id: "source-1", parent_relative_path: "", entries: [] });
+  });
+
+  it("renders shared entries with the managed library row structure and navigation", async () => {
+    const sharedCategory = {
+      ...category,
+      id: "cat-shared",
+      category_key: "shared_training",
+      display_code: "04",
+      display_name: "共享培训",
+      category_kind: "shared_folder" as const,
+      external_source_id: "source-1",
+      full_path: "04 共享培训",
+    };
+    mocks.categories.mockResolvedValue([sharedCategory]);
+    mocks.externalEntries
+      .mockImplementation(async (_sourceId: string, parent: string) => parent === "" ? ({
+        source_id: "source-1",
+        parent_relative_path: "",
+        entries: [
+          { id: "folder-1", kind: "folder", name: "一级课程", relative_path: "一级课程" },
+          { id: "video-1", kind: "video", name: "导论.mp4", relative_path: "导论.mp4", availability: "available", modified_ns: 1_700_000_000_000_000_000 },
+        ],
+      }) : ({ source_id: "source-1", parent_relative_path: parent, entries: [] }));
+
+    render(<AdminManagedContentPage />);
+    fireEvent.click(await screen.findByTestId("managed-folder-row-cat-shared"));
+
+    await waitFor(() => expect(mocks.externalEntries).toHaveBeenCalledWith("source-1", ""));
+    expect(await screen.findByTestId("shared-library-row-folder-1")).toBeInTheDocument();
+    expect(screen.getByTestId("shared-library-row-video-1")).toHaveTextContent("导论.mp4");
+    expect(screen.getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual(
+      expect.arrayContaining(["类型", "资料", "更新时间", "状态", "来源", "操作"]),
+    );
+    expect(screen.getAllByText("共享").length).toBeGreaterThanOrEqual(2);
+    fireEvent.click(screen.getByRole("button", { name: "打开一级课程" }));
+    await waitFor(() => expect(mocks.externalEntries).toHaveBeenLastCalledWith("source-1", "一级课程"));
   });
 
   it("shows library-wide status counts at the root while keeping the file list empty", async () => {

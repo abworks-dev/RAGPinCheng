@@ -1,6 +1,6 @@
 import type { Page, Route } from "@playwright/test";
 
-export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "asr_identity_unavailable" | "publication_failure" | "media_progress" | "media_stale_cleanup" | "media_permanent_failure" | "media_upload" | "media_conflict" | "media_library";
+export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "asr_identity_unavailable" | "publication_failure" | "media_progress" | "media_stale_cleanup" | "media_permanent_failure" | "media_upload" | "media_conflict" | "media_library" | "shared_library";
 export type WorkspaceUser = "admin" | "bim_engineer" | "member";
 
 const admin = {
@@ -47,6 +47,12 @@ export const managedChildFolder = {
   version: 1, created_at: 1700000000, updated_at: 1700000000,
   full_path: "03 公司内部标准 / 01 建模标准（长名称用于响应式检查）",
   item_count: 2, direct_child_count: 0, total_child_count: 0, total_item_count: 2,
+};
+
+const sharedCategory = {
+  ...categories[0], id: "cat-shared", category_key: "shared_training", display_code: "05",
+  display_name: "共享培训资料", sort_order: 30, category_kind: "shared_folder",
+  external_source_id: "source-shared", full_path: "05 共享培训资料", item_count: 0,
 };
 
 const knowledgeScopes = categories
@@ -806,7 +812,12 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && path === "/api/admin/external-media/roots") return json(route, []);
     if (request.method() === "GET" && path === "/api/admin/external-media/sources") return json(route, []);
     if (request.method() === "GET" && /^\/api\/admin\/external-media\/sources\/[^/]+\/entries$/.test(path)) {
-      return json(route, { source_id: "", parent_relative_path: "", entries: [] });
+      const parent = new URL(request.url()).searchParams.get("parent") || "";
+      const entries = scenario === "shared_library" && !parent ? [
+        { id: "shared-folder-course", kind: "folder", name: "一级课程", relative_path: "一级课程" },
+        { id: "shared-video-intro", kind: "video", name: "共享培训导论.mp4", relative_path: "共享培训导论.mp4", availability: "available", modified_ns: 1_700_000_000_000_000_000 },
+      ] : [];
+      return json(route, { source_id: "source-shared", parent_relative_path: parent, entries });
     }
     if (request.method() === "GET" && path === "/api/admin/transcription/profiles") return json(route, transcriptionProfiles);
     if (request.method() === "GET" && path === "/api/admin/transcription/schemes") return json(route, scenario === "empty" ? [] : transcriptionSchemeOptions);
@@ -943,7 +954,7 @@ export async function installAdminRoutes(
       return json(route, { enabled: scenario !== "disabled", max_upload_bytes: 10_000_000, supported_extensions: [".pdf", ".md", ".docx", ".xlsx", ".pptx"] });
     }
     if (request.method() === "GET" && path === "/api/admin/content/categories") {
-      return json(route, scenario === "empty" ? [] : options.includeChildFolder ? [...categories, managedChildFolder] : categories);
+      return json(route, scenario === "empty" ? [] : scenario === "shared_library" ? [...categories, sharedCategory] : options.includeChildFolder ? [...categories, managedChildFolder] : categories);
     }
     if (request.method() === "POST" && path === "/api/admin/content/bulk-operations/preflight") {
       const payload = request.postDataJSON() as { operation: string };
