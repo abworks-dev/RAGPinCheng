@@ -3121,6 +3121,7 @@ export function AdminManagedContentPage() {
 
   const currentFolder =
     categories.find((category) => category.id === currentFolderId) || null;
+  const sharedFolderMode = currentFolder?.category_kind === "shared_folder" && Boolean(currentFolder.external_source_id);
   const currentFolderDropLabel = currentFolder
     ? `${currentFolder.display_code} ${currentFolder.display_name}`.trim()
     : "当前目录";
@@ -3128,6 +3129,7 @@ export function AdminManagedContentPage() {
     enabled &&
     can("item.upload") &&
     Boolean(currentFolderId) &&
+    !sharedFolderMode &&
     !uploading &&
     !uploadChecking &&
     !folderScanning;
@@ -6632,10 +6634,10 @@ export function AdminManagedContentPage() {
         <div className="grid gap-3 border-b border-border px-4 py-4 xl:grid-cols-[minmax(13rem,1fr)_18rem_auto] xl:items-end min-[1400px]:grid-cols-[minmax(13rem,1fr)_24rem_auto] sm:px-5">
           <div className="min-w-0">
             <h2 id="managed-list-title" className="text-ui-base font-semibold">
-              资料列表
+              {sharedFolderMode ? "共享目录" : "资料列表"}
             </h2>
             <p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-ui-xs text-muted-foreground">
-              <span>共 {total} 份</span>
+              <span>{sharedFolderMode ? "按远程目录层级浏览" : `共 ${total} 份`}</span>
               <span role="status" aria-live="polite">
                 ·{" "}
                 {selectedFolders.length > 0 ? (
@@ -6653,7 +6655,7 @@ export function AdminManagedContentPage() {
               </span>
             </p>
           </div>
-          <ManagedContentSearchFilters
+          {!sharedFolderMode && <ManagedContentSearchFilters
             queryInput={queryInput}
             searchScope={searchScope}
             currentDirectoryAvailable={Boolean(currentFolderId)}
@@ -6671,8 +6673,8 @@ export function AdminManagedContentPage() {
               setSourceFilter("");
               setKindFilter("");
             }}
-          />
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
+          />}
+          {!sharedFolderMode && <div className="flex shrink-0 flex-wrap items-center gap-2">
             {can("item.upload") && (
               <Button
                 size="sm"
@@ -6851,7 +6853,7 @@ export function AdminManagedContentPage() {
                 </Button>
               )
             )}
-          </div>
+          </div>}
         </div>
         <div
           className="border-b border-border bg-surface-muted/40 px-4 py-3 sm:px-5"
@@ -6935,7 +6937,9 @@ export function AdminManagedContentPage() {
               </div>
             </div>
           )}
-          {loading ? (
+          {sharedFolderMode && currentFolder?.external_source_id ? (
+            <ExternalFolderBrowser sourceId={currentFolder.external_source_id} title={`${currentFolder.display_name}远程目录`} />
+          ) : loading ? (
             <LoadingState
               className="min-h-48 border-x-0 border-b-0"
               label="正在加载资料…"
@@ -7284,7 +7288,6 @@ export function AdminManagedContentPage() {
               </>
             )
           )}
-          {currentFolder?.category_kind === "shared_folder" && currentFolder.external_source_id && <ExternalFolderBrowser sourceId={currentFolder.external_source_id} title={`${currentFolder.display_name}远程目录`} />}
         </div>
       </Card>
 
