@@ -22,7 +22,7 @@ import { adminMediaApi } from "../../api/admin/media";
 import { CategoryDeleteDialog } from "../../components/admin/CategoryDeleteDialog";
 import { CategoryTreePicker } from "../../components/admin/CategoryTreePicker";
 import { ExternalMediaSourcesPanel } from "../../components/admin/ExternalMediaSourcesPanel";
-import { ExternalFolderBrowser } from "../../components/admin/ExternalFolderBrowser";
+import { ExternalCategoryTree } from "../../components/admin/ExternalFolderBrowser";
 import { useAuth } from "../../context/AuthContext";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
@@ -183,8 +183,12 @@ export function AdminCategoriesPage() {
   const tree = useMemo(() => filterTree(buildCategoryTree(categories), query, filter), [categories, filter, query]);
   const visibleNodes = useMemo(() => flattenVisibleCategoryTree(tree, expanded), [expanded, tree]);
   const filteredCount = useMemo(() => countCategoryTreeNodes(tree), [tree]);
-  const hasNestedNodes = categories.some((category) => categories.some((child) => child.parent_id === category.id));
-  const allExpanded = hasNestedNodes && categories.filter((category) => categories.some((child) => child.parent_id === category.id)).every((category) => expanded.has(category.id));
+  const expandableCategoryIds = categories
+    .filter((category) => (category.category_kind === "shared_folder" && category.external_source_id)
+      || categories.some((child) => child.parent_id === category.id))
+    .map((category) => category.id);
+  const hasNestedNodes = expandableCategoryIds.length > 0;
+  const allExpanded = hasNestedNodes && expandableCategoryIds.every((id) => expanded.has(id));
   const activeChildIds = useMemo(() => {
     const result = new Set<string>();
     categories.filter((category) => category.is_active && category.parent_id).forEach((category) => result.add(category.parent_id as string));
@@ -536,7 +540,7 @@ export function AdminCategoriesPage() {
                 </div>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-1">
-                {hasNestedNodes && <Button size="sm" variant="ghost" onClick={() => setExpanded(allExpanded ? new Set() : new Set(categories.filter((category) => categories.some((child) => child.parent_id === category.id)).map((category) => category.id)))}>
+                {hasNestedNodes && <Button size="sm" variant="ghost" onClick={() => setExpanded(allExpanded ? new Set() : new Set(expandableCategoryIds))}>
                   {allExpanded ? <ChevronsUp className="size-4" aria-hidden="true" /> : <ChevronsDown className="size-4" aria-hidden="true" />}
                   {allExpanded ? "全部折叠" : "全部展开"}
                 </Button>}
@@ -560,8 +564,6 @@ export function AdminCategoriesPage() {
       )}
 
       {canManageExternalSources && !error && <ExternalMediaSourcesPanel categories={categories} schemes={sharedSchemes} onOpenWorkbench={() => undefined} onMediaChanged={async () => { await load(true); }} />}
-      {selectedCategory?.category_kind === "shared_folder" && selectedCategory.external_source_id && <ExternalFolderBrowser sourceId={selectedCategory.external_source_id} title={`${selectedCategory.display_name}远程目录`} />}
-
       <Sheet open={sharedOpen} onOpenChange={(open) => { if (!sharedSaving) setSharedOpen(open); }}>
         <SheetContent className="max-w-xl overflow-y-auto">
           <SheetHeader><SheetTitle>新建共享文件夹</SheetTitle><SheetDescription>只读扫描服务端白名单目录中的 MP4 视频，不修改远程文件。</SheetDescription></SheetHeader>
@@ -684,7 +686,8 @@ function CategoryTreeNodeView({
 }) {
   const { category, children } = node;
   const isExpanded = expanded.has(category.id);
-  const hasChildren = children.length > 0;
+  const sharedSourceId = category.category_kind === "shared_folder" ? category.external_source_id : null;
+  const hasChildren = children.length > 0 || Boolean(sharedSourceId);
   const visibleIndex = visibleNodes.findIndex((item) => item.category.id === category.id);
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const currentIndex = visibleIndex < 0 ? index : visibleIndex;
@@ -697,7 +700,7 @@ function CategoryTreeNodeView({
     if (event.key === "ArrowRight" && hasChildren) {
       event.preventDefault();
       if (!isExpanded) onToggle(category.id);
-      else {
+      else if (children[0]) {
         const childId = children[0].category.id;
         onSelect(childId);
         nodeRefs.current.get(childId)?.focus();
@@ -744,7 +747,10 @@ function CategoryTreeNodeView({
         </span>
       </span>
     </div>
-    {hasChildren && isExpanded && <div role="group" className="ml-5 border-l border-border bg-surface-muted/10 sm:ml-6">{children.map((child, childIndex) => <CategoryTreeNodeView key={child.category.id} node={child} level={level + 1} index={childIndex} siblingCount={children.length} selectedId={selectedId} expanded={expanded} visibleNodes={visibleNodes} nodeRefs={nodeRefs} onSelect={onSelect} onToggle={onToggle} />)}</div>}
+    {hasChildren && isExpanded && <div role="group" className="ml-5 border-l border-border bg-surface-muted/10 sm:ml-6">
+      {children.map((child, childIndex) => <CategoryTreeNodeView key={child.category.id} node={child} level={level + 1} index={childIndex} siblingCount={children.length} selectedId={selectedId} expanded={expanded} visibleNodes={visibleNodes} nodeRefs={nodeRefs} onSelect={onSelect} onToggle={onToggle} />)}
+      {sharedSourceId && <ExternalCategoryTree sourceId={sharedSourceId} level={level + 1} />}
+    </div>}
   </>;
 }
 

@@ -24,6 +24,30 @@ async function openRootFolder(page: Parameters<typeof installAdminRoutes>[0], fo
 }
 
 test.describe("资料管理", () => {
+  test("共享目录复用资料条目并在分类树内联展开", async ({ page }) => {
+    await openTab(page, "资料管理", "shared_library");
+    const sharedFolder = page.viewportSize()!.width < 1024
+      ? page.getByTestId("managed-folder-mobile-cat-shared")
+      : page.getByTestId("managed-folder-row-cat-shared");
+    await sharedFolder.getByRole("button").first().click();
+    const sharedEntry = page.viewportSize()!.width < 1024
+      ? page.getByTestId("shared-library-mobile-shared-video-intro")
+      : page.getByTestId("shared-library-row-shared-video-intro");
+    await expect(sharedEntry).toContainText("共享培训导论.mp4");
+    await expect(sharedEntry.getByText("共享", { exact: true })).toBeVisible();
+    await expectNoBodyOverflow(page);
+
+    if (page.viewportSize()!.width < 1024) {
+      await page.getByRole("button", { name: "展开管理功能" }).click();
+    }
+    await page.getByRole("link", { name: "分类管理", exact: true }).click();
+    await page.getByRole("button", { name: "展开共享培训资料" }).click();
+    await expect(page.getByTestId("shared-tree-item-shared-folder-course")).toContainText("一级课程");
+    await expect(page.getByTestId("shared-tree-item-shared-video-intro")).toContainText("共享培训导论.mp4");
+    await expectNoBodyOverflow(page);
+    expect((await page.screenshot({ fullPage: true })).byteLength).toBeGreaterThan(10_000);
+  });
+
   test.skip("normal layout keeps navigation and upload controls discoverable", async ({ page }) => {
     await openTab(page, "资料管理");
     await expect(page.getByRole("heading", { name: "资料管理" })).toBeVisible();

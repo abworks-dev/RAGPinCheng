@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn(),
   updateNumber: vi.fn(),
   move: vi.fn(),
+  externalEntries: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
   role: "admin" as "admin" | "user",
@@ -20,6 +21,7 @@ vi.mock("../../api/client", () => ({
     updateManagedCategory: mocks.update,
     updateManagedCategoryNumber: mocks.updateNumber,
     moveManagedCategory: mocks.move,
+    listExternalMediaEntries: mocks.externalEntries,
   },
 }));
 
@@ -68,6 +70,7 @@ describe("AdminCategoriesPage", () => {
     mocks.create.mockResolvedValue({ ...category, id: "cat-new", display_code: "09", display_name: "新分类", full_path: "09 新分类" });
     mocks.updateNumber.mockResolvedValue([category, child]);
     mocks.move.mockResolvedValue([category, child]);
+    mocks.externalEntries.mockResolvedValue({ source_id: "source-1", parent_relative_path: "", entries: [] });
   });
 
   it("sends the selected category version for optimistic concurrency", async () => {
@@ -274,5 +277,39 @@ describe("AdminCategoriesPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("分类服务暂不可用");
     expect(screen.getByRole("button", { name: "重新加载" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "暂无分类" })).not.toBeInTheDocument();
+  });
+
+  it("expands shared folders and files inside the category tree", async () => {
+    const shared = {
+      ...category,
+      id: "cat-shared",
+      category_key: "shared_training",
+      display_code: "02",
+      display_name: "共享培训",
+      category_kind: "shared_folder" as const,
+      external_source_id: "source-1",
+      full_path: "02 共享培训",
+    };
+    mocks.categories.mockResolvedValueOnce([shared]);
+    mocks.externalEntries.mockResolvedValueOnce({
+      source_id: "source-1",
+      parent_relative_path: "",
+      entries: [
+        { id: "folder-1", kind: "folder", name: "一级课程", relative_path: "一级课程" },
+        { id: "video-1", kind: "video", name: "导论.mp4", relative_path: "导论.mp4", availability: "available" },
+      ],
+    });
+
+    render(<AdminCategoriesPage />);
+    expect(await screen.findByRole("button", { name: "全部展开" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "展开共享培训" }));
+
+    expect(await screen.findByTestId("shared-tree-item-folder-1")).toHaveTextContent("一级课程");
+    expect(screen.getByTestId("shared-tree-item-video-1")).toHaveTextContent("导论.mp4");
+    expect(screen.getAllByText("共享").length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByRole("region", { name: "共享培训远程目录" })).not.toBeInTheDocument();
+    const root = screen.getByTestId("category-tree-item-cat-shared");
+    fireEvent.keyDown(root, { key: "ArrowRight" });
+    expect(root).toBeInTheDocument();
   });
 });
