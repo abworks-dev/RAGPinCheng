@@ -243,3 +243,16 @@ def test_format_qdrant_verification_exposes_count_difference():
         approximate=19,
         exact=20,
     ) == "REBUILD_VERIFY qdrant expected=20 approximate=19 exact=20"
+
+
+def test_format_location_verification_exposes_coverage_without_document_names():
+    module = load_script()
+
+    assert module.format_location_verification(
+        expected=5,
+        located=4,
+        missing_by_doc_type={"xmind": 1},
+    ) == (
+        'REBUILD_VERIFY locations expected=5 located=4 '
+        'missing_by_doc_type={"xmind":1}'
+    )

@@ -78,13 +78,22 @@ def mineru_locations(payload: Any, page_offset: int = 0) -> list[DocumentLocatio
     return out
 
 
-def match_locations(text: str, locations: list[DocumentLocation]) -> DocumentLocation | None:
+def match_locations(
+    text: str,
+    locations: list[DocumentLocation],
+    *,
+    section_path: str | None = None,
+) -> DocumentLocation | None:
     """Return a conservative location match for one evidence chunk."""
     target = normalize_location_text(text)
     if not target:
         return None
-    matches: list[DocumentLocation] = []
-    for item in locations:
+    matches = (
+        [item for item in locations if item.heading_anchor == section_path]
+        if section_path
+        else []
+    )
+    for item in locations if not matches else []:
         candidate = normalize_location_text(item.text)
         if len(candidate) < 4:
             continue

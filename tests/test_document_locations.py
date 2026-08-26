@@ -26,6 +26,25 @@ def test_location_matching_returns_page_span(tmp_path):
     assert result.page_end == 6
 
 
+def test_location_matching_prefers_exact_section_path_for_short_xmind_topic():
+    locations = [
+        DocumentLocation(
+            text="交付",
+            topic_id="root-topic",
+            heading_anchor="画布：项目计划 > 交付",
+        )
+    ]
+
+    result = match_locations(
+        "# 画布：项目计划\n## 交付",
+        locations,
+        section_path="画布：项目计划 > 交付",
+    )
+
+    assert result is not None
+    assert result.topic_id == "root-topic"
+
+
 def test_location_sidecar_is_versioned_and_tolerates_invalid_payload(tmp_path):
     path = tmp_path / "document.locations.json"
     write_location_sidecar(path, [DocumentLocation(text="证据", page_number=2)])

@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from src.chunk import chunk_document
+from src.indexing_pipeline import _build_xmind_doc
 from src.xmind_parser import XMindParseError, parse_xmind, xmind_to_markdown
 
 
@@ -35,6 +37,66 @@ def test_parses_modern_xmind_and_preserves_hierarchy(tmp_path: Path):
     assert "# 画布：项目计划" in markdown
     assert "## 交付" in markdown
     assert "### 设计" in markdown
+
+
+def test_xmind_index_document_preserves_topic_location(tmp_path: Path):
+    path = tmp_path / "plan.xmind"
+    _write_modern(path, [{
+        "id": "sheet-1",
+        "title": "项目计划",
+        "rootTopic": {
+            "id": "root-topic",
+            "title": "交付",
+            "children": {"attached": []},
+        },
+    }])
+
+    document = _build_xmind_doc(path, lambda _status: None, parsed_dir=tmp_path / "parsed")
+    parents, children = chunk_document(document)
+
+    assert document.location_map_path is not None
+    assert document.location_map_path.is_file()
+    assert {parent.topic_id for parent in parents} == {"root-topic"}
+    assert {child.topic_id for child in children} == {"root-topic"}
+
+
+def test_xmind_topic_location_uses_full_hierarchy_for_duplicate_titles(tmp_path: Path):
+    path = tmp_path / "duplicate-topics.xmind"
+    _write_modern(path, [{
+        "id": "sheet-1",
+        "title": "项目计划",
+        "rootTopic": {
+            "id": "root-topic",
+            "title": "总览",
+            "children": {"attached": [
+                {
+                    "id": "design",
+                    "title": "设计",
+                    "children": {"attached": [{
+                        "id": "design-review",
+                        "title": "复核",
+                        "children": {"attached": []},
+                    }]},
+                },
+                {
+                    "id": "delivery",
+                    "title": "交付",
+                    "children": {"attached": [{
+                        "id": "delivery-review",
+                        "title": "复核",
+                        "children": {"attached": []},
+                    }]},
+                },
+            ]},
+        },
+    }])
+
+    document = _build_xmind_doc(path, lambda _status: None, parsed_dir=tmp_path / "parsed")
+    parents, _children = chunk_document(document)
+    topic_by_section = {parent.section_path: parent.topic_id for parent in parents}
+
+    assert topic_by_section["画布：项目计划 > 总览 > 设计 > 复核"] == "design-review"
+    assert topic_by_section["画布：项目计划 > 总览 > 交付 > 复核"] == "delivery-review"
 
 
 def test_parses_legacy_content_xml(tmp_path: Path):
