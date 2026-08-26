@@ -422,7 +422,15 @@ def _build_xlsx_doc(
     if metadata:
         write_location_sidecar(
             location_map_path,
-            (DocumentLocation(text=item.get("text", item.get("markdown", "")), sheet_name=item["sheet_name"], cell_range=item["cell_range"]) for item in metadata),
+            (
+                DocumentLocation(
+                    text=item.get("text", item.get("markdown", "")),
+                    sheet_name=item["sheet_name"],
+                    cell_range=item["cell_range"],
+                    heading_anchor=f"Sheet: {item['sheet_name']}",
+                )
+                for item in metadata
+            ),
         )
 
     category, company = _derive_category_and_company(source_path)

@@ -21,8 +21,11 @@ import threading
 import multiprocessing
 import queue
 import sys
+import zipfile
 from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any
+from xml.etree import ElementTree
 
 logger = logging.getLogger(__name__)
 
@@ -158,9 +161,50 @@ def _extract_anchors_from_markdown(markdown: str) -> list[dict[str, Any]]:
             if text and len(text) > 10:
                 anchors.append({"text": text[:50], "anchor": _text_hash(text)})
         # Paragraphs (non-empty, non-heading, non-list)
-        elif len(stripped) > 20:
+        elif not stripped.startswith(("|", "---")):
             anchors.append({"text": stripped[:50], "anchor": _text_hash(stripped)})
     return anchors
+
+
+def _pptx_source_slides(path: Path) -> list[dict[str, Any]]:
+    """Read slide text in presentation order from a validated OOXML package."""
+    relationship_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+    presentation_ns = "http://schemas.openxmlformats.org/presentationml/2006/main"
+    document_rel_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    drawing_ns = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    try:
+        with zipfile.ZipFile(path) as archive:
+            presentation = ElementTree.fromstring(archive.read("ppt/presentation.xml"))
+            relationships = ElementTree.fromstring(
+                archive.read("ppt/_rels/presentation.xml.rels")
+            )
+            targets = {
+                item.attrib.get("Id"): item.attrib.get("Target")
+                for item in relationships.findall(f"{{{relationship_ns}}}Relationship")
+                if item.attrib.get("Type", "").endswith("/slide")
+            }
+            slides: list[dict[str, Any]] = []
+            slide_ids = presentation.findall(
+                f".//{{{presentation_ns}}}sldId"
+            )
+            for slide_number, slide_id in enumerate(slide_ids, start=1):
+                target = targets.get(slide_id.attrib.get(f"{{{document_rel_ns}}}id"))
+                if not target:
+                    continue
+                member = PurePosixPath("ppt", target)
+                if member.is_absolute() or ".." in member.parts:
+                    continue
+                slide = ElementTree.fromstring(archive.read(member.as_posix()))
+                text = " ".join(
+                    value.strip()
+                    for node in slide.findall(f".//{{{drawing_ns}}}t")
+                    if (value := node.text) and value.strip()
+                )
+                if text:
+                    slides.append({"slide_number": slide_number, "text": text[:500]})
+            return slides
+    except (KeyError, OSError, ValueError, zipfile.BadZipFile, ElementTree.ParseError):
+        return []
 
 
 def convert_docx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
@@ -569,19 +613,17 @@ def convert_pptx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
     _ensure_disk_space(path)
     markdown = _docling_markdown(path)
 
-    # Count slides by heading markers
-    slides: list[dict[str, Any]] = []
-    slide_num = 0
-    for line in markdown.split("\n"):
-        stripped = line.strip()
-        if stripped.startswith("#") and len(stripped) > 10:
-            slide_num += 1
-            slides.append({
-                "slide_number": slide_num,
-                "text": stripped.lstrip("#").strip()[:50],
-            })
+    slides = _pptx_source_slides(path)
+    if not slides:
+        for line in markdown.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("#") and len(stripped) > 10:
+                slides.append({
+                    "slide_number": len(slides) + 1,
+                    "text": stripped.lstrip("#").strip()[:50],
+                })
 
-    slide_count = max(slide_num, 1)
+    slide_count = max(len(slides), 1)
 
     elapsed = time.time() - start
     logger.info(
