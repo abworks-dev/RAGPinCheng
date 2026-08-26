@@ -155,6 +155,24 @@ def format_qdrant_verification(*, expected: int, approximate: int | None, exact:
     )
 
 
+def format_location_verification(
+    *,
+    expected: int,
+    located: int,
+    missing_by_doc_type: dict[str, int],
+) -> str:
+    missing = json.dumps(
+        missing_by_doc_type,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return (
+        f"REBUILD_VERIFY locations expected={expected} located={located} "
+        f"missing_by_doc_type={missing}"
+    )
+
+
 def validate_report(report: dict[str, object]) -> None:
     expected = report["expected"]
     indexed = report["indexed"]
@@ -324,6 +342,15 @@ def run_rebuild(
                                 OR sheet_name IS NOT NULL OR topic_id IS NOT NULL)"""
                 ).fetchall()
             }
+            locatable_by_doc_type: dict[str, set[str]] = {}
+            for head in snapshot.managed:
+                if head.version_id in locatable_version_ids:
+                    locatable_by_doc_type.setdefault(head.doc_type, set()).add(head.version_id)
+            missing_by_doc_type = {
+                doc_type: len(version_ids - located_version_ids)
+                for doc_type, version_ids in sorted(locatable_by_doc_type.items())
+                if version_ids - located_version_ids
+            }
         qdrant = qdrant_collection_stats(_client(), COLLECTION)
         report = {
             "schema_version": 2,
@@ -355,6 +382,14 @@ def run_rebuild(
                 expected=report["indexed"]["children"],
                 approximate=qdrant["approximate_points_count"],
                 exact=qdrant["exact_points_count"],
+            ),
+            flush=True,
+        )
+        print(
+            format_location_verification(
+                expected=report["location_head_coverage"]["expected"],
+                located=report["location_head_coverage"]["located"],
+                missing_by_doc_type=missing_by_doc_type,
             ),
             flush=True,
         )

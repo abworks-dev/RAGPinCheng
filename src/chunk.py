@@ -620,7 +620,11 @@ def chunk_document(doc: ParsedDoc) -> tuple[list[Parent], list[Child]]:
     for sec in sections:
         section_path = _section_path(sec.metadata)
         for parent_text in _split_parents(sec.page_content):
-            located = match_locations(parent_text, locations)
+            located = match_locations(
+                parent_text,
+                locations,
+                section_path=section_path,
+            )
             page_number = located.page_number if located else None
             page_end = located.page_end if located else None
             quote = location_quote(parent_text)

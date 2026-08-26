@@ -300,9 +300,28 @@ def _build_xmind_doc(
     """Parse a bounded XMind archive and cache its topic hierarchy as Markdown."""
     parsed_dir.mkdir(parents=True, exist_ok=True)
     md_path = parsed_dir / "document.md"
+    location_map_path = parsed_dir / "document.locations.json"
     on_status("parsing")
-    markdown = xmind_to_markdown(parse_xmind(source_path))
+    document = parse_xmind(source_path)
+    markdown = xmind_to_markdown(document)
     _write_text_atomic(md_path, markdown)
+    locations: list[DocumentLocation] = []
+
+    def append_topic_locations(topic, path: tuple[str, ...]) -> None:
+        topic_path = (*path, topic.title)
+        locations.append(
+            DocumentLocation(
+                text="\n".join(part for part in (topic.title, topic.notes) if part),
+                topic_id=topic.id,
+                heading_anchor=" > ".join(topic_path),
+            )
+        )
+        for child in topic.children:
+            append_topic_locations(child, topic_path)
+
+    for sheet in document.sheets:
+        append_topic_locations(sheet.root_topic, (f"画布：{sheet.title}",))
+    write_location_sidecar(location_map_path, locations)
     category, company = _derive_category_and_company(source_path)
     return ParsedDoc(
         source_path=source_path,
@@ -311,6 +330,7 @@ def _build_xmind_doc(
         markdown_path=md_path,
         doc_type="xmind",
         company=company,
+        location_map_path=location_map_path,
     )
 
 

@@ -17,9 +17,9 @@ PROTECTED = {
     # archived and unpublished media remain hidden; normalize_hash is portable.
     "api/routes_media.py": "be62e86673fa78adaa4db8a253c106b0698dd0460ecda75538716dad74f487f7",
     "api/indexing.py": "048559281160fa3c6ca4ee611cfb5757b0854e84b8bd90e912fbd51a4d299b21",
-    "src/chunk.py": "25154cb99573799297ef503ead2b3bd9bf0708abf75ea35106612d1e267efcaf",
+    "src/chunk.py": "ed4305b65ea459f7784494b4f743a00e26bf20ce5779d8519c498251e51d06d1",
     "src/index.py": "2709230a68efde43fa6a45cd63c04697576a6bd4bb3984d9f224c5603c432711",
-    "src/indexing_pipeline.py": "e02b8ee50a125ed33108b7347c1f149dca31df7056037ba05c7c9c78eb214d17",
+    "src/indexing_pipeline.py": "d1beec4374568fb187653acab44c457996730920e08d13172d3daee8f044909c",
     "src/retrieve.py": "de585207fe38d94edca120a1a47670b538607d7cc62119d1c73946ac4087ddbf",
 }
 FORBIDDEN = {

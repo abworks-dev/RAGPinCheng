@@ -42,6 +42,7 @@
 - 无可识别 Markdown 标题的文档开头区段在索引内部使用稳定 `section_path="(intro)"`；该值参与既有 Parent/Child 身份与向量上下文，用户界面将其显示为“文档开头”，不要求重建旧索引；
 - Parent SQLite 保存 Office 定位元数据；检索结果与来源 DTO 贯通 Excel 工作表/单元格、PowerPoint 页码和 Word 段落锚点，并在字段缺失时安全回退到章节定位；
 - PDF 解析缓存同时保留版本化定位侧车，记录文本证据到原始页码的映射；Parent/Child、SQLite、Qdrant 和来源 DTO 贯通 `page_number/page_end`，预览按页跳转并在文本层可用时高亮；
+- XMind 解析缓存生成版本化主题定位侧车，以完整画布/主题层级精确关联 `topic_id`；短标题和不同分支的同名主题按结构化路径区分，引用预览可定位到对应主题；
 - 检索按 `content_item_heads` 过滤受管版本，`compat` 模式继续允许旧的未版本化索引；
 - 发布时生成保留原扩展名的工作副本供解析和 Office 预览，引用接口通过稳定 `content://` 身份回取正式对象；
 - 受管 PDF 在 `data/parsed/managed/<content_version_id>/` 中使用独立解析缓存和临时目录，不依赖旧 `docs` 相对路径；空密码加密 PDF 使用临时解密副本解析且不修改正式对象，真正需要密码的 PDF 明确失败；MinerU 云解析结果原子写入 `document.md`，同一版本重试复用该缓存；
@@ -53,7 +54,7 @@
 - 代码支持 `DOCS_DIR`、`MEDIA_DIR`、`DOCS_HOST_PATH`、`MEDIA_HOST_PATH` 和 `TRANSCRIPTION_ARTIFACT_DIR` 显式配置；本地兼容模式的 `DOCS_DIR` 和 Compose 宿主机默认值仍指向 `content/legacy-docs`，仓库 `docs/` 只存放项目文档。生产完成标记为 `true` 时，仓库内最终 Compose overlay 必须位于私有生产 override 之后，并以 `!override` 完整替换 backend volumes：重新声明 `/app/data`、`/app/content`、`/app/media`，把 `/app/docs` 替换为空的只读 tmpfs。生产不再要求 `DOCS_HOST_PATH` 或宿主机 `content/legacy-docs`；部署、失败回滚和手工恢复共用该顺序。
 - `strict` 检索契约按身份分流：普通资料必须命中 `content_item_heads`，带 `transcript_version_id` 的转录由独立 `media_transcript_heads` 快照校验；双重无版本身份的旧 Parent/Child 被拒绝。生产部署会同时核对 strict 配置、受管 head、索引计数和容器 mount source，从容器 mountinfo 核对 `/app/docs` 是带 `ro` 选项的 tmpfs 并执行不可写探针，同时拒绝任何仍来自 `/data/business/ragpincheng/source` 的 `/app/media` 或 `/app/content` 挂载；失败时恢复上一镜像。
 - T12-B 提供精确 plan/apply/verify 和受控生产 workflow：候选 ID、媒体/head、正式版本及审计表均指纹化，活动任务或冻结摘要漂移会在写入前失败；执行仅归档旧媒体记录、删除旧 transcript head 和精确候选 Parent/Point，不重建 collection，也不删除旧文件。
-- 生产全量索引重建只允许通过 `rebuild-production-index-manual.yml`：它从 `content_item_heads` 与 `media_transcript_heads` 冻结正式可见版本，在独立 Parent SQLite、解析目录和 Qdrant collection 中强制重新解析并重建；旧解析缓存不会阻止页码、段落、工作表或主题定位 sidecar 生成。活动任务、head 指纹漂移、正式版本覆盖不完整、可定位文档缺少定位字段、Parent/Child 计数不一致或 Qdrant 非绿色状态都会在切换前终止。
+- 生产全量索引重建只允许通过 `rebuild-production-index-manual.yml`：它从 `content_item_heads` 与 `media_transcript_heads` 冻结正式可见版本，在独立 Parent SQLite、解析目录和 Qdrant collection 中强制重新解析并重建；旧解析缓存不会阻止页码、段落、工作表或主题定位 sidecar 生成。Actions 日志实时输出 head/Parent/Child 进度，并在切换前分别输出 Qdrant 精确计数与按文档类型聚合的定位覆盖；活动任务、head 指纹漂移、正式版本覆盖不完整、可定位文档缺少定位字段、Parent/Child 计数不一致或 Qdrant 非绿色状态都会终止切换。
 
 ### 未实现
 
