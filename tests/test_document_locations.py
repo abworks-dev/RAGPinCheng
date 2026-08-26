@@ -1,5 +1,6 @@
 import json
 
+from src.chunk import chunk_document
 from src.document_locations import (
     DocumentLocation,
     match_locations,
@@ -7,6 +8,7 @@ from src.document_locations import (
     read_location_sidecar,
     write_location_sidecar,
 )
+from src.ingest import ParsedDoc
 
 
 def test_mineru_content_list_normalizes_zero_based_pages():
@@ -43,6 +45,77 @@ def test_location_matching_prefers_exact_section_path_for_short_xmind_topic():
 
     assert result is not None
     assert result.topic_id == "root-topic"
+
+
+def test_location_matching_accepts_exact_short_office_line():
+    locations = [
+        DocumentLocation(text="交付", paragraph_anchor="short-anchor"),
+    ]
+
+    result = match_locations("# 计划\n\n交付", locations)
+
+    assert result is not None
+    assert result.paragraph_anchor == "short-anchor"
+
+
+def test_location_matching_selects_range_within_exact_sheet():
+    locations = [
+        DocumentLocation(
+            text="## Sheet: 统计\n\n| 编号 | 数量 |\n| --- | --- |\n| A | 1 |",
+            sheet_name="统计",
+            cell_range="A1:B2",
+            heading_anchor="Sheet: 统计",
+        ),
+        DocumentLocation(
+            text="## Sheet: 统计\n\n| 编号 | 数量 |\n| --- | --- |\n| B | 2 |",
+            sheet_name="统计",
+            cell_range="A3:B4",
+            heading_anchor="Sheet: 统计",
+        ),
+    ]
+
+    result = match_locations(
+        "## Sheet: 统计\n\n| 编号 | 数量 |\n| --- | --- |\n| B | 2 |",
+        locations,
+        section_path="Sheet: 统计",
+    )
+
+    assert result is not None
+    assert result.cell_range == "A3:B4"
+
+
+def test_chunk_document_propagates_office_location_fields(tmp_path):
+    markdown_path = tmp_path / "office.md"
+    markdown_path.write_text("# 交付\n\n交付证据", encoding="utf-8")
+    location_path = tmp_path / "office.locations.json"
+    write_location_sidecar(
+        location_path,
+        [
+            DocumentLocation(
+                text="交付证据",
+                sheet_name="统计",
+                cell_range="A1:B2",
+                slide_number=5,
+                paragraph_anchor="abcd1234",
+            )
+        ],
+    )
+    document = ParsedDoc(
+        source_path=tmp_path / "office.pptx",
+        category="项目资料",
+        doc_title="office",
+        markdown_path=markdown_path,
+        doc_type="pptx",
+        location_map_path=location_path,
+    )
+
+    parents, children = chunk_document(document)
+
+    for item in [*parents, *children]:
+        assert item.sheet_name == "统计"
+        assert item.cell_range == "A1:B2"
+        assert item.slide_number == 5
+        assert item.paragraph_anchor == "abcd1234"
 
 
 def test_location_sidecar_is_versioned_and_tolerates_invalid_payload(tmp_path):

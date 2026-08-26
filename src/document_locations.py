@@ -88,14 +88,25 @@ def match_locations(
     target = normalize_location_text(text)
     if not target:
         return None
-    matches = (
+    target_lines = {
+        normalized
+        for line in text.splitlines()
+        if (normalized := normalize_location_text(line))
+    }
+    anchored = (
         [item for item in locations if item.heading_anchor == section_path]
         if section_path
         else []
     )
-    for item in locations if not matches else []:
+    if len(anchored) == 1:
+        matches = anchored
+    else:
+        matches = []
+    for item in (anchored or locations) if not matches else []:
         candidate = normalize_location_text(item.text)
         if len(candidate) < 4:
+            if candidate and candidate in target_lines:
+                matches.append(item)
             continue
         probe = candidate[: min(80, len(candidate))]
         reverse_probe = target[: min(80, len(target))]

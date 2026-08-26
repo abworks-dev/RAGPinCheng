@@ -15,6 +15,8 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from services.libreoffice.app import MAX_FILE_SIZE, _cleanup_dirs, _save_upload, _select_conversion_output, app
+from src.chunk import chunk_document
+from src.indexing_pipeline import _build_pptx_doc
 from src.office_convert import (
     OfficeConversionError,
     _run_conversion_process,
@@ -41,6 +43,40 @@ def _slow_process_entry(_path: str, _output) -> None:
 def _synthetic_ooxml(path: Path, content_type: str) -> Path:
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("[Content_Types].xml", f'<Types><Override ContentType="{content_type}"/></Types>')
+    return path
+
+
+def _synthetic_pptx_with_slides(path: Path, slide_texts: list[str]) -> Path:
+    relationship = (
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        + "".join(
+            f'<Relationship Id="rId{index}" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" '
+            f'Target="slides/slide{index}.xml"/>'
+            for index in range(1, len(slide_texts) + 1)
+        )
+        + "</Relationships>"
+    )
+    presentation = (
+        '<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        "<p:sldIdLst>"
+        + "".join(
+            f'<p:sldId id="{255 + index}" r:id="rId{index}"/>'
+            for index in range(1, len(slide_texts) + 1)
+        )
+        + "</p:sldIdLst></p:presentation>"
+    )
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("ppt/presentation.xml", presentation)
+        archive.writestr("ppt/_rels/presentation.xml.rels", relationship)
+        for index, slide_text in enumerate(slide_texts, start=1):
+            archive.writestr(
+                f"ppt/slides/slide{index}.xml",
+                '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
+                'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+                f"<p:cSld><a:t>{slide_text}</a:t></p:cSld></p:sld>",
+            )
     return path
 
 
@@ -72,6 +108,22 @@ def test_generated_docx_preserves_paragraph_anchors(tmp_path: Path, monkeypatch:
 
     assert markdown.startswith("# 总则")
     assert anchors[0]["text"] == "总则"
+    assert len(anchors[0]["anchor"]) == 8
+
+
+def test_generated_docx_preserves_short_paragraph_anchor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source = _synthetic_ooxml(
+        tmp_path / "short.docx",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
+    )
+    _install_fake_docling(monkeypatch, "交付")
+
+    _markdown, anchors = convert_docx_to_markdown(source)
+
+    assert len(anchors) == 1
+    assert anchors[0]["text"] == "交付"
     assert len(anchors[0]["anchor"]) == 8
 
 
@@ -122,6 +174,45 @@ def test_generated_pptx_preserves_slide_metadata(tmp_path: Path, monkeypatch: py
 
     assert "第二页合成测试演示标题" in markdown
     assert [slide["slide_number"] for slide in slides] == [1, 2]
+
+
+def test_pptx_uses_source_slide_order_without_long_markdown_headings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source = _synthetic_pptx_with_slides(
+        tmp_path / "short-titles.pptx",
+        ["总览", "交付"],
+    )
+    _install_fake_docling(monkeypatch, "总览\n\n交付")
+
+    _markdown, slides = convert_pptx_to_markdown(source)
+
+    assert slides == [
+        {"slide_number": 1, "text": "总览"},
+        {"slide_number": 2, "text": "交付"},
+    ]
+
+
+def test_pptx_source_slides_reach_chunk_locations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source = _synthetic_pptx_with_slides(
+        tmp_path / "short-titles.pptx",
+        ["总览", "交付"],
+    )
+    _install_fake_docling(monkeypatch, "# 总览\n\n# 交付")
+
+    document = _build_pptx_doc(
+        source,
+        lambda _status: None,
+        parsed_dir=tmp_path / "parsed",
+        write_preview=False,
+        force_parse=True,
+    )
+    parents, children = chunk_document(document)
+
+    assert {parent.slide_number for parent in parents} == {1, 2}
+    assert {child.slide_number for child in children} == {1, 2}
 
 
 @pytest.mark.parametrize("body", [b"", b"not-a-pdf", b"PK\x03\x04wrong-format"])

@@ -17,6 +17,8 @@ from src.office_convert import (
     _detect_data_region_from_formula,
     convert_xlsx_to_markdown,
 )
+from src.document_locations import read_location_sidecar
+from src.indexing_pipeline import _build_xlsx_doc
 
 
 # ── _format_plain_value ─────────────────────────────────────────────────────
@@ -161,6 +163,39 @@ class TestConvertXlsxToMarkdown:
         assert any(m["sheet_name"] == "材料参数" for m in meta)
         for m in meta:
             assert ":" in m["cell_range"]  # Should be like A1:H4
+
+    def test_index_sidecar_preserves_sheet_section_anchor(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        source = tmp_path / "sheet.xlsx"
+        source.write_bytes(b"synthetic")
+        markdown = "## Sheet: 统计\n\n| 编号 |\n| --- |\n| A |\n"
+        monkeypatch.setattr(
+            "src.indexing_pipeline.recalculate_xlsx",
+            lambda _path: (_ for _ in ()).throw(RuntimeError("unavailable")),
+        )
+        monkeypatch.setattr(
+            "src.indexing_pipeline.convert_xlsx_to_markdown",
+            lambda _path: (
+                markdown,
+                [{
+                    "text": markdown,
+                    "sheet_name": "统计",
+                    "cell_range": "A1:A2",
+                }],
+            ),
+        )
+
+        document = _build_xlsx_doc(
+            source,
+            lambda _status: None,
+            parsed_dir=tmp_path / "parsed",
+            write_preview=False,
+            force_parse=True,
+        )
+        locations = read_location_sidecar(document.location_map_path)
+
+        assert locations[0].heading_anchor == "Sheet: 统计"
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
