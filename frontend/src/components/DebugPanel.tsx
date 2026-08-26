@@ -55,6 +55,15 @@ export function DebugPanel({ msg }: { msg: ChatMessage }) {
               </>
             )}
           </div>
+          {(prep?.relevance || done?.relevance) && (
+            <div>
+              检索分类：<code>{String((done?.relevance ?? prep?.relevance)?.classification ?? "unknown")}</code>{" "}
+              · 新召回：<code>{String((done?.relevance ?? prep?.relevance)?.fresh_count ?? prep?.fresh_count ?? 0)}</code>{" "}
+              · 合并：<code>{String((done?.relevance ?? prep?.relevance)?.merged_count ?? prep?.final_count ?? 0)}</code>{" "}
+              · 上下文：<code>{String((done?.relevance ?? prep?.relevance)?.model_context_count ?? prep?.used_sources.length ?? 0)}</code>{" "}
+              · 引用：<code>{String((done?.relevance ?? prep?.relevance)?.cited_count ?? done?.sources.length ?? 0)}</code>
+            </div>
+          )}
           {(done?.sources?.length ?? prep?.used_sources?.length ?? 0) > 0 && (
             <div className="mt-1">
               <div className="font-medium">来源得分:</div>

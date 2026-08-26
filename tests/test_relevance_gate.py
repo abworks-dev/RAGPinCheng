@@ -26,6 +26,48 @@ def test_default_off_records_snapshot_and_allows(monkeypatch):
     assert decision.top2_score == 0.5
     assert decision.score_margin == 0.30000000000000004
     assert decision.top1_rrf == 0.2
+    assert decision.classification == "normal"
+    assert decision.exact_match is False
+
+
+def test_empty_sources_are_classified_as_no_match():
+    decision = evaluate_relevance([], has_history=False, decomposition_applied=False)
+    assert decision.classification == "no_match"
+    assert decision.action == "allow"
+    assert decision.source_count == 0
+
+
+def test_standard_code_hit_is_classified_as_exact_match(monkeypatch):
+    monkeypatch.setattr("src.relevance_gate.RELEVANCE_GATE_ENABLED", False)
+    hit = replace(source(0.8, 0.2), text="《GB 50017-2013 钢结构设计标准》正文")
+    decision = evaluate_relevance(
+        [hit], has_history=False, decomposition_applied=False,
+        query="GB 50017 钢结构设计标准有哪些要求",
+    )
+    assert decision.classification == "exact_match"
+    assert decision.exact_match is True
+
+
+def test_passed_non_exact_hit_is_classified_as_normal(monkeypatch):
+    monkeypatch.setattr("src.relevance_gate.RELEVANCE_GATE_ENABLED", False)
+    decision = evaluate_relevance(
+        [replace(source(0.8), text="关于钢结构施工的一般说明")],
+        has_history=False, decomposition_applied=False,
+        query="钢结构验收有哪些要求",
+    )
+    assert decision.classification == "normal"
+
+
+def test_low_confidence_overrides_exact_match(monkeypatch):
+    monkeypatch.setattr("src.relevance_gate.RELEVANCE_GATE_ENABLED", True)
+    monkeypatch.setattr("src.relevance_gate.RELEVANCE_GATE_MIN_SCORE", 0.9)
+    decision = evaluate_relevance(
+        [replace(source(0.2), text="GB 50017 的说明")],
+        has_history=False, decomposition_applied=False,
+        query="GB 50017 有哪些要求",
+    )
+    assert decision.classification == "low_confidence"
+    assert decision.exact_match is True
 
 
 def test_enabled_gate_rejects_low_score(monkeypatch):
