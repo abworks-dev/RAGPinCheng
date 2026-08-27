@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 # Timeout for document conversion (seconds)
 from .config import OFFICE_MIN_FREE_DISK_MB, OFFICE_PARSE_TIMEOUT_SECONDS
+from .document_locations import normalize_location_text
 
 class OfficeConversionError(RuntimeError):
     """Recoverable Office conversion failure with a stable reason."""
@@ -167,7 +168,7 @@ def _extract_anchors_from_markdown(markdown: str) -> list[dict[str, Any]]:
 
 
 def _pptx_source_slides(path: Path) -> list[dict[str, Any]]:
-    """Read slide text in presentation order from a validated OOXML package."""
+    """Read unambiguous text-block anchors in source presentation order."""
     relationship_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
     presentation_ns = "http://schemas.openxmlformats.org/presentationml/2006/main"
     document_rel_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -183,7 +184,7 @@ def _pptx_source_slides(path: Path) -> list[dict[str, Any]]:
                 for item in relationships.findall(f"{{{relationship_ns}}}Relationship")
                 if item.attrib.get("Type", "").endswith("/slide")
             }
-            slides: list[dict[str, Any]] = []
+            slide_anchors: list[dict[str, Any]] = []
             slide_ids = presentation.findall(
                 f".//{{{presentation_ns}}}sldId"
             )
@@ -195,14 +196,45 @@ def _pptx_source_slides(path: Path) -> list[dict[str, Any]]:
                 if member.is_absolute() or ".." in member.parts:
                     continue
                 slide = ElementTree.fromstring(archive.read(member.as_posix()))
-                text = " ".join(
-                    value.strip()
-                    for node in slide.findall(f".//{{{drawing_ns}}}t")
-                    if (value := node.text) and value.strip()
+                paragraphs = slide.findall(f".//{{{drawing_ns}}}p")
+                blocks = [
+                    " ".join(
+                        value.strip()
+                        for node in paragraph.findall(f".//{{{drawing_ns}}}t")
+                        if (value := node.text) and value.strip()
+                    )
+                    for paragraph in paragraphs
+                ]
+                if not paragraphs:
+                    blocks = [
+                        value.strip()
+                        for node in slide.findall(f".//{{{drawing_ns}}}t")
+                        if (value := node.text) and value.strip()
+                    ]
+                seen: set[str] = set()
+                for block in blocks:
+                    text = " ".join(block.split())[:500]
+                    normalized = normalize_location_text(text)
+                    if normalized and normalized not in seen:
+                        seen.add(normalized)
+                        slide_anchors.append(
+                            {
+                                "slide_number": slide_number,
+                                "text": text,
+                                "normalized": normalized,
+                            }
+                        )
+
+            anchor_slides: dict[str, set[int]] = {}
+            for anchor in slide_anchors:
+                anchor_slides.setdefault(anchor["normalized"], set()).add(
+                    anchor["slide_number"]
                 )
-                if text:
-                    slides.append({"slide_number": slide_number, "text": text[:500]})
-            return slides
+            return [
+                {"slide_number": anchor["slide_number"], "text": anchor["text"]}
+                for anchor in slide_anchors
+                if len(anchor_slides[anchor["normalized"]]) == 1
+            ]
     except (KeyError, OSError, ValueError, zipfile.BadZipFile, ElementTree.ParseError):
         return []
 

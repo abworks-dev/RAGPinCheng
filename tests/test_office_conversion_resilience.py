@@ -46,7 +46,9 @@ def _synthetic_ooxml(path: Path, content_type: str) -> Path:
     return path
 
 
-def _synthetic_pptx_with_slides(path: Path, slide_texts: list[str]) -> Path:
+def _synthetic_pptx_with_slides(
+    path: Path, slide_texts: list[str | list[str]]
+) -> Path:
     relationship = (
         '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
         + "".join(
@@ -71,11 +73,14 @@ def _synthetic_pptx_with_slides(path: Path, slide_texts: list[str]) -> Path:
         archive.writestr("ppt/presentation.xml", presentation)
         archive.writestr("ppt/_rels/presentation.xml.rels", relationship)
         for index, slide_text in enumerate(slide_texts, start=1):
+            blocks = [slide_text] if isinstance(slide_text, str) else slide_text
             archive.writestr(
                 f"ppt/slides/slide{index}.xml",
                 '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
                 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
-                f"<p:cSld><a:t>{slide_text}</a:t></p:cSld></p:sld>",
+                "<p:cSld>"
+                + "".join(f"<a:p><a:r><a:t>{block}</a:t></a:r></a:p>" for block in blocks)
+                + "</p:cSld></p:sld>",
             )
     return path
 
@@ -213,6 +218,62 @@ def test_pptx_source_slides_reach_chunk_locations(
 
     assert {parent.slide_number for parent in parents} == {1, 2}
     assert {child.slide_number for child in children} == {1, 2}
+
+
+def test_pptx_emits_deduplicated_text_block_anchors_per_slide(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source = _synthetic_pptx_with_slides(
+        tmp_path / "reordered-blocks.pptx",
+        [["项目总览", "关键结论文字足够稳定", "关键结论文字足够稳定"]],
+    )
+    _install_fake_docling(monkeypatch, "# 关键结论文字足够稳定\n\n项目总览")
+
+    _markdown, slides = convert_pptx_to_markdown(source)
+
+    assert slides == [
+        {"slide_number": 1, "text": "项目总览"},
+        {"slide_number": 1, "text": "关键结论文字足够稳定"},
+    ]
+
+
+def test_pptx_reordered_text_block_reaches_chunk_location(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source = _synthetic_pptx_with_slides(
+        tmp_path / "reordered-blocks.pptx",
+        [["不会连续出现在 Markdown 开头", "关键结论文字足够稳定"]],
+    )
+    _install_fake_docling(monkeypatch, "# 关键结论文字足够稳定\n\n补充说明")
+
+    document = _build_pptx_doc(
+        source,
+        lambda _status: None,
+        parsed_dir=tmp_path / "parsed",
+        write_preview=False,
+        force_parse=True,
+    )
+    parents, children = chunk_document(document)
+
+    assert {parent.slide_number for parent in parents} == {1}
+    assert {child.slide_number for child in children} == {1}
+
+
+def test_pptx_discards_text_anchors_repeated_across_slides(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source = _synthetic_pptx_with_slides(
+        tmp_path / "repeated-blocks.pptx",
+        [["公司 模板标题", "第一页独有内容"], ["公司模板标题", "第二页独有内容"]],
+    )
+    _install_fake_docling(monkeypatch, "# 公司模板标题")
+
+    _markdown, slides = convert_pptx_to_markdown(source)
+
+    assert slides == [
+        {"slide_number": 1, "text": "第一页独有内容"},
+        {"slide_number": 2, "text": "第二页独有内容"},
+    ]
 
 
 @pytest.mark.parametrize("body", [b"", b"not-a-pdf", b"PK\x03\x04wrong-format"])
