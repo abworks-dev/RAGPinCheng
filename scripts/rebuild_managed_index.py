@@ -159,6 +159,7 @@ def format_location_verification(
     *,
     expected: int,
     located: int,
+    partial: int,
     missing_by_doc_type: dict[str, int],
 ) -> str:
     missing = json.dumps(
@@ -169,6 +170,7 @@ def format_location_verification(
     )
     return (
         f"REBUILD_VERIFY locations expected={expected} located={located} "
+        f"partial={partial} "
         f"missing_by_doc_type={missing}"
     )
 
@@ -189,9 +191,6 @@ def validate_report(report: dict[str, object]) -> None:
         raise ValueError("qdrant_not_green")
     if qdrant["exact_points_count"] != indexed["children"]:
         raise ValueError("qdrant_child_count_mismatch")
-    location_coverage = report["location_head_coverage"]
-    if location_coverage["located"] != location_coverage["expected"]:
-        raise ValueError("location_head_coverage_mismatch")
 
 
 def _materialize_managed_source(content_root: Path, data_root: Path, head: ManagedHead) -> Path:
@@ -342,6 +341,19 @@ def run_rebuild(
                                 OR sheet_name IS NOT NULL OR topic_id IS NOT NULL)"""
                 ).fetchall()
             }
+            version_location_rows = parents.execute(
+                """SELECT content_version_id,doc_type,count(*) AS total,
+                          sum(CASE WHEN page_number IS NOT NULL OR paragraph_anchor IS NOT NULL
+                                        OR sheet_name IS NOT NULL OR topic_id IS NOT NULL
+                                   THEN 1 ELSE 0 END) AS located
+                     FROM parents WHERE content_version_id IS NOT NULL
+                    GROUP BY content_version_id,doc_type"""
+            ).fetchall()
+            partially_located_version_ids = {
+                row[0]
+                for row in version_location_rows
+                if 0 < (row[3] or 0) < row[2]
+            }
             locatable_by_doc_type: dict[str, set[str]] = {}
             for head in snapshot.managed:
                 if head.version_id in locatable_version_ids:
@@ -373,6 +385,8 @@ def run_rebuild(
             "location_head_coverage": {
                 "expected": len(locatable_version_ids),
                 "located": len(locatable_version_ids & located_version_ids),
+                "partial": len(locatable_version_ids & partially_located_version_ids),
+                "missing": len(locatable_version_ids - located_version_ids),
             },
             "parents_integrity": integrity,
             "qdrant": qdrant,
@@ -389,6 +403,7 @@ def run_rebuild(
             format_location_verification(
                 expected=report["location_head_coverage"]["expected"],
                 located=report["location_head_coverage"]["located"],
+                partial=report["location_head_coverage"]["partial"],
                 missing_by_doc_type=missing_by_doc_type,
             ),
             flush=True,

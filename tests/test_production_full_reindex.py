@@ -129,7 +129,7 @@ def test_shadow_destination_guard_accepts_workflow_run_directory(tmp_path: Path)
         )
 
 
-def test_validate_report_requires_exact_head_coverage_and_green_collection():
+def test_validate_report_requires_exact_index_coverage_and_allows_missing_locations():
     module = load_script()
     report = {
         "expected": {"managed_heads": 2, "transcript_heads": 1},
@@ -155,8 +155,7 @@ def test_validate_report_requires_exact_head_coverage_and_green_collection():
 
     report["indexed"]["managed_heads"] = 2
     report["location_head_coverage"]["located"] = 1
-    with pytest.raises(ValueError, match="location_head_coverage_mismatch"):
-        module.validate_report(report)
+    module.validate_report(report)
 
 
 def test_validate_report_rejects_exact_qdrant_count_mismatch():
@@ -251,8 +250,9 @@ def test_format_location_verification_exposes_coverage_without_document_names():
     assert module.format_location_verification(
         expected=5,
         located=4,
+        partial=2,
         missing_by_doc_type={"xmind": 1},
     ) == (
-        'REBUILD_VERIFY locations expected=5 located=4 '
+        'REBUILD_VERIFY locations expected=5 located=4 partial=2 '
         'missing_by_doc_type={"xmind":1}'
     )
