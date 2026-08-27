@@ -47,6 +47,7 @@ export const adminContentApi = {
     restore: (...args: Parameters<typeof api.restoreManagedContent>) => api.restoreManagedContent(...args),
     auditEvents: (...args: Parameters<typeof api.managedContentAuditEvents>) => api.managedContentAuditEvents(...args),
   publish: (...args: Parameters<typeof api.publishManagedContent>) => api.publishManagedContent(...args),
+  publishTranscript: (...args: Parameters<typeof api.publishTranscriptVersion>) => api.publishTranscriptVersion(...args),
   regeneratePreview: (...args: Parameters<typeof api.regenerateManagedContentPreview>) => api.regenerateManagedContentPreview(...args),
   xmindPreview: (...args: Parameters<typeof api.managedContentXMindPreview>) => api.managedContentXMindPreview(...args),
   bulkPublish: (...args: Parameters<typeof api.bulkPublishManagedContent>) => api.bulkPublishManagedContent(...args),

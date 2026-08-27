@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   capabilities: vi.fn(),
   categories: vi.fn(),
   items: vi.fn(),
+  allItems: vi.fn(),
   preflightUpload: vi.fn(),
   upload: vi.fn(),
   uploadTasks: vi.fn(),
@@ -29,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   createFolderRequest: vi.fn(),
   reviewFolderRequest: vi.fn(),
   publish: vi.fn(),
+  publishTranscript: vi.fn(),
   regeneratePreview: vi.fn(),
   bulkPublish: vi.fn(),
   bulkMove: vi.fn(),
@@ -108,6 +110,7 @@ vi.mock("../../api/client", () => ({
     managedContentCapabilities: mocks.capabilities,
     managedCategories: mocks.categories,
     managedContentItems: mocks.items,
+    managedContentItemsAll: mocks.allItems,
     preflightManagedContentUpload: mocks.preflightUpload,
     uploadManagedContent: mocks.upload,
     managedUploadTasks: mocks.uploadTasks,
@@ -128,6 +131,7 @@ vi.mock("../../api/client", () => ({
     createFolderRequest: mocks.createFolderRequest,
     reviewFolderRequest: mocks.reviewFolderRequest,
     publishManagedContent: mocks.publish,
+    publishTranscriptVersion: mocks.publishTranscript,
     regenerateManagedContentPreview: mocks.regeneratePreview,
     bulkPublishManagedContent: mocks.bulkPublish,
     bulkMoveManagedContent: mocks.bulkMove,
@@ -299,6 +303,7 @@ describe("AdminManagedContentPage", () => {
     mocks.capabilities.mockResolvedValue({ enabled: true, max_upload_bytes: 1024, max_batch_files: 5000, max_batch_bytes: 10240, supported_extensions: [".pdf"] });
     mocks.categories.mockResolvedValue([category]);
     mocks.items.mockResolvedValue({ items: [item], total: 1, status_counts: { pending_publication: 1 } });
+    mocks.allItems.mockResolvedValue([item]);
     mocks.preflightUpload.mockResolvedValue({ entries: [], folder_conflicts: [] });
     mocks.folderRequests.mockResolvedValue([]);
     mocks.regeneratePreview.mockResolvedValue({ version_id: "version-1", preview_parent_id: "parent-pptx", preview_status: "ready" });
@@ -333,6 +338,7 @@ describe("AdminManagedContentPage", () => {
   });
 
   it("renders shared entries with the managed library row structure and navigation", async () => {
+    mocks.permissions = PUBLISHER_PERMISSIONS;
     const sharedCategory = {
       ...category,
       id: "cat-shared",
@@ -344,13 +350,55 @@ describe("AdminManagedContentPage", () => {
       full_path: "04 共享培训",
     };
     mocks.categories.mockResolvedValue([sharedCategory]);
+    const sharedVideo = {
+      ...item,
+      item_id: "media-transcript-media-1",
+      version_id: "transcript-1",
+      title: "导论",
+      original_filename: "导论.mp4",
+      doc_type: "video",
+      content_kind: "media_transcript",
+      category_id: "cat-shared",
+      category_label: "04 共享培训",
+      category_path: "04 共享培训",
+      media_id: "media-1",
+      lifecycle_status: "transcript_approved",
+      review_status: "review_approved",
+      publication_status: "not_published",
+      transcription_job_status: "succeeded",
+      has_published_head: false,
+      source_origin: "transcription",
+    };
+    const secondSharedVideo = {
+      ...sharedVideo,
+      item_id: "media-transcript-media-2",
+      version_id: "transcript-2",
+      title: "进阶",
+      original_filename: "进阶.mp4",
+      media_id: "media-2",
+    };
+    mocks.items.mockResolvedValue({
+      items: [sharedVideo],
+      total: 2,
+      status_counts: { transcript_approved: 2 },
+    });
+    mocks.allItems.mockResolvedValue([sharedVideo, secondSharedVideo]);
+    let failSecondPublish = true;
+    mocks.publishTranscript.mockImplementation(async (versionId: string) => {
+      if (versionId === "transcript-2" && failSecondPublish) {
+        failSecondPublish = false;
+        throw new Error("发布队列暂不可用");
+      }
+      return {};
+    });
     mocks.externalEntries
       .mockImplementation(async (_sourceId: string, parent: string) => parent === "" ? ({
         source_id: "source-1",
         parent_relative_path: "",
         entries: [
           { id: "folder-1", kind: "folder", name: "一级课程", relative_path: "一级课程" },
-          { id: "video-1", kind: "video", name: "导论.mp4", relative_path: "导论.mp4", availability: "available", modified_ns: 1_700_000_000_000_000_000 },
+          { id: "video-1", kind: "video", name: "导论.mp4", relative_path: "导论.mp4", availability: "available", media_id: "media-1", lifecycle_status: "transcript_approved", modified_ns: 1_700_000_000_000_000_000 },
+          { id: "video-2", kind: "video", name: "进阶.mp4", relative_path: "进阶.mp4", availability: "available", media_id: "media-2", lifecycle_status: "transcript_approved", modified_ns: 1_700_000_000_000_000_000 },
         ],
       }) : ({ source_id: "source-1", parent_relative_path: parent, entries: [] }));
 
@@ -358,12 +406,48 @@ describe("AdminManagedContentPage", () => {
     fireEvent.click(await screen.findByTestId("managed-folder-row-cat-shared"));
 
     await waitFor(() => expect(mocks.externalEntries).toHaveBeenCalledWith("source-1", ""));
+    expect(mocks.allItems).toHaveBeenCalledWith(expect.objectContaining({ category_id: "cat-shared" }));
     expect(await screen.findByTestId("shared-library-row-folder-1")).toBeInTheDocument();
     expect(screen.getByTestId("shared-library-row-video-1")).toHaveTextContent("导论.mp4");
     expect(screen.getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual(
       expect.arrayContaining(["类型", "资料", "更新时间", "状态", "来源", "操作"]),
     );
     expect(screen.getAllByText("共享").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByTestId("shared-library-row-video-1")).toHaveTextContent("待发布");
+    expect(screen.getAllByRole("checkbox", { name: "选择导论" })[0]).toBeEnabled();
+    expect(screen.getAllByRole("button", { name: "播放“导论”" })[0]).toBeEnabled();
+    expect(screen.getAllByRole("button", { name: "查看“导论”的详细信息" })[0]).toBeEnabled();
+    expect(screen.getAllByRole("button", { name: "重命名“导论”" })[0]).toBeDisabled();
+    expect(screen.getAllByRole("button", { name: "更新“导论”" })[0]).toBeDisabled();
+    expect(screen.getAllByRole("button", { name: "调整“导论”的归档目录" })[0]).toBeDisabled();
+    expect(screen.getAllByRole("button", { name: "下载“导论”" })[0]).toBeEnabled();
+    expect(screen.getAllByRole("button", { name: "删除“导论”" })[0]).toBeDisabled();
+    expect(screen.getAllByRole("button", { name: "发布" })[0]).toBeEnabled();
+    const overview = screen.getByRole("region", { name: "资料状态概览" });
+    expect(within(overview).getByText("待发布").parentElement?.parentElement).toHaveTextContent("2");
+    expect(screen.getByLabelText("搜索资料")).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "选择导论" })[0]);
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "选择进阶" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "批量发布" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认发布（2）" }));
+    await waitFor(() => expect(mocks.publishTranscript).toHaveBeenCalledTimes(2));
+    expect(mocks.publishTranscript).toHaveBeenCalledWith("transcript-1");
+    expect(mocks.publishTranscript).toHaveBeenCalledWith("transcript-2");
+    const retryDialog = screen.getByRole("dialog", { name: "批量发布资料" });
+    fireEvent.click(within(retryDialog).getByRole("button", { name: "重试失败项" }));
+    await waitFor(() => expect(mocks.publishTranscript).toHaveBeenCalledTimes(3));
+    expect(mocks.publishTranscript).toHaveBeenLastCalledWith("transcript-2");
+
+    mocks.allItems.mockResolvedValue([secondSharedVideo]);
+    fireEvent.change(screen.getByLabelText("搜索资料"), { target: { value: "进阶" } });
+    await waitFor(() => expect(mocks.allItems).toHaveBeenLastCalledWith(
+      expect.objectContaining({ category_id: "cat-shared", query: "进阶" }),
+    ));
+    await waitFor(() => expect(screen.queryByTestId("shared-library-row-video-1")).not.toBeInTheDocument());
+    expect(screen.getByTestId("shared-library-row-video-2")).toBeInTheDocument();
+
     fireEvent.click(screen.getByRole("button", { name: "打开一级课程" }));
     await waitFor(() => expect(mocks.externalEntries).toHaveBeenLastCalledWith("source-1", "一级课程"));
   });

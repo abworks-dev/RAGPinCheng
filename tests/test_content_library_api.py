@@ -3264,6 +3264,7 @@ def test_published_media_transcripts_share_library_listing_without_document_mirr
         **_auth(sessions, "publisher"),
     ).json()["total"] == 0
 
+
     move_url = f"/api/admin/content/items/{first_item_id}/move"
     body = {"target_category_id": "cat-04", "expected_version_id": first_version_id}
     assert client.post(
@@ -3317,6 +3318,69 @@ def test_published_media_transcripts_share_library_listing_without_document_mirr
         assert conn.execute("SELECT count(*) FROM content_index_jobs").fetchone()[0] == 0
     finally:
         conn.close()
+
+
+@pytest.mark.parametrize(
+    ("review_status", "publication_status", "index_status", "expected"),
+    [
+        ("awaiting_review", "not_published", "done", "transcript_awaiting_review"),
+        ("review_approved", "not_published", "done", "transcript_approved"),
+        ("review_approved", "publishing", "pending", "publishing"),
+        ("review_approved", "publication_failed", "failed", "publication_failed"),
+    ],
+)
+def test_media_library_status_prefers_review_and_publication_over_completed_transcription(
+    content_api,
+    review_status: str,
+    publication_status: str,
+    index_status: str,
+    expected: str,
+):
+    client, sessions, _queued, db_path = content_api
+    media_id = "123e4567-e89b-12d3-a456-426614174210"
+    version_id = "123e4567-e89b-12d3-a456-426614174211"
+    conn = connect(db_path)
+    _insert_published_media(
+        conn,
+        media_id=media_id,
+        version_id=version_id,
+        title="共享培训",
+        filename="shared.mp4",
+        now=100,
+    )
+    conn.execute("DELETE FROM media_transcript_heads WHERE media_id=?", (media_id,))
+    conn.execute(
+        "UPDATE transcript_versions SET review_status=?,publication_status=?,published_at=NULL WHERE id=?",
+        (review_status, publication_status, version_id),
+    )
+    conn.execute(
+        "UPDATE transcript_publication_index_jobs SET status=? WHERE transcript_version_id=?",
+        (index_status, version_id),
+    )
+    conn.commit()
+    conn.close()
+
+    listing = client.get(
+        "/api/admin/content/items-page?category_id=cat-05&content_kind=media_transcript",
+        **_auth(sessions, "publisher"),
+    )
+    assert listing.status_code == 200, listing.text
+    assert listing.json()["items"][0]["lifecycle_status"] == expected
+    assert listing.json()["status_counts"] == {expected: 1}
+    if expected == "transcript_approved":
+        grouped = client.get(
+            "/api/admin/content/items-page?lifecycle_status=pending_publication",
+            **_auth(sessions, "publisher"),
+        )
+        assert grouped.status_code == 200, grouped.text
+        assert [entry["version_id"] for entry in grouped.json()["items"]] == [version_id]
+    if expected == "publishing":
+        grouped = client.get(
+            "/api/admin/content/items-page?lifecycle_status=publishing",
+            **_auth(sessions, "publisher"),
+        )
+        assert grouped.status_code == 200, grouped.text
+        assert [entry["version_id"] for entry in grouped.json()["items"]] == [version_id]
 
 
 def test_published_media_downloads_video_transcript_and_zip_with_permission_checks(
@@ -3388,11 +3452,62 @@ def test_published_media_downloads_video_transcript_and_zip_with_permission_chec
         assert archive.read("training-video.mp4") == video
         assert archive.read("下载_测试视频-转录稿.md") == transcript
 
+    conn = connect(db_path)
+    conn.execute(
+        "UPDATE transcript_versions SET publication_status='not_published' WHERE id=?",
+        (version_id,),
+    )
+    conn.commit()
+    conn.close()
+    source_only_response = client.get(
+        endpoint, params={"part": "video"}, **_auth(sessions, "publisher")
+    )
+    assert source_only_response.status_code == 200
+    assert source_only_response.content == video
+    assert client.get(
+        endpoint, params={"part": "transcript"}, **_auth(sessions, "publisher")
+    ).status_code == 404
+
+    conn = connect(db_path)
+    conn.execute(
+        "UPDATE transcript_versions SET publication_status='published' WHERE id=?",
+        (version_id,),
+    )
+    conn.commit()
+    conn.close()
+
     monkeypatch.setattr(routes_content, "_MAX_BULK_DOWNLOAD_BYTES", len(video) + len(transcript) - 1)
     oversized = client.get(
         endpoint, params={"part": "all"}, **_auth(sessions, "publisher")
     )
     assert oversized.status_code == 413
+
+    waiting_media_id = "123e4567-e89b-12d3-a456-426614174132"
+    conn = connect(db_path)
+    waiting_item_id, _ = _insert_catalogued_media(
+        conn,
+        media_id=waiting_media_id,
+        title="待转录源视频",
+        filename="waiting.mp4",
+        now=500,
+    )
+    waiting_path = tmp_path / "media" / "synthetic" / f"{waiting_media_id}.mp4"
+    waiting_path.write_bytes(video)
+    conn.execute(
+        "UPDATE media_assets SET file_size=?,sha256=? WHERE media_id=?",
+        (len(video), hashlib.sha256(video).hexdigest(), waiting_media_id),
+    )
+    conn.commit()
+    conn.close()
+    waiting_endpoint = f"/api/admin/content/items/{waiting_item_id}/media-download"
+    source_without_transcript = client.get(
+        waiting_endpoint, params={"part": "video"}, **_auth(sessions, "publisher")
+    )
+    assert source_without_transcript.status_code == 200
+    assert source_without_transcript.content == video
+    assert client.get(
+        waiting_endpoint, params={"part": "transcript"}, **_auth(sessions, "publisher")
+    ).status_code == 404
 
 
 def test_media_download_rejects_path_escape_and_integrity_mismatches(content_api, tmp_path: Path):

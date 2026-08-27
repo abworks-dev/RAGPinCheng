@@ -71,7 +71,7 @@ from .indexing import create_job, enqueue
 from .routes_transcription import build_transcription_service, resolve_admitted_retry_scheme
 from .transcription_schemes import get_scheme, resolve_scheme_runtime
 from .routes_media import safe_join, stream_media_file
-from .media_storage import MediaStorageError, resolve_media_path
+from .media_storage import MediaStorageError, require_mutable_media_source, resolve_media_path
 from .media_transcript_catalog import (
     DEFAULT_MEDIA_TRANSCRIPT_CATEGORY_ID,
     ensure_media_transcript_catalog_item,
@@ -1533,6 +1533,11 @@ async def upload_media(
         transcript_bytes = await transcript.read()
         _validate_transcript_markdown(transcript_bytes)
 
+    if replacement_source_media_id is not None:
+        try:
+            require_mutable_media_source(conn, replacement_source_media_id)
+        except MediaStorageError as exc:
+            raise HTTPException(status_code=409, detail="共享源只读，不能替换视频文件") from exc
     if category_id is None and replacement_source_media_id is not None:
         source_category = conn.execute(
             """SELECT i.category_id FROM content_items i

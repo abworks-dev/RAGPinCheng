@@ -1835,16 +1835,16 @@ _CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
                m.original_filename,'video' AS doc_type,
                CASE
                  WHEN h.current_version_id IS NOT NULL THEN 'published'
-                 WHEN mj.status IN ('pending','running') THEN 'transcribing'
-                 WHEN mj.status='succeeded' THEN 'transcript_ready'
-                 WHEN m.status='failed' THEN 'transcription_failed'
-                 WHEN mj.status='failed' THEN 'transcription_failed'
-                 WHEN tv.review_status='awaiting_review' THEN 'transcript_awaiting_review'
-                 WHEN tv.review_status='review_rejected' THEN 'transcript_rejected'
                  WHEN tv.publication_status='publishing' THEN 'publishing'
                  WHEN tv.publication_status='publication_failed' THEN 'publication_failed'
                  WHEN tv.review_status='review_approved' THEN 'transcript_approved'
+                 WHEN tv.review_status='awaiting_review' THEN 'transcript_awaiting_review'
+                 WHEN tv.review_status='review_rejected' THEN 'transcript_rejected'
+                 WHEN mj.status IN ('pending','running') THEN 'transcribing'
+                 WHEN m.status='failed' THEN 'transcription_failed'
+                 WHEN mj.status='failed' THEN 'transcription_failed'
                  WHEN tv.id IS NOT NULL THEN 'transcript_ready'
+                 WHEN mj.status='succeeded' THEN 'transcript_ready'
                  ELSE 'awaiting_transcription'
                END AS lifecycle_status,
                NULL AS object_sha256,'transcription' AS source_origin,
@@ -2006,8 +2006,16 @@ def list_content_items_page(
     status_where = base_where
     status_params = list(params)
     if lifecycle_status:
-        status_where += " AND lifecycle_status=?"
-        status_params.append(lifecycle_status)
+        grouped_statuses = {
+            "pending_publication": ("pending_publication", "transcript_approved"),
+            "publishing": ("publishing", "transcribing"),
+        }.get(lifecycle_status)
+        if grouped_statuses:
+            status_where += f" AND lifecycle_status IN ({','.join('?' for _ in grouped_statuses)})"
+            status_params.extend(grouped_statuses)
+        else:
+            status_where += " AND lifecycle_status=?"
+            status_params.append(lifecycle_status)
     order_by = f"archived_at {archived_sort_direction.upper()},item_id" if archived else "updated_at DESC,item_id"
     if sort_by == "doc_type":
         cases = " ".join(
@@ -2046,15 +2054,15 @@ def _archive_media_transcript_item_locked(conn: sqlite3.Connection, item_id: str
                                  latest_job.status AS job_status,
                                CASE
                                    WHEN h.current_version_id IS NOT NULL THEN 'published'
-                                   WHEN latest_job.status IN ('pending','running') THEN 'transcribing'
-                                   WHEN latest_job.status='succeeded' THEN 'transcript_ready'
-                                   WHEN m.status='failed' OR latest_job.status='failed' THEN 'transcription_failed'
-                                   WHEN tv.review_status='awaiting_review' THEN 'transcript_awaiting_review'
-                                   WHEN tv.review_status='review_rejected' THEN 'transcript_rejected'
                                    WHEN tv.publication_status='publishing' THEN 'publishing'
                                    WHEN tv.publication_status='publication_failed' THEN 'publication_failed'
                                    WHEN tv.review_status='review_approved' THEN 'transcript_approved'
+                                   WHEN tv.review_status='awaiting_review' THEN 'transcript_awaiting_review'
+                                   WHEN tv.review_status='review_rejected' THEN 'transcript_rejected'
+                                   WHEN latest_job.status IN ('pending','running') THEN 'transcribing'
+                                   WHEN m.status='failed' OR latest_job.status='failed' THEN 'transcription_failed'
                                    WHEN tv.id IS NOT NULL THEN 'transcript_ready'
+                                   WHEN latest_job.status='succeeded' THEN 'transcript_ready'
                                    ELSE 'awaiting_transcription'
                                  END AS lifecycle_status
                           FROM content_items i JOIN media_assets m ON m.media_id=i.media_id

@@ -68,7 +68,7 @@ from .schemas import (
     TranscriptionSchemeOptionDTO,
 )
 from .transcription_schemes import available_schemes, resolve_scheme_runtime
-from .media_storage import MediaStorageError, resolve_media_path
+from .media_storage import MediaStorageError, require_mutable_media_source, resolve_media_path
 from .transcription_artifacts import LocalTranscriptionArtifactStore
 from .transcription_publication import TranscriptionPublicationApplicationService
 from .indexing import enqueue_publication
@@ -910,6 +910,10 @@ def create_media_metadata_revision(
 ):
     conn = connect()
     try:
+        try:
+            require_mutable_media_source(conn, media_id)
+        except MediaStorageError as exc:
+            raise HTTPException(status_code=409, detail="共享源只读，不能修改媒体信息") from exc
         title, original_filename = _normalized_media_metadata(
             body.title, body.original_filename
         )

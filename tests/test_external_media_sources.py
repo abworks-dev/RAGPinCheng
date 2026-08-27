@@ -14,9 +14,56 @@ from fastapi.testclient import TestClient
 from api import routes_external_media
 from api.db import connect, init_db
 from api.db import get_db
-from api.external_media import ExternalMediaError, discover_video_files, reconcile_source
-from api.media_storage import MediaStorageError, normalize_external_relative_path, resolve_media_path
+from api.external_media import (
+    ExternalMediaError,
+    discover_video_files,
+    project_external_lifecycle,
+    reconcile_source,
+)
+from api.media_storage import MediaStorageError, normalize_external_relative_path, require_mutable_media_source, resolve_media_path
 from src.config import parse_external_unc_roots, resolve_external_unc_path
+
+
+@pytest.mark.parametrize(
+    ("media_status", "job_status", "review_status", "publication_status", "index_status", "expected"),
+    [
+        ("uploaded", None, None, None, None, "awaiting_transcription"),
+        ("transcribing", "running", None, None, None, "transcribing"),
+        ("failed", "failed", None, None, None, "transcription_failed"),
+        ("transcript_ready", "succeeded", "awaiting_review", "not_published", None, "transcript_awaiting_review"),
+        ("transcript_ready", "succeeded", "review_rejected", "not_published", None, "transcript_rejected"),
+        ("transcript_ready", "succeeded", "review_approved", "not_published", None, "transcript_approved"),
+        ("transcript_ready", "succeeded", "review_approved", "publishing", "embedding", "publishing"),
+        ("transcript_ready", "succeeded", "review_approved", "publication_failed", "failed", "publication_failed"),
+        ("ready", "succeeded", "review_approved", "published", "done", "published"),
+    ],
+)
+def test_external_lifecycle_matches_managed_video_statuses(
+    media_status: str,
+    job_status: str | None,
+    review_status: str | None,
+    publication_status: str | None,
+    index_status: str | None,
+    expected: str,
+) -> None:
+    assert project_external_lifecycle(
+        media_status=media_status,
+        transcription_job_status=job_status,
+        review_status=review_status,
+        publication_status=publication_status,
+        index_status=index_status,
+    ) == expected
+
+
+def test_external_lifecycle_prefers_published_head_over_newer_revision() -> None:
+    assert project_external_lifecycle(
+        media_status="transcript_ready",
+        transcription_job_status="succeeded",
+        review_status="awaiting_review",
+        publication_status="not_published",
+        index_status=None,
+        has_published_head=True,
+    ) == "published"
 
 
 def _source_database(tmp_path: Path, share: Path) -> tuple[sqlite3.Connection, str]:
@@ -186,6 +233,8 @@ def test_external_media_resolver_checks_identity_and_never_returns_host_path(tmp
         resolved = resolve_media_path(conn, row["media_id"], external_roots={"share": share})
         assert resolved.path == video
         assert resolved.storage_kind == "external"
+        with pytest.raises(MediaStorageError, match="external_media_read_only"):
+            require_mutable_media_source(conn, row["media_id"])
         video.write_bytes(b"mutated")
         with pytest.raises(MediaStorageError, match="external_media_changed"):
             resolve_media_path(conn, row["media_id"], external_roots={"share": share})
