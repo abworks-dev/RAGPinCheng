@@ -161,8 +161,7 @@ def test_single_pptx_location_diagnostic_cli_requires_bounded_inputs():
     assert "--item-id" in result.stdout
     assert "--version-id" in result.stdout
     assert "--work-dir" in result.stdout
-    assert "--source" in result.stdout
-    assert "--expected-sha256" in result.stdout
+    assert "--manifest" in result.stdout
 
 
 def test_production_workflow_is_exact_read_only_and_isolated():
@@ -172,11 +171,10 @@ def test_production_workflow_is_exact_read_only_and_isolated():
         "permissions:\n  contents: read",
         "group: production-app-manual-v1",
         "runs-on: [self-hosted, linux, ubuntu, production, app]",
-        ITEM_ID,
-        VERSION_ID,
+        "DIAGNOSE_ALL_PPTX",
         "--read-only",
         "--network none",
-        ":/diagnostic/source.pptx:ro",
+        ":/diagnostic-input:ro",
         ":/diagnostic/repo:ro",
         "--tmpfs /diagnostic-work",
         "RAG_DATA_DIR=/diagnostic-work/data",
@@ -198,9 +196,9 @@ def test_production_workflow_is_exact_read_only_and_isolated():
     ):
         assert forbidden not in workflow
 
-    assert "--source /diagnostic/source.pptx" in workflow
-    assert "--expected-sha256" in workflow
+    assert "--manifest /diagnostic-input/manifest.json" in workflow
     assert "sqlite3.connect" in workflow
     assert "shutil.copyfile" in workflow
     assert ":/diagnostic/data:ro" not in workflow
     assert ":/diagnostic/app.sqlite:ro" not in workflow
+    assert "PPTX_ALL_LOCATION_DIAGNOSTIC" in workflow

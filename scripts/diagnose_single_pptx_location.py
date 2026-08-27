@@ -193,9 +193,35 @@ def main() -> None:
     parser.add_argument("--version-id")
     parser.add_argument("--source", type=Path)
     parser.add_argument("--expected-sha256")
+    parser.add_argument("--manifest", type=Path)
     parser.add_argument("--work-dir", type=Path, required=True)
     args = parser.parse_args()
 
+    if args.manifest is not None:
+        if any(value is not None for value in (args.source, args.app_database, args.content_root, args.item_id, args.version_id, args.expected_sha256)):
+            parser.error("--manifest cannot be combined with single-target inputs")
+        manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+        results = []
+        for entry in manifest:
+            target = TargetPptx(Path(entry["source"]), str(entry["original_filename"]), str(entry["sha256"]))
+            report = diagnose_target(target, args.work_dir / str(entry["version_id"]))
+            results.append({
+                "item_id": str(entry["item_id"]),
+                "version_id": str(entry["version_id"]),
+                "original_filename": str(entry["original_filename"]),
+                "parents": report["chunks"]["parents"],
+                "children": report["chunks"]["children"],
+                "located_parents": report["chunks"]["located_parents"],
+                "located_children": report["chunks"]["located_children"],
+            })
+        missing = [item for item in results if item["located_parents"] == 0]
+        print("PPTX_ALL_LOCATION_DIAGNOSTIC " + json.dumps({
+            "schema_version": 1,
+            "pptx_heads": len(results),
+            "located_heads": len(results) - len(missing),
+            "missing_heads": missing,
+        }, ensure_ascii=False, sort_keys=True), flush=True)
+        return
     if args.source is not None:
         if not args.expected_sha256 or any(
             value is not None

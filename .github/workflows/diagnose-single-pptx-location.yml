@@ -1,16 +1,16 @@
-name: Diagnose Single Production PPTX Location
+name: Diagnose All Production PPTX Locations
 
 on:
   workflow_dispatch:
     inputs:
       confirm_diagnostic:
-        description: Select DIAGNOSE_SINGLE_PPTX to parse the approved production PPTX read-only
+        description: Select DIAGNOSE_ALL_PPTX to parse all current production PPTX files read-only
         required: true
         default: CANCEL
         type: choice
         options:
           - CANCEL
-          - DIAGNOSE_SINGLE_PPTX
+          - DIAGNOSE_ALL_PPTX
 
 permissions:
   contents: read
@@ -29,8 +29,6 @@ jobs:
       DATA_PATH: ${{ vars.PRODUCTION_APP_DATA_PATH }}
       CONTENT_ROOT: ${{ vars.PRODUCTION_CONTENT_ROOT }}
       CONFIRM_DIAGNOSTIC: ${{ inputs.confirm_diagnostic }}
-      ITEM_ID: item-8e22ad7c-e1ea-4475-b8ab-7084c9d870f3
-      VERSION_ID: version-2f810c73-7d5f-4b04-8ff1-9b7416a28403
     steps:
       - name: Check out the approved diagnostic implementation
         uses: actions/checkout@v4
@@ -42,8 +40,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          [ "${CONFIRM_DIAGNOSTIC}" = "DIAGNOSE_SINGLE_PPTX" ] || {
-            echo "ERROR: production single-PPTX diagnostic was not confirmed"
+          [ "${CONFIRM_DIAGNOSTIC}" = "DIAGNOSE_ALL_PPTX" ] || {
+            echo "ERROR: production all-PPTX diagnostic was not confirmed"
             exit 1
           }
           [ "${GITHUB_REF}" = "refs/heads/master" ] || {
@@ -85,41 +83,40 @@ jobs:
 
           TEMP_ROOT="$(mktemp -d)"
           trap 'rm -rf -- "${TEMP_ROOT}"' EXIT
-          export APP_DATABASE CONTENT_ROOT ITEM_ID VERSION_ID TEMP_ROOT
-          OBJECT_SHA256="$(python3 - <<'PY'
+          export APP_DATABASE CONTENT_ROOT TEMP_ROOT
+          python3 - <<'PY'
           import hashlib
+          import json
           import os
           from pathlib import Path
           import shutil
           import sqlite3
 
           with sqlite3.connect(f"file:{os.environ['APP_DATABASE']}?mode=ro", uri=True) as connection:
-              row = connection.execute(
-                  """SELECT o.storage_rel_path,o.sha256,v.doc_type
+              rows = connection.execute(
+                  """SELECT h.item_id,h.current_version_id,o.storage_rel_path,o.sha256,v.original_filename,v.doc_type
                        FROM content_item_heads h
                        JOIN content_versions v
                          ON v.id=h.current_version_id AND v.item_id=h.item_id
                        JOIN content_objects o ON o.sha256=v.object_sha256
-                      WHERE h.item_id=? AND h.current_version_id=?""",
-                  (os.environ["ITEM_ID"], os.environ["VERSION_ID"]),
-              ).fetchone()
-          if row is None or str(row[2]) != "pptx":
-              raise SystemExit("ERROR: approved production PPTX target is unavailable")
+                      WHERE v.doc_type='pptx' ORDER BY h.item_id"""
+              ).fetchall()
           root = Path(os.environ["CONTENT_ROOT"]).resolve(strict=True)
-          source = (root / str(row[0])).resolve(strict=True)
-          if source == root or root not in source.parents or not source.is_file() or source.is_symlink():
-              raise SystemExit("ERROR: approved production PPTX object is unsafe")
-          expected = str(row[1])
-          digest = hashlib.sha256(source.read_bytes()).hexdigest()
-          if digest != expected:
-              raise SystemExit("ERROR: approved production PPTX object hash mismatch")
-          target = Path(os.environ["TEMP_ROOT"]) / "source.pptx"
-          shutil.copyfile(source, target)
-          if hashlib.sha256(target.read_bytes()).hexdigest() != expected:
-              raise SystemExit("ERROR: temporary PPTX copy hash mismatch")
-          print(expected)
+          manifest = []
+          for index, row in enumerate(rows):
+              source = (root / str(row[2])).resolve(strict=True)
+              if source == root or root not in source.parents or not source.is_file() or source.is_symlink():
+                  raise SystemExit("ERROR: approved production PPTX object is unsafe")
+              expected = str(row[3])
+              if hashlib.sha256(source.read_bytes()).hexdigest() != expected:
+                  raise SystemExit("ERROR: approved production PPTX object hash mismatch")
+              target = Path(os.environ["TEMP_ROOT"]) / f"{index:04d}.pptx"
+              shutil.copyfile(source, target)
+              if hashlib.sha256(target.read_bytes()).hexdigest() != expected:
+                  raise SystemExit("ERROR: temporary PPTX copy hash mismatch")
+              manifest.append({"item_id": row[0], "version_id": row[1], "original_filename": row[4], "sha256": expected, "source": f"/diagnostic-input/{target.name}"})
+          (Path(os.environ["TEMP_ROOT"]) / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
           PY
-          )"
 
           OUTPUT="$(docker run --rm \
             --read-only \
@@ -135,17 +132,16 @@ jobs:
             -e CONTENT_ROOT=/diagnostic-work/content \
             -e DOCS_DIR=/diagnostic-work/docs \
             -e MEDIA_DIR=/diagnostic-work/media \
-            -v "${TEMP_ROOT}/source.pptx:/diagnostic/source.pptx:ro" \
+            -v "${TEMP_ROOT}:/diagnostic-input:ro" \
             -v "${GITHUB_WORKSPACE}:/diagnostic/repo:ro" \
             --entrypoint python3 \
             pincheng-rag-backend:latest \
             /diagnostic/repo/scripts/diagnose_single_pptx_location.py \
-              --source /diagnostic/source.pptx \
-              --expected-sha256 "${OBJECT_SHA256}" \
+              --manifest /diagnostic-input/manifest.json \
               --work-dir /diagnostic-work)"
           printf '%s\n' "${OUTPUT}"
           DIAGNOSTIC_JSON="$(printf '%s\n' "${OUTPUT}" | sed -n \
-            's/^PPTX_SINGLE_FILE_DIAGNOSTIC //p')"
+            's/^PPTX_ALL_LOCATION_DIAGNOSTIC //p')"
           [ -n "${DIAGNOSTIC_JSON}" ] || {
             echo "ERROR: structural diagnostic output is missing"
             exit 1
@@ -157,14 +153,12 @@ jobs:
           report = json.loads(os.environ["DIAGNOSTIC_JSON"])
           if report.get("schema_version") != 1:
               raise SystemExit("ERROR: unsupported structural diagnostic report")
-          print("PPTX_SINGLE_FILE_DIAGNOSTIC_VALIDATED status=read_only")
+          print("PPTX_ALL_LOCATION_DIAGNOSTIC_VALIDATED status=read_only")
           PY
           {
-            echo "## Single production PPTX location diagnostic"
+            echo "## All production PPTX location diagnostic"
             echo
             echo "- Status: read-only parse completed"
-            echo "- Item: \`${ITEM_ID}\`"
-            echo "- Version: \`${VERSION_ID}\`"
             echo
             echo '```json'
             printf '%s\n' "${DIAGNOSTIC_JSON}"
