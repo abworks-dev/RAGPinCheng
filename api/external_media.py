@@ -27,6 +27,41 @@ class ExternalMediaError(RuntimeError):
     pass
 
 
+def project_external_lifecycle(
+    *,
+    media_status: str | None,
+    transcription_job_status: str | None,
+    review_status: str | None,
+    publication_status: str | None,
+    index_status: str | None,
+    has_published_head: bool = False,
+) -> str:
+    """Project an external video onto the managed-content lifecycle vocabulary."""
+    if has_published_head or (publication_status == "published" and index_status == "done"):
+        return "published"
+    if publication_status == "publication_failed" or index_status == "failed":
+        return "publication_failed"
+    if publication_status == "publishing" or index_status in {
+        "pending", "parsing", "chunking", "embedding"
+    }:
+        return "publishing"
+    if review_status == "review_approved":
+        return "transcript_approved"
+    if review_status == "awaiting_review":
+        return "transcript_awaiting_review"
+    if review_status == "review_rejected":
+        return "transcript_rejected"
+    if review_status:
+        return "transcript_ready"
+    if media_status == "failed" or transcription_job_status == "failed":
+        return "transcription_failed"
+    if media_status == "transcribing" or transcription_job_status in {
+        "pending", "running", "processing"
+    }:
+        return "transcribing"
+    return "awaiting_transcription"
+
+
 @dataclass(frozen=True, slots=True)
 class ScannedFile:
     relative_path: str

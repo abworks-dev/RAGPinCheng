@@ -2223,6 +2223,7 @@ export function AdminManagedContentPage() {
   const [recursiveBulkAction, setRecursiveBulkAction] =
     useState<BulkOperationAction | null>(null);
   const [bulkAction, setBulkAction] = useState<BulkAction | null>(null);
+  const [sharedManagedItems, setSharedManagedItems] = useState<ManagedContentItem[]>([]);
   const [bulkFailures, setBulkFailures] = useState<
     Array<BulkManagedContentResult & { title: string }>
   >([]);
@@ -2500,10 +2501,12 @@ export function AdminManagedContentPage() {
             ? current
             : "",
         );
-        setSelected((current) =>
-          current.filter((id) =>
-            listing.items.some((item) => item.version_id === id),
-          ),
+        const loadingSharedFolder = categoryRows.some(
+          (category) => category.id === currentFolderId && category.category_kind === "shared_folder",
+        );
+        setSelected((current) => loadingSharedFolder
+          ? current
+          : current.filter((id) => listing.items.some((item) => item.version_id === id))
         );
         setSelectedFolders((current) =>
           current.filter((id) =>
@@ -4338,8 +4341,8 @@ export function AdminManagedContentPage() {
   };
 
   const selectedItems = useMemo(
-    () => items.filter((item) => selected.includes(item.version_id)),
-    [items, selected],
+    () => (sharedFolderMode ? sharedManagedItems : items).filter((item) => selected.includes(item.version_id)),
+    [items, selected, sharedFolderMode, sharedManagedItems],
   );
 
   const canMoveItem = (item: ManagedContentItem) => {
@@ -4377,8 +4380,9 @@ export function AdminManagedContentPage() {
       : can("item.archive_published");
   };
   const canPublishItem = (item: ManagedContentItem) =>
-    item.content_kind === "document" &&
-    ["pending_publication", "publication_failed"].includes(item.lifecycle_status);
+    item.content_kind === "document"
+      ? ["pending_publication", "publication_failed"].includes(item.lifecycle_status)
+      : ["transcript_approved", "publication_failed"].includes(item.lifecycle_status);
 
   const executeBulk = async () => {
     if (!bulkAction || selectedItems.length === 0 || busyAction === "bulk")
@@ -4401,7 +4405,26 @@ export function AdminManagedContentPage() {
           ? selectedMoveOperation === "reclassify"
             ? await adminContentApi.bulkReclassify(moveItems, bulkMoveFolderId)
             : await adminContentApi.bulkMove(moveItems, bulkMoveFolderId)
-          : await adminContentApi.bulkPublish(ids);
+          : await (async () => {
+              const documents = actionItems.filter((item) => item.content_kind === "document");
+              const transcripts = actionItems.filter((item) => item.content_kind === "media_transcript");
+              const documentResult = documents.length
+                ? await adminContentApi.bulkPublish(documents.map((item) => item.version_id))
+                : { results: [], succeeded: 0, failed: 0 };
+              const transcriptResults = await Promise.all(transcripts.map(async (item) => {
+                try {
+                  await adminContentApi.publishTranscript(item.version_id);
+                  return { version_id: item.version_id, item_id: item.item_id, status: "succeeded" as const, message: null, index_job_id: null };
+                } catch (error) {
+                  return { version_id: item.version_id, item_id: item.item_id, status: "failed" as const, message: error instanceof Error ? error.message : "发布失败", index_job_id: null };
+                }
+              }));
+              return {
+                results: [...documentResult.results, ...transcriptResults],
+                succeeded: documentResult.succeeded + transcriptResults.filter((entry) => entry.status === "succeeded").length,
+                failed: documentResult.failed + transcriptResults.filter((entry) => entry.status === "failed").length,
+              };
+            })();
       const titles = new Map(
         selectedItems.map((item) => [item.version_id, item.title]),
       );
@@ -4516,8 +4539,7 @@ export function AdminManagedContentPage() {
   const skippedPublishSelectedItems = selectedItems.filter(
     (item) => !canPublishItem(item),
   );
-  const hasPublishableSelection =
-    documentSelection && publishableSelectedItems.length > 0;
+  const hasPublishableSelection = publishableSelectedItems.length > 0;
   const selectedMoveOperations = new Set(selectedItems.map(moveOperation));
   const hasMovableSelection =
     selectedItems.length > 0 &&
@@ -4649,7 +4671,21 @@ export function AdminManagedContentPage() {
     );
   };
 
-  const renderActions = (item: ManagedContentItem) => {
+  const publishTranscript = async (item: ManagedContentItem) => {
+    if (busyAction || !item.version_id) return;
+    setBusyAction(`publish-transcript:${item.version_id}`);
+    try {
+      await adminContentApi.publishTranscript(item.version_id);
+      toast.success("已将视频转录稿加入发布队列");
+      await load(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "发布视频转录稿失败");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const renderActions = (item: ManagedContentItem, sourceReadOnly = false) => {
     const disabled = Boolean(busyAction) || refreshing || !enabled;
     const isMediaTranscript = item.content_kind === "media_transcript";
     const reclassifying = ACTIVE_RECLASSIFICATION_STATUSES.has(
@@ -4663,21 +4699,27 @@ export function AdminManagedContentPage() {
           item.doc_type,
         ),
       );
-    const movable = canMoveItem(item);
+    const movable = !sourceReadOnly && canMoveItem(item);
     const downloadable = can("item.download");
     const revisionAllowed =
       !isMediaTranscript &&
       can("item.upload") &&
       item.lifecycle_status !== "publishing" &&
       !reclassifying;
-    const deletable =
+    const deletable = !sourceReadOnly &&
       canDeleteItem(item) &&
       item.lifecycle_status !== "publishing" &&
       !reclassifying;
-    const workflow =
-      ["pending_publication", "publication_failed"].includes(
-        item.lifecycle_status,
-      ) && can("item.publish")
+    const workflow = isMediaTranscript &&
+      ["transcript_approved", "publication_failed"].includes(item.lifecycle_status) &&
+      can("item.publish")
+        ? {
+            label: item.lifecycle_status === "publication_failed" ? "重新发布" : "发布",
+            action: () => void publishTranscript(item),
+          }
+        : ["pending_publication", "publication_failed"].includes(
+            item.lifecycle_status,
+          ) && can("item.publish")
         ? {
             label:
               item.lifecycle_status === "publication_failed"
@@ -4709,10 +4751,11 @@ export function AdminManagedContentPage() {
       const moveTooltip =
         unavailableReason ||
         (movable ? "调整归档目录" : "当前账号没有发布权限");
-      const mediaManageAllowed =
+      const derivedManageAllowed =
         state.status === "authed" &&
         state.user.role === "admin" &&
         Boolean(item.media_id);
+      const mediaManageAllowed = derivedManageAllowed && !sourceReadOnly;
       const updateAllowed =
         mediaManageAllowed &&
         !item.transcription_job_status?.match(/pending|running/);
@@ -4720,7 +4763,8 @@ export function AdminManagedContentPage() {
       return (
         <div className="ml-auto flex min-h-10 max-w-full flex-wrap items-center justify-end gap-1">
           <IconButton label={`转录“${item.title}”`} tooltip={transcriptionTooltip} className="border border-border max-sm:size-10" disabled={disabled || !pendingTranscription} onClick={() => openTranscriptionDialog([item])}><Rocket className="size-4" /></IconButton>
-          <IconButton label={`播放“${item.title}”`} tooltip={unavailableReason || (item.has_published_head ? "播放视频与转录稿" : "转录稿发布后可播放")} className="border border-border max-sm:size-10" disabled={disabled || !item.media_id || !item.has_published_head} onClick={() => openVideoPreview({ mediaId: item.media_id!, title: item.title, startSeconds: 0, fromSource: false })}><Film className="size-4" /></IconButton>
+          {workflow && <Button size="sm" className="shrink-0 max-sm:h-10" disabled={disabled} onClick={workflow.action}>{workflow.label}</Button>}
+          <IconButton label={`播放“${item.title}”`} tooltip={unavailableReason || (sourceReadOnly ? "预览共享视频和已有转录稿" : item.has_published_head ? "播放视频与转录稿" : "转录稿发布后可播放")} className="border border-border max-sm:size-10" disabled={disabled || !item.media_id || (!sourceReadOnly && !item.has_published_head)} onClick={() => openVideoPreview({ mediaId: item.media_id!, title: item.title, startSeconds: 0, fromSource: sourceReadOnly })}><Film className="size-4" /></IconButton>
           <IconButton
             label={`查看“${item.title}”的详细信息`}
             tooltip={unavailableReason || "查看视频详细信息"}
@@ -4730,11 +4774,11 @@ export function AdminManagedContentPage() {
           >
             <Info className="size-4" />
           </IconButton>
-          <IconButton label={`重命名“${item.title}”`} tooltip={unavailableReason || (mediaManageAllowed ? "重命名视频" : "仅系统管理员可以重命名视频")} className="border border-border max-sm:size-10" disabled={disabled || !mediaManageAllowed} onClick={() => openMediaInfoDialog(item)}><Pencil className="size-4" /></IconButton>
-          <IconButton label={`更新“${item.title}”`} tooltip={unavailableReason || (updateAllowed ? "更新视频资料" : "转录任务进行中，暂不能更新视频")} className="border border-border max-sm:size-10" disabled={disabled || !updateAllowed} onClick={() => { window.location.href = `${mediaBaseUrl}&action=replace`; }}><FileUp className="size-4" /></IconButton>
+          <IconButton label={`重命名“${item.title}”`} tooltip={unavailableReason || (sourceReadOnly ? "共享源只读，不能重命名" : mediaManageAllowed ? "重命名视频" : "仅系统管理员可以重命名视频")} className="border border-border max-sm:size-10" disabled={disabled || !mediaManageAllowed} onClick={() => openMediaInfoDialog(item)}><Pencil className="size-4" /></IconButton>
+          <IconButton label={`更新“${item.title}”`} tooltip={unavailableReason || (sourceReadOnly ? "共享源只读，不能替换文件" : updateAllowed ? "更新视频资料" : "转录任务进行中，暂不能更新视频")} className="border border-border max-sm:size-10" disabled={disabled || !updateAllowed} onClick={() => { window.location.href = `${mediaBaseUrl}&action=replace`; }}><FileUp className="size-4" /></IconButton>
           <IconButton
             label={`调整“${item.title}”的归档目录`}
-            tooltip={moveTooltip}
+            tooltip={sourceReadOnly ? "共享源只读，不能调整远程目录" : moveTooltip}
             className="border border-border max-sm:size-10"
             disabled={disabled || !movable}
             onClick={() => {
@@ -4756,10 +4800,10 @@ export function AdminManagedContentPage() {
                 key: "edit-transcript",
                 label: "编辑转录稿",
                 icon: <FilePenLine className="size-4" />,
-                href: mediaManageAllowed
+                href: derivedManageAllowed
                   ? `${mediaBaseUrl}&workbench=1&action=edit-current`
                   : undefined,
-                disabled: !mediaManageAllowed,
+                disabled: !derivedManageAllowed,
                 disabledReason: "当前账号没有发布权限",
               },
               {
@@ -4784,17 +4828,17 @@ export function AdminManagedContentPage() {
                 key: "open-media",
                 label: "进入转录任务",
                 icon: <ExternalLink className="size-4" />,
-                href: mediaManageAllowed
+                href: derivedManageAllowed
                   ? `${mediaBaseUrl}&workbench=1`
                   : undefined,
-                disabled: !mediaManageAllowed,
+                disabled: !derivedManageAllowed,
                 disabledReason: item.media_id
                   ? "仅系统管理员可以进入转录任务"
                   : "媒体关联缺失",
               },
             ]}
           />
-          <IconButton label={`删除“${item.title}”`} tooltip={unavailableReason || (deletable ? "移入回收站（视频与转录稿可一起恢复）" : "仅系统管理员可以删除视频")} className="border border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive max-sm:size-10" disabled={disabled || !deletable} onClick={() => openDeleteDialog([item])}><Trash2 className="size-4" /></IconButton>
+          <IconButton label={`删除“${item.title}”`} tooltip={unavailableReason || (sourceReadOnly ? "共享源只读，不能删除" : deletable ? "移入回收站（视频与转录稿可一起恢复）" : "仅系统管理员可以删除视频")} className="border border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive max-sm:size-10" disabled={disabled || !deletable} onClick={() => openDeleteDialog([item])}><Trash2 className="size-4" /></IconButton>
         </div>
       );
     }
@@ -6346,8 +6390,8 @@ export function AdminManagedContentPage() {
       >
         {[
           { label: "全部资料", value: Object.values(counts).reduce((sum, value) => sum + value, 0), icon: <FileText className="size-4" /> },
-          { label: "待发布", value: counts.pending_publication || 0, icon: <FileText className="size-4" />, tone: "warning" as const },
-          { label: "处理中", value: counts.publishing || 0, icon: <LoaderCircle className="size-4" />, tone: "warning" as const },
+          { label: "待发布", value: (counts.pending_publication || 0) + (counts.transcript_approved || 0), icon: <FileText className="size-4" />, tone: "warning" as const },
+          { label: "处理中", value: (counts.publishing || 0) + (counts.transcribing || 0), icon: <LoaderCircle className="size-4" />, tone: "warning" as const },
           { label: "已发布", value: counts.published || 0, icon: <Rocket className="size-4" />, tone: "success" as const },
           { label: "发布失败", value: counts.publication_failed || 0, icon: <XCircle className="size-4" />, tone: "destructive" as const },
         ].map((summary) => { const next = summary.label === "全部资料" ? "" : summary.label === "待发布" ? "pending_publication" : summary.label === "处理中" ? "publishing" : summary.label === "已发布" ? "published" : "publication_failed"; return <ManagedSummaryCard key={summary.label} label={summary.label} value={summary.value} icon={summary.icon} tone={summary.tone} active={statusFilter === next} onClick={() => { setStatusFilter((current) => current === next ? "" : next); setPage(0); }} />; })}
@@ -6453,7 +6497,7 @@ export function AdminManagedContentPage() {
               </span>
             </p>
           </div>
-          {!sharedFolderMode && <ManagedContentSearchFilters
+          <ManagedContentSearchFilters
             queryInput={queryInput}
             searchScope={searchScope}
             currentDirectoryAvailable={Boolean(currentFolderId)}
@@ -6471,9 +6515,9 @@ export function AdminManagedContentPage() {
               setSourceFilter("");
               setKindFilter("");
             }}
-          />}
-          {!sharedFolderMode && <div className="flex shrink-0 flex-wrap items-center gap-2">
-            {can("item.upload") && (
+          />
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {!sharedFolderMode && can("item.upload") && (
               <Button
                 size="sm"
                 className="max-sm:h-control-md"
@@ -6642,14 +6686,15 @@ export function AdminManagedContentPage() {
                       ? setNewFolderOpen(true)
                       : setRequestFolderOpen(true)
                   }
-                  disabled={!currentFolder}
+                  disabled={!currentFolder || sharedFolderMode}
+                  title={sharedFolderMode ? "共享源只读，不能新建远程目录" : undefined}
                 >
                   <FolderPlus className="size-4" />
                   新建目录
                 </Button>
               )
             )}
-          </div>}
+          </div>
         </div>
         <div
           className="border-b border-border bg-surface-muted/40 px-4 py-3 sm:px-5"
@@ -6733,8 +6778,26 @@ export function AdminManagedContentPage() {
               </div>
             </div>
           )}
-          {sharedFolderMode && currentFolder?.external_source_id ? (
-            <ExternalFolderBrowser sourceId={currentFolder.external_source_id} title={`${currentFolder.display_name}远程目录`} />
+          {sharedFolderMode && currentFolder?.external_source_id && !showGlobalResults ? (
+            <ExternalFolderBrowser
+              sourceId={currentFolder.external_source_id}
+              categoryId={currentFolder.id}
+              query={query}
+              lifecycleStatus={statusFilter}
+              sourceOrigin={sourceFilter}
+              docType={kindFilter ? kindFilter as "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "xmind" | "markdown" | "transcript" | "other" : undefined}
+              title={`${currentFolder.display_name}远程目录`}
+              managedItems={items}
+              selectedVersionIds={selected}
+              onToggleItem={(item) => setSelected((current) =>
+                current.includes(item.version_id)
+                  ? current.filter((id) => id !== item.version_id)
+                  : [...current, item.version_id]
+              )}
+              onManagedItemsLoaded={setSharedManagedItems}
+              renderItemStatus={renderItemStatus}
+              renderItemActions={(item) => renderActions(item, true)}
+            />
           ) : loading ? (
             <LoadingState
               className="min-h-48 border-x-0 border-b-0"

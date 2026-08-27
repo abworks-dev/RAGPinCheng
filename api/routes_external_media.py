@@ -15,7 +15,13 @@ from src.transcription.types import ContractValidationError
 
 from .auth import CurrentUser, require_admin, require_csrf_admin
 from .db import connect, get_db
-from .external_media import ExternalMediaError, due_source_ids, external_request_key, reconcile_source
+from .external_media import (
+    ExternalMediaError,
+    due_source_ids,
+    external_request_key,
+    project_external_lifecycle,
+    reconcile_source,
+)
 from .media_storage import normalize_external_relative_path
 from .media_upload_conflicts import require_active_category
 from .content_permissions import require_content_permission
@@ -194,6 +200,7 @@ def scan_source(
 def _entry_rows(conn: sqlite3.Connection, source_id: str) -> list[sqlite3.Row]:
     return conn.execute(
         """SELECT e.*,m.status AS media_status,
+                  EXISTS(SELECT 1 FROM media_transcript_heads h WHERE h.media_id=e.media_id) AS has_published_head,
                   (SELECT id FROM transcription_jobs j WHERE j.media_id=e.media_id ORDER BY attempt_number DESC LIMIT 1) AS job_id,
                   (SELECT status FROM transcription_jobs j WHERE j.media_id=e.media_id ORDER BY attempt_number DESC LIMIT 1) AS job_status,
                   (SELECT review_status FROM transcript_versions v WHERE v.media_id=e.media_id ORDER BY created_at DESC LIMIT 1) AS review_status,
@@ -253,6 +260,14 @@ def list_entries(
                 review_status=row["review_status"],
                 publication_status=row["publication_status"],
                 index_status=row["index_status"],
+                lifecycle_status=project_external_lifecycle(
+                    media_status=row["media_status"],
+                    transcription_job_status=row["job_status"],
+                    review_status=row["review_status"],
+                    publication_status=row["publication_status"],
+                    index_status=row["index_status"],
+                    has_published_head=bool(row["has_published_head"]),
+                ),
             )
         )
     entries = sorted(folders.values(), key=lambda item: item.name.casefold()) + videos

@@ -15,6 +15,15 @@ class MediaStorageError(RuntimeError):
     pass
 
 
+def require_mutable_media_source(conn: sqlite3.Connection, media_id: str) -> None:
+    row = conn.execute(
+        "SELECT storage_kind FROM media_assets WHERE media_id=?",
+        (media_id,),
+    ).fetchone()
+    if row is not None and row["storage_kind"] == "external":
+        raise MediaStorageError("external_media_read_only")
+
+
 @dataclass(frozen=True, slots=True)
 class ResolvedMedia:
     path: Path

@@ -1334,6 +1334,7 @@ export type ExternalMediaEntry = {
   review_status?: string | null;
   publication_status?: string | null;
   index_status?: string | null;
+  lifecycle_status?: string;
 };
 export type ExternalMediaEntryList = { source_id: string; parent_relative_path: string; entries: ExternalMediaEntry[] };
 export type ExternalMediaScan = { run_id: string; source_id: string; discovered_count: number; added_count: number; changed_count: number; missing_count: number; enqueued_count: number; enqueue_failures: number };

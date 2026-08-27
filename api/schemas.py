@@ -1400,6 +1400,7 @@ class ExternalMediaEntryDTO(BaseModel):
     review_status: str | None = None
     publication_status: str | None = None
     index_status: str | None = None
+    lifecycle_status: str = "awaiting_transcription"
 
 
 class ExternalMediaEntryListDTO(BaseModel):

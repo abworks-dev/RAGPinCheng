@@ -603,6 +603,27 @@ export const api = {
     if (params?.offset != null) search.set("offset", String(params.offset));
     return jsonFetch<ManagedContentList>(`/api/admin/content/items-page?${search}`);
   },
+  managedContentItemsAll: async (params: {
+    query?: string;
+    category_id: string;
+    lifecycle_status?: string;
+    source_origin?: string;
+    doc_type?: "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "xmind" | "markdown" | "transcript" | "other";
+  }) => {
+    const rows: ManagedContentItem[] = [];
+    let offset = 0;
+    while (true) {
+      const page = await api.managedContentItems({
+        ...params,
+        content_kind: "media_transcript",
+        limit: 100,
+        offset,
+      });
+      rows.push(...page.items);
+      offset += page.items.length;
+      if (page.items.length === 0 || offset >= page.total) return rows;
+    }
+  },
   deleteManagedContent: (itemId: string, expectedVersionId: string) =>
     jsonFetch<{
       item_id: string;

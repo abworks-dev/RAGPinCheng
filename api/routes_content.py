@@ -86,6 +86,7 @@ from .content_bulk_operations import (
     update_item_selection,
 )
 from .content_storage import ContentStorage, StoredContentObject
+from .media_storage import MediaStorageError, resolve_media_path
 from .content_trash_cleanup import (
     get_trash_settings,
     list_purge_runs,
@@ -2917,22 +2918,30 @@ def download_media_library_item(
 ):
     _require_feature()
     row = conn.execute(
-        """SELECT i.title,m.original_filename,m.storage_rel_path,m.mime_type,m.file_size,m.sha256,
+        """SELECT i.title,i.media_id,m.original_filename,m.storage_rel_path,m.mime_type,m.file_size,m.sha256,
                   v.markdown_storage_kind,v.markdown_rel_path,v.markdown_sha256,
                   v.markdown_size_bytes,v.publication_status
            FROM content_items i
            JOIN media_assets m ON m.media_id=i.media_id AND m.status<>'archived'
-           JOIN media_transcript_heads h ON h.media_id=m.media_id
-           JOIN transcript_versions v ON v.id=h.current_version_id AND v.media_id=m.media_id
+           LEFT JOIN media_transcript_heads h ON h.media_id=m.media_id
+           LEFT JOIN transcript_versions v ON v.id=COALESCE(
+               h.current_version_id,
+               (SELECT latest.id FROM transcript_versions latest
+                WHERE latest.media_id=m.media_id
+                ORDER BY latest.created_at DESC,latest.id DESC LIMIT 1)
+           ) AND v.media_id=m.media_id
            WHERE i.id=? AND i.content_kind='media_transcript' AND i.archived_at IS NULL""",
         (item_id,),
     ).fetchone()
-    if row is None or row["publication_status"] != "published":
-        raise HTTPException(status_code=404, detail="视频资料不存在或尚未正式发布")
+    if row is None:
+        raise HTTPException(status_code=404, detail="视频资料不存在")
+    if part != "video" and row["publication_status"] != "published":
+        raise HTTPException(status_code=404, detail="视频转录稿尚未正式发布")
     try:
-        video_path = safe_join(MEDIA_DIR, row["storage_rel_path"])
+        resolved_media = resolve_media_path(conn, str(row["media_id"]), media_root=MEDIA_DIR)
+        video_path = resolved_media.path
         video_size = video_path.stat().st_size
-    except (OSError, ValueError):
+    except (MediaStorageError, OSError, ValueError):
         raise HTTPException(status_code=404, detail="视频文件不可用")
     if not video_path.is_file() or video_path.is_symlink() or video_size != row["file_size"]:
         raise HTTPException(status_code=409, detail="视频文件完整性校验失败")
