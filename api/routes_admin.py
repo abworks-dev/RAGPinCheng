@@ -2006,6 +2006,9 @@ def list_media_assets(
                       WHERE active_index.media_id=m.media_id
                         AND active_index.status NOT IN ('done','failed')) AS has_active_index_job,
                v.review_status, v.publication_status,
+               (SELECT request.status FROM media_publication_requests request
+                WHERE request.media_id=m.media_id
+                ORDER BY request.created_at DESC,request.id DESC LIMIT 1) AS publication_request_status,
                CASE WHEN h.current_version_id=v.id THEN 1 ELSE 0 END AS is_current_version,
                (
                    SELECT p.status
@@ -2109,6 +2112,7 @@ def list_media_assets(
             review_status=r["review_status"],
             publication_status=r["publication_status"],
             publication_index_status=r["publication_index_status"],
+            publication_request_status=r["publication_request_status"],
             is_current_version=bool(r["is_current_version"]),
             replacement_source_media_id=r["replacement_source_media_id"],
             replacement_candidate_media_id=r["replacement_candidate_media_id"],

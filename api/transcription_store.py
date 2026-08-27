@@ -332,6 +332,11 @@ class SQLiteTranscriptionStore:
             if changed != 1:
                 raise StoreConflictError("job_success_conflict")
             self._conn.execute(
+                """UPDATE media_publication_requests SET status='ready_to_publish',updated_at=?
+                   WHERE media_id=? AND status='pending_transcription'""",
+                (now, job.media_id),
+            )
+            self._conn.execute(
                 """UPDATE media_replacements
                    SET status='pending',error_code=NULL,updated_at=?
                    WHERE candidate_media_id=? AND status='failed'""",
@@ -796,6 +801,20 @@ class SQLiteTranscriptionStore:
                     version.markdown_ref.content_sha256, target_index_id, now, now,
                 ),
             )
+            self._conn.execute(
+                """UPDATE media_publication_requests
+                   SET status='publishing',transcript_version_id=?,publication_index_job_id=?,
+                       error_code=NULL,updated_at=?
+                   WHERE id=(
+                       SELECT id FROM media_publication_requests
+                       WHERE media_id=? AND status IN (
+                           'pending_transcription','ready_to_publish','failed'
+                       )
+                       ORDER BY CASE WHEN status='failed' THEN 1 ELSE 0 END,
+                                created_at DESC,id DESC LIMIT 1
+                   )""",
+                (version.id, index_job_id, now, version.media_id),
+            )
 
     def record_index_receipt(self, receipt: PublicationIndexReceipt, *, now: int) -> None:
         if type(receipt) is not PublicationIndexReceipt:
@@ -846,6 +865,12 @@ class SQLiteTranscriptionStore:
                        SET status='failed',updated_at=? WHERE transcript_version_id=?""",
                     (now, receipt.transcript_version_id),
                 )
+                self._conn.execute(
+                    """UPDATE media_publication_requests
+                       SET status='failed',error_code=?,updated_at=?
+                       WHERE publication_index_job_id=? AND status='publishing'""",
+                    (receipt.error_code, now, receipt.index_job_id),
+                )
 
     def fail_publication_job(
         self,
@@ -884,6 +909,12 @@ class SQLiteTranscriptionStore:
                 """UPDATE media_metadata_revisions
                    SET status='failed',updated_at=? WHERE transcript_version_id=?""",
                 (now, row["transcript_version_id"]),
+            )
+            self._conn.execute(
+                """UPDATE media_publication_requests
+                   SET status='failed',error_code=?,updated_at=?
+                   WHERE publication_index_job_id=? AND status='publishing'""",
+                (error_code, now, index_job_id),
             )
 
     def load_index_request(self, index_job_id: str) -> PublicationIndexRequest:
@@ -1023,6 +1054,12 @@ class SQLiteTranscriptionStore:
             ).rowcount
             if changed != 1:
                 raise StoreConflictError("promotion_transition_conflict")
+            self._conn.execute(
+                """UPDATE media_publication_requests
+                   SET status='published',updated_at=?,completed_at=?
+                   WHERE media_id=? AND publication_index_job_id=? AND status='publishing'""",
+                (now, now, version.media_id, index_job_id),
+            )
             if replacement is not None:
                 candidate = self._conn.execute(
                     "SELECT title FROM media_assets WHERE media_id=?",

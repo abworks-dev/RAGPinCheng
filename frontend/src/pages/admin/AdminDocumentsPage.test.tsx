@@ -120,6 +120,38 @@ describe("AdminDocumentsPage", () => {
     expect(screen.getByText("共 1 条任务，第 1 / 1 页")).toBeInTheDocument();
   });
 
+  it("links an untranscribed video publication task to its transcription dialog", async () => {
+    mocks.publicationJobs.mockResolvedValue({
+      jobs: [{
+        ...failedJob,
+        id: "intent:intent-1",
+        version_id: "media-pending-media-1",
+        media_id: "media-1",
+        title: "培训视频",
+        original_filename: "training.mp4",
+        task_type: "video_transcript",
+        task_type_label: "视频文件",
+        status: "processing",
+        workflow_status: "pending_transcription",
+        transcription_action: "start_transcription",
+        doc_type: "video",
+        error_code: null,
+        error_summary: null,
+        retryable: false,
+      }],
+      total: 1,
+      status_counts: { processing: 1, published: 0, failed: 0 },
+    });
+
+    render(<AdminDocumentsPage />);
+
+    const link = await screen.findByRole("link", { name: "转录“培训视频”" });
+    expect(link).toHaveAttribute(
+      "href",
+      "/admin/content?view=transcription&media_id=media-1&action=start-transcription",
+    );
+  });
+
   it("uses section headings when embedded in content management", async () => {
     render(<AdminDocumentsPage embedded />);
 

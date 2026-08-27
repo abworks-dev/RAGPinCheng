@@ -184,14 +184,14 @@ describe("AdminMediaPage wizard", () => {
     expect(screen.queryByText("资料管理 / 转录任务")).not.toBeInTheDocument();
   });
 
-  it("shows the three-step entry and keeps lifecycle states separate", async () => {
+  it("shows review and publication while indexing stays inside publication", async () => {
     render(<AdminMediaPage />);
     fireEvent.click(screen.getByRole("button", { name: /上传视频/ }));
     expect(screen.getByLabelText("上传步骤")).toHaveTextContent("1. 上传视频");
     expect(await screen.findByText("项目交付培训")).toBeInTheDocument();
     expect(screen.getByText("待人工审核")).toBeInTheDocument();
     expect(screen.getByText("未发布")).toBeInTheDocument();
-    expect(screen.getByText("未开始")).toBeInTheDocument();
+    expect(screen.getByLabelText("审核、发布流程")).not.toHaveTextContent("索引");
     expect(screen.getByText("草稿已生成，等待后续审核与发布。")).toBeInTheDocument();
   });
 

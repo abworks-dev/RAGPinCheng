@@ -1312,6 +1312,32 @@ MIGRATIONS = (
         ),
     ),
     Migration(36, "document_pending_publication_status", ("REPLACE_DOCUMENT_REVIEW_STATUSES",)),
+    Migration(
+        37,
+        "media_publication_requests",
+        (
+            """CREATE TABLE media_publication_requests (
+                id TEXT PRIMARY KEY,
+                media_id TEXT NOT NULL REFERENCES media_assets(media_id) ON DELETE RESTRICT,
+                requested_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                request_idempotency_key TEXT NOT NULL UNIQUE,
+                status TEXT NOT NULL CHECK (status IN (
+                    'pending_transcription','ready_to_publish','publishing',
+                    'published','failed','cancelled'
+                )),
+                transcript_version_id TEXT,
+                publication_index_job_id TEXT,
+                error_code TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                completed_at INTEGER
+            )""",
+            """CREATE UNIQUE INDEX uq_media_publication_requests_one_active
+               ON media_publication_requests(media_id)
+               WHERE status IN ('pending_transcription','ready_to_publish','publishing')""",
+            "CREATE INDEX idx_media_publication_requests_status_updated ON media_publication_requests(status,updated_at DESC)",
+        ),
+    ),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(

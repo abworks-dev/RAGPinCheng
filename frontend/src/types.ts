@@ -775,6 +775,8 @@ export type UnifiedPublicationJob = {
   file_size: number | null;
   parent_count: number | null;
   preview_parent_id: string | null;
+  workflow_status?: string | null;
+  transcription_action?: "start_transcription" | "open_transcription_job" | "open_transcript_workbench" | null;
 };
 
 export type UnifiedPublicationJobList = {
@@ -1281,6 +1283,7 @@ export type MediaAsset = {
   review_status?: TranscriptReviewStatus | null;
   publication_status?: TranscriptPublicationStatus | null;
   publication_index_status?: "pending" | "parsing" | "chunking" | "embedding" | "done" | "failed" | null;
+  publication_request_status?: "pending_transcription" | "ready_to_publish" | "publishing" | "published" | "failed" | "cancelled" | null;
   is_current_version?: boolean;
   replacement_source_media_id?: string | null;
   replacement_candidate_media_id?: string | null;

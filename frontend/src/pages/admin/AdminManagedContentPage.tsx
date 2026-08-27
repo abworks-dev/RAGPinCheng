@@ -4382,7 +4382,7 @@ export function AdminManagedContentPage() {
   const canPublishItem = (item: ManagedContentItem) =>
     item.content_kind === "document"
       ? ["pending_publication", "publication_failed"].includes(item.lifecycle_status)
-      : ["transcript_approved", "publication_failed"].includes(item.lifecycle_status);
+      : ["pending_publication", "awaiting_transcription", "transcript_approved", "publication_failed"].includes(item.lifecycle_status);
 
   const executeBulk = async () => {
     if (!bulkAction || selectedItems.length === 0 || busyAction === "bulk")
@@ -4407,22 +4407,26 @@ export function AdminManagedContentPage() {
             : await adminContentApi.bulkMove(moveItems, bulkMoveFolderId)
           : await (async () => {
               const documents = actionItems.filter((item) => item.content_kind === "document");
-              const transcripts = actionItems.filter((item) => item.content_kind === "media_transcript");
+              const mediaItems = actionItems.filter((item) => item.content_kind === "media_transcript");
               const documentResult = documents.length
                 ? await adminContentApi.bulkPublish(documents.map((item) => item.version_id))
                 : { results: [], succeeded: 0, failed: 0 };
-              const transcriptResults = await Promise.all(transcripts.map(async (item) => {
+              const mediaResults = await Promise.all(mediaItems.map(async (item) => {
                 try {
-                  await adminContentApi.publishTranscript(item.version_id);
+                  if (["pending_publication", "awaiting_transcription"].includes(item.lifecycle_status)) {
+                    await adminContentApi.publishMedia(item.item_id, item.version_id, createRequestId());
+                  } else {
+                    await adminContentApi.publishTranscript(item.version_id);
+                  }
                   return { version_id: item.version_id, item_id: item.item_id, status: "succeeded" as const, message: null, index_job_id: null };
                 } catch (error) {
                   return { version_id: item.version_id, item_id: item.item_id, status: "failed" as const, message: error instanceof Error ? error.message : "发布失败", index_job_id: null };
                 }
               }));
               return {
-                results: [...documentResult.results, ...transcriptResults],
-                succeeded: documentResult.succeeded + transcriptResults.filter((entry) => entry.status === "succeeded").length,
-                failed: documentResult.failed + transcriptResults.filter((entry) => entry.status === "failed").length,
+                results: [...documentResult.results, ...mediaResults],
+                succeeded: documentResult.succeeded + mediaResults.filter((entry) => entry.status === "succeeded").length,
+                failed: documentResult.failed + mediaResults.filter((entry) => entry.status === "failed").length,
               };
             })();
       const titles = new Map(
@@ -4533,8 +4537,6 @@ export function AdminManagedContentPage() {
   const videoSelection =
     selectedItems.length > 0 &&
     selectedItems.every((item) => item.content_kind === "media_transcript");
-  const hasTranscribableSelection =
-    videoSelection && selectedItems.some(canStartTranscription);
   const publishableSelectedItems = selectedItems.filter(canPublishItem);
   const skippedPublishSelectedItems = selectedItems.filter(
     (item) => !canPublishItem(item),
@@ -4685,6 +4687,24 @@ export function AdminManagedContentPage() {
     }
   };
 
+  const publishMedia = async (item: ManagedContentItem) => {
+    if (busyAction || !item.media_id) return;
+    setBusyAction(`publish-media:${item.item_id}`);
+    try {
+      await adminContentApi.publishMedia(
+        item.item_id,
+        item.version_id,
+        createRequestId(),
+      );
+      toast.success("视频已加入发布任务和转录任务");
+      await load(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "发布视频失败");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const renderActions = (item: ManagedContentItem, sourceReadOnly = false) => {
     const disabled = Boolean(busyAction) || refreshing || !enabled;
     const isMediaTranscript = item.content_kind === "media_transcript";
@@ -4711,12 +4731,19 @@ export function AdminManagedContentPage() {
       item.lifecycle_status !== "publishing" &&
       !reclassifying;
     const workflow = isMediaTranscript &&
-      ["transcript_approved", "publication_failed"].includes(item.lifecycle_status) &&
-      can("item.publish")
+      ["awaiting_transcription", "pending_publication"].includes(item.lifecycle_status) &&
+      !item.has_published_head && can("item.publish")
         ? {
-            label: item.lifecycle_status === "publication_failed" ? "重新发布" : "发布",
-            action: () => void publishTranscript(item),
+            label: "发布",
+            action: () => void publishMedia(item),
           }
+        : isMediaTranscript &&
+            ["transcript_approved", "publication_failed"].includes(item.lifecycle_status) &&
+            can("item.publish")
+          ? {
+              label: item.lifecycle_status === "publication_failed" ? "重新发布" : "发布",
+              action: () => void publishTranscript(item),
+            }
         : ["pending_publication", "publication_failed"].includes(
             item.lifecycle_status,
           ) && can("item.publish")
@@ -4736,18 +4763,6 @@ export function AdminManagedContentPage() {
           ? "资料管理功能当前不可用"
           : null;
     if (isMediaTranscript) {
-      const pendingTranscription =
-        canStartTranscription(item) &&
-        !item.transcription_job_status?.match(/pending|running/);
-      const transcriptionTooltip =
-        unavailableReason ||
-        (pendingTranscription
-          ? "选择转录方案"
-          : item.transcription_job_status?.match(/pending|running/)
-            ? "转录任务进行中"
-            : item.transcription_failure_classification === "permanent"
-              ? "该视频无法重试转录"
-              : "该视频已完成转录");
       const moveTooltip =
         unavailableReason ||
         (movable ? "调整归档目录" : "当前账号没有发布权限");
@@ -4762,8 +4777,7 @@ export function AdminManagedContentPage() {
       const mediaBaseUrl = `/admin/content?view=transcription&media_id=${encodeURIComponent(item.media_id || "")}`;
       return (
         <div className="ml-auto flex min-h-10 max-w-full flex-wrap items-center justify-end gap-1">
-          <IconButton label={`转录“${item.title}”`} tooltip={transcriptionTooltip} className="border border-border max-sm:size-10" disabled={disabled || !pendingTranscription} onClick={() => openTranscriptionDialog([item])}><Rocket className="size-4" /></IconButton>
-          {workflow && <Button size="sm" className="shrink-0 max-sm:h-10" disabled={disabled} onClick={workflow.action}>{workflow.label}</Button>}
+          {workflow && <Button size="sm" aria-label={`${workflow.label}“${item.title}”`} className="shrink-0 max-sm:h-10" disabled={disabled} onClick={workflow.action}>{workflow.label}</Button>}
           <IconButton label={`播放“${item.title}”`} tooltip={unavailableReason || (sourceReadOnly ? "预览共享视频和已有转录稿" : item.has_published_head ? "播放视频与转录稿" : "转录稿发布后可播放")} className="border border-border max-sm:size-10" disabled={disabled || !item.media_id || (!sourceReadOnly && !item.has_published_head)} onClick={() => openVideoPreview({ mediaId: item.media_id!, title: item.title, startSeconds: 0, fromSource: sourceReadOnly })}><Film className="size-4" /></IconButton>
           <IconButton
             label={`查看“${item.title}”的详细信息`}
@@ -5328,7 +5342,7 @@ export function AdminManagedContentPage() {
         {viewTabs}
         <UploadTasksPanel
           activeUpload={activeUpload}
-          canTranscribe={isSystemAdmin}
+          canTranscribe={false}
           canDelete={can("item.archive_draft") || can("item.archive_published")}
           canRetry={(task) =>
             Boolean(lastUploadAttempt?.batchId === task.batch_id)
@@ -6534,32 +6548,6 @@ export function AdminManagedContentPage() {
                 {folderScanning ? "读取文件夹中…" : "上传文件"}
               </Button>
             )}
-            {isSystemAdmin && currentFolderId && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="max-sm:h-control-md"
-                onClick={() => openTranscriptionDialog([], "category")}
-                disabled={loading || refreshing}
-              >
-                <Rocket className="size-4" />
-                批量转录本目录
-              </Button>
-            )}
-            {isSystemAdmin &&
-              activeUpload?.batchId &&
-              activeUpload.phase === "completed" && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="max-sm:h-control-md"
-                  onClick={() => openTranscriptionDialog([], "batch")}
-                  disabled={loading || refreshing}
-                >
-                  <Rocket className="size-4" />
-                  转录最近上传批次
-                </Button>
-              )}
             <Button
               size="sm"
               variant="outline"
@@ -6622,15 +6610,6 @@ export function AdminManagedContentPage() {
                           : []),
                       ]
                     : [
-                        {
-                          key: "start-transcription",
-                          label: "批量开始转录",
-                          icon: <Rocket className="size-4" />,
-                          disabled: !hasTranscribableSelection,
-                          disabledReason: "请选择待转录视频",
-                          onSelect: () =>
-                            openTranscriptionDialog(selectedItems),
-                        },
                         {
                           key: "move",
                           label: bulkMoveLabel,
