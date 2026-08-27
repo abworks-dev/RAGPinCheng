@@ -168,7 +168,9 @@ def test_conversion_process_terminates_timed_out_worker(
         _run_conversion_process(_slow_process_entry, source)
 
 
-def test_generated_pptx_preserves_slide_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_pptx_without_source_anchors_does_not_guess_slides_from_markdown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     source = _synthetic_ooxml(
         tmp_path / "sample.pptx",
         "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml",
@@ -178,7 +180,7 @@ def test_generated_pptx_preserves_slide_metadata(tmp_path: Path, monkeypatch: py
     markdown, slides = convert_pptx_to_markdown(source)
 
     assert "第二页合成测试演示标题" in markdown
-    assert [slide["slide_number"] for slide in slides] == [1, 2]
+    assert slides == []
 
 
 def test_pptx_uses_source_slide_order_without_long_markdown_headings(
@@ -274,6 +276,28 @@ def test_pptx_discards_text_anchors_repeated_across_slides(
         {"slide_number": 1, "text": "第一页独有内容"},
         {"slide_number": 2, "text": "第二页独有内容"},
     ]
+
+
+def test_pptx_prefix_ambiguous_anchors_leave_chunks_unlocated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source = _synthetic_pptx_with_slides(
+        tmp_path / "prefix-ambiguous.pptx",
+        ["项目总览", "项目总览详细计划"],
+    )
+    _install_fake_docling(monkeypatch, "# 项目总览详细计划")
+
+    document = _build_pptx_doc(
+        source,
+        lambda _status: None,
+        parsed_dir=tmp_path / "parsed",
+        write_preview=False,
+        force_parse=True,
+    )
+    parents, children = chunk_document(document)
+
+    assert {parent.slide_number for parent in parents} == {None}
+    assert {child.slide_number for child in children} == {None}
 
 
 @pytest.mark.parametrize("body", [b"", b"not-a-pdf", b"PK\x03\x04wrong-format"])

@@ -646,14 +646,6 @@ def convert_pptx_to_markdown(path: Path) -> tuple[str, list[dict[str, Any]]]:
     markdown = _docling_markdown(path)
 
     slides = _pptx_source_slides(path)
-    if not slides:
-        for line in markdown.split("\n"):
-            stripped = line.strip()
-            if stripped.startswith("#") and len(stripped) > 10:
-                slides.append({
-                    "slide_number": len(slides) + 1,
-                    "text": stripped.lstrip("#").strip()[:50],
-                })
 
     slide_count = max(len(slides), 1)
 
