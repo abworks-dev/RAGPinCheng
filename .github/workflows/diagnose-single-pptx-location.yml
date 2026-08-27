@@ -1,0 +1,132 @@
+name: Diagnose Single Production PPTX Location
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_diagnostic:
+        description: Select DIAGNOSE_SINGLE_PPTX to parse the approved production PPTX read-only
+        required: true
+        default: CANCEL
+        type: choice
+        options:
+          - CANCEL
+          - DIAGNOSE_SINGLE_PPTX
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-app-manual-v1
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    environment: production-asr
+    runs-on: [self-hosted, linux, ubuntu, production, app]
+    timeout-minutes: 30
+    env:
+      REPO_PATH: ${{ vars.PRODUCTION_APP_REPO_PATH }}
+      DATA_PATH: ${{ vars.PRODUCTION_APP_DATA_PATH }}
+      CONTENT_ROOT: ${{ vars.PRODUCTION_CONTENT_ROOT }}
+      CONFIRM_DIAGNOSTIC: ${{ inputs.confirm_diagnostic }}
+      ITEM_ID: item-8e22ad7c-e1ea-4475-b8ab-7084c9d870f3
+      VERSION_ID: version-2f810c73-7d5f-4b04-8ff1-9b7416a28403
+    steps:
+      - name: Check out the approved diagnostic implementation
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Parse the exact PPTX in a disposable read-only container
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          [ "${CONFIRM_DIAGNOSTIC}" = "DIAGNOSE_SINGLE_PPTX" ] || {
+            echo "ERROR: production single-PPTX diagnostic was not confirmed"
+            exit 1
+          }
+          [ "${GITHUB_REF}" = "refs/heads/master" ] || {
+            echo "ERROR: production single-PPTX diagnostic must run from master"
+            exit 1
+          }
+          [ "${REPO_PATH}" = "/data/workspace/projects/ragpincheng" ] || {
+            echo "ERROR: production application repository is not the approved path"
+            exit 1
+          }
+          [ "${DATA_PATH}" = "/data/services/docker/data/ragpincheng/prod/app" ] || {
+            echo "ERROR: production application data directory is not the approved path"
+            exit 1
+          }
+          [ "${CONTENT_ROOT}" = "/data/business/ragpincheng/content" ] || {
+            echo "ERROR: production content root is not the approved path"
+            exit 1
+          }
+          for path in "${REPO_PATH}" "${DATA_PATH}" "${CONTENT_ROOT}"; do
+            [ -d "${path}" ] && [ ! -L "${path}" ] || {
+              echo "ERROR: an approved production directory is unavailable"
+              exit 1
+            }
+          done
+          APP_DATABASE="${DATA_PATH}/app.sqlite"
+          [ -f "${APP_DATABASE}" ] && [ ! -L "${APP_DATABASE}" ] || {
+            echo "ERROR: production application database is unavailable"
+            exit 1
+          }
+          [ "$(git -C "${REPO_PATH}" branch --show-current)" = "master" ] || {
+            echo "ERROR: production application repository must be on master"
+            exit 1
+          }
+          [ -z "$(git -C "${REPO_PATH}" status --porcelain --untracked-files=no)" ] || {
+            echo "ERROR: production application repository has tracked local changes"
+            exit 1
+          }
+          docker image inspect pincheng-rag-backend:latest >/dev/null
+
+          OUTPUT="$(docker run --rm \
+            --read-only \
+            --network none \
+            --pids-limit 512 \
+            --tmpfs /tmp:rw,noexec,nosuid,size=2g \
+            --tmpfs /diagnostic-work:rw,exec,nosuid,size=4g \
+            -e HOME=/tmp \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            -e PYTHONPATH=/diagnostic/repo \
+            -v "${APP_DATABASE}:/diagnostic/app.sqlite:ro" \
+            -v "${CONTENT_ROOT}:/diagnostic/content:ro" \
+            -v "${GITHUB_WORKSPACE}:/diagnostic/repo:ro" \
+            --entrypoint python3 \
+            pincheng-rag-backend:latest \
+            /diagnostic/repo/scripts/diagnose_single_pptx_location.py \
+              --app-database /diagnostic/app.sqlite \
+              --content-root /diagnostic/content \
+              --item-id "${ITEM_ID}" \
+              --version-id "${VERSION_ID}" \
+              --work-dir /diagnostic-work)"
+          printf '%s\n' "${OUTPUT}"
+          DIAGNOSTIC_JSON="$(printf '%s\n' "${OUTPUT}" | sed -n \
+            's/^PPTX_SINGLE_FILE_DIAGNOSTIC //p')"
+          [ -n "${DIAGNOSTIC_JSON}" ] || {
+            echo "ERROR: structural diagnostic output is missing"
+            exit 1
+          }
+          DIAGNOSTIC_JSON="${DIAGNOSTIC_JSON}" python3 - <<'PY'
+          import json
+          import os
+
+          report = json.loads(os.environ["DIAGNOSTIC_JSON"])
+          if report.get("schema_version") != 1:
+              raise SystemExit("ERROR: unsupported structural diagnostic report")
+          print("PPTX_SINGLE_FILE_DIAGNOSTIC_VALIDATED status=read_only")
+          PY
+          {
+            echo "## Single production PPTX location diagnostic"
+            echo
+            echo "- Status: read-only parse completed"
+            echo "- Item: \`${ITEM_ID}\`"
+            echo "- Version: \`${VERSION_ID}\`"
+            echo
+            echo '```json'
+            printf '%s\n' "${DIAGNOSTIC_JSON}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
