@@ -27,10 +27,16 @@ const mocks = vi.hoisted(() => ({
   scanExternalMediaSource: vi.fn(),
   listExternalMediaEntries: vi.fn(),
   enqueueExternalMedia: vi.fn(),
+  returnTranscriptToReview: vi.fn(),
+  toastSuccess: vi.fn(),
+  toastError: vi.fn(),
 }));
 const scrollIntoView = vi.fn();
 
 vi.mock("../../api/client", () => ({ api: mocks }));
+vi.mock("../../components/ui/toast", () => ({
+  toast: { success: mocks.toastSuccess, error: mocks.toastError },
+}));
 
 const availableProfile = {
   scheme_id: "funasr-sensevoice-zh-experimental-v1",
@@ -175,6 +181,7 @@ describe("AdminMediaPage wizard", () => {
     mocks.listExternalMediaEntries.mockResolvedValue({ source_id: "", parent_relative_path: "", entries: [] });
     mocks.scanExternalMediaSource.mockResolvedValue({ run_id: "scan-1", source_id: "source-1", discovered_count: 2, added_count: 2, changed_count: 0, missing_count: 0, enqueued_count: 0, enqueue_failures: 0 });
     mocks.enqueueExternalMedia.mockResolvedValue({ requested: 1, enqueued: 1, failed: 0, failures: {} });
+    mocks.returnTranscriptToReview.mockResolvedValue({});
   });
 
   it("moves shared media configuration out of the transcription task page", async () => {
@@ -771,7 +778,11 @@ describe("AdminMediaPage wizard", () => {
       ["media-failed-1", "media-failed-2"],
       expect.any(String),
     ));
-    expect(await screen.findByText("共享文件暂时不可读")).toBeInTheDocument();
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(
+      "批量重试：成功 1 项，失败 1 项",
+      expect.objectContaining({ description: expect.stringContaining("共享文件暂时不可读") }),
+    ));
+    expect(screen.queryByText("共享文件暂时不可读")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "清理所选（2）" }));
@@ -781,6 +792,35 @@ describe("AdminMediaPage wizard", () => {
       "media-failed-1",
       "media-failed-2",
     ]));
+  });
+
+  it("orders task controls and opens the same scheme dialog for row and batch transcription", async () => {
+    const pending = [
+      { ...assets[0], media_id: "media-one", title: "待转录一", status: "uploaded", review_status: null, current_version_id: null, publication_request_status: "pending_transcription", transcription_job_id: null, transcription_job_status: null },
+      { ...assets[0], media_id: "media-two", title: "待转录二", status: "uploaded", review_status: null, current_version_id: null, publication_request_status: "pending_transcription", transcription_job_id: null, transcription_job_status: null },
+    ];
+    mocks.listMediaAssets.mockResolvedValue(pending);
+    mocks.listTranscriptionJobs.mockResolvedValue([]);
+    render(<AdminMediaPage embedded />);
+
+    const search = await screen.findByRole("searchbox", { name: "搜索转录任务" });
+    const config = screen.getByRole("link", { name: "转录配置" });
+    const refresh = screen.getByRole("button", { name: "刷新媒体资源" });
+    const batch = screen.getByRole("button", { name: "批量操作" });
+    expect(search.compareDocumentPosition(config) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(config.compareDocumentPosition(refresh) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(refresh.compareDocumentPosition(batch) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "转录" })[0]);
+    expect(screen.getByRole("dialog", { name: "配置转录方案" })).toHaveTextContent("待转录一");
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择当前页视频" }));
+    fireEvent.click(batch);
+    fireEvent.click(screen.getByRole("menuitem", { name: "开始转录（2）" }));
+    const dialog = screen.getByRole("dialog", { name: "配置转录方案" });
+    expect(dialog).toHaveTextContent("待转录一");
+    expect(dialog).toHaveTextContent("待转录二");
   });
 
   it("uses the managed-content upload entry when embedded as transcription tasks", async () => {

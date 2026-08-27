@@ -11,6 +11,7 @@ export const adminMediaApi = {
   deleteFailedAsset: (...args: Parameters<typeof api.deleteFailedMediaAsset>) => api.deleteFailedMediaAsset(...args),
   bulkDeleteFailedAssets: (...args: Parameters<typeof api.bulkDeleteFailedMediaAssets>) => api.bulkDeleteFailedMediaAssets(...args),
   archiveAsset: (...args: Parameters<typeof api.archiveMediaAsset>) => api.archiveMediaAsset(...args),
+  returnToReview: (...args: Parameters<typeof api.returnTranscriptToReview>) => api.returnTranscriptToReview(...args),
   profiles: (...args: Parameters<typeof api.listTranscriptionProfiles>) => api.listTranscriptionProfiles(...args),
   schemes: (...args: Parameters<typeof api.listTranscriptionSchemes>) => api.listTranscriptionSchemes(...args),
   jobs: (...args: Parameters<typeof api.listTranscriptionJobs>) => api.listTranscriptionJobs(...args),

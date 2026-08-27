@@ -179,6 +179,9 @@ class TranscriptionPublicationApplicationService:
             now=self.now(),
         )
 
+    def return_to_review(self, version_id: str):
+        return self.store.return_version_to_review(version_id, now=self.now())
+
     def create_revision(
         self,
         base_version_id: str,

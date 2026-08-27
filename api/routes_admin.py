@@ -219,11 +219,21 @@ def _media_action_state(
         disabled["review_transcript"] = "当前没有待审核转录稿"
     if review_status == "review_approved" and publication_status in {"not_published", "publication_failed"}:
         available.append("publish_transcript")
+        available.append("return_to_review")
     else:
         disabled["publish_transcript"] = "转录稿需审核通过且未处于发布中"
+    archiveable_unpublished = (
+        review_status in {"awaiting_review", "review_rejected", "review_approved"}
+        and publication_status in {"not_published", "publication_failed"}
+        and not has_active_job
+        and not has_active_index_job
+    )
     if publication_status == "published" and status not in {"archived"} and replacement_status != "pending":
         available.append("replace_media")
         available.append("archive_media")
+    elif archiveable_unpublished and storage_kind != "external" and replacement_status != "pending":
+        available.append("archive_media")
+        disabled["replace_media"] = "仅已发布视频可替换"
     else:
         reason = "视频替换任务正在处理" if replacement_status == "pending" else "仅已发布且未归档的视频可操作"
         disabled["replace_media"] = reason
@@ -2178,13 +2188,14 @@ def archive_media_asset(media_id: str, admin: CurrentUser = Depends(require_csrf
     try: validate_uuid(media_id, "media_id")
     except ContractValidationError: raise HTTPException(status_code=404, detail="媒体不存在")
     row = conn.execute("""SELECT i.id AS item_id,h.current_version_id AS version_id,m.storage_kind
-                         FROM content_items i JOIN media_transcript_heads h ON h.media_id=i.media_id
+                         FROM content_items i LEFT JOIN media_transcript_heads h ON h.media_id=i.media_id
                          JOIN media_assets m ON m.media_id=i.media_id
                          WHERE i.media_id=? AND i.content_kind='media_transcript' AND i.archived_at IS NULL""", (media_id,)).fetchone()
-    if row is None: raise HTTPException(status_code=409, detail="该视频没有可归档的已发布转写资料")
+    if row is None: raise HTTPException(status_code=409, detail="该视频没有可归档的转写资料")
     if row["storage_kind"] == "external": raise HTTPException(status_code=409, detail="共享目录视频为只读来源，不能移入回收站")
     try:
-        result = archive_content_item(conn, str(row["item_id"]), expected_version_id=str(row["version_id"]), actor_user_id=admin.id, can_archive_draft=True, can_archive_published=True)
+        expected_version_id = str(row["version_id"] or f"media-pending-{media_id}")
+        result = archive_content_item(conn, str(row["item_id"]), expected_version_id=expected_version_id, actor_user_id=admin.id, can_archive_draft=True, can_archive_published=True)
     except ValueError as exc:
         detail = {"content_delete_in_progress": "视频正在处理，请完成或取消任务后再归档", "content_version_conflict": "视频版本已变化，请刷新后重试"}.get(str(exc), "视频当前不能移入回收站")
         raise HTTPException(status_code=409, detail=detail)

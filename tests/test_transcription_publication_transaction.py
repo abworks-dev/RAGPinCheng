@@ -2,6 +2,8 @@ import sqlite3
 
 import pytest
 
+from api.transcription_store import StoreConflictError
+
 from src.transcription.formatter import format_transcript
 from src.transcription.normalizer import normalize_candidate
 from src.transcription.persistence import (
@@ -257,6 +259,34 @@ def test_experimental_profile_requires_actual_review(tmp_path):
     conn.commit()
     store.review_version(VERSION_ID, approved=True, reviewed_by=1, review_note="approved fixture", now=35)
     assert begin(workflow, profile).endswith("-a1")
+    conn.close()
+
+
+def test_approved_unpublished_version_can_return_to_review_but_publishing_cannot(tmp_path):
+    profile = make_profile(
+        qualification=ProfileQualification.experimental,
+        release_policy=ReleasePolicy(True, False, False),
+    )
+    conn, store, workflow, _port, _profile, _version = persist_candidate(tmp_path, profile=profile)
+    conn.execute(
+        "INSERT INTO users(employee_id,real_name,password_hash,role,is_active,created_at) VALUES ('u','User','x','admin',1,1)"
+    )
+    conn.commit()
+    approved = store.review_version(
+        VERSION_ID, approved=True, reviewed_by=1, review_note="approved fixture", now=35
+    )
+    assert approved.review_status is ReviewStatus.review_approved
+
+    returned = store.return_version_to_review(VERSION_ID, now=36)
+    assert returned.review_status is ReviewStatus.awaiting_review
+    assert returned.reviewed_by is None
+    assert returned.reviewed_at is None
+    assert returned.review_note is None
+
+    store.review_version(VERSION_ID, approved=True, reviewed_by=1, review_note=None, now=37)
+    begin(workflow, profile)
+    with pytest.raises(StoreConflictError, match="return_to_review_conflict"):
+        store.return_version_to_review(VERSION_ID, now=41)
     conn.close()
 
 
