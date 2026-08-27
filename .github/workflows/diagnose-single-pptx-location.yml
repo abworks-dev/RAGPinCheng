@@ -92,13 +92,13 @@ jobs:
             -e HOME=/tmp \
             -e PYTHONDONTWRITEBYTECODE=1 \
             -e PYTHONPATH=/diagnostic/repo \
-            -v "${APP_DATABASE}:/diagnostic/app.sqlite:ro" \
+            -v "${DATA_PATH}:/diagnostic/data:ro" \
             -v "${CONTENT_ROOT}:/diagnostic/content:ro" \
             -v "${GITHUB_WORKSPACE}:/diagnostic/repo:ro" \
             --entrypoint python3 \
             pincheng-rag-backend:latest \
             /diagnostic/repo/scripts/diagnose_single_pptx_location.py \
-              --app-database /diagnostic/app.sqlite \
+              --app-database /diagnostic/data/app.sqlite \
               --content-root /diagnostic/content \
               --item-id "${ITEM_ID}" \
               --version-id "${VERSION_ID}" \

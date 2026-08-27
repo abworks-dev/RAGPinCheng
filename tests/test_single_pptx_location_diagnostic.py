@@ -174,7 +174,7 @@ def test_production_workflow_is_exact_read_only_and_isolated():
         VERSION_ID,
         "--read-only",
         "--network none",
-        ":/diagnostic/app.sqlite:ro",
+        ":/diagnostic/data:ro",
         ":/diagnostic/content:ro",
         ":/diagnostic/repo:ro",
         "--tmpfs /diagnostic-work",
@@ -191,3 +191,6 @@ def test_production_workflow_is_exact_read_only_and_isolated():
         "docker restart",
     ):
         assert forbidden not in workflow
+
+    assert "--app-database /diagnostic/data/app.sqlite" in workflow
+    assert ":/diagnostic/app.sqlite:ro" not in workflow
