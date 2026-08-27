@@ -130,6 +130,11 @@ jobs:
             -e HOME=/tmp \
             -e PYTHONDONTWRITEBYTECODE=1 \
             -e PYTHONPATH=/diagnostic/repo \
+            -e RAG_DATA_DIR=/diagnostic-work/data \
+            -e RAG_PARSED_DIR=/diagnostic-work/parsed \
+            -e CONTENT_ROOT=/diagnostic-work/content \
+            -e DOCS_DIR=/diagnostic-work/docs \
+            -e MEDIA_DIR=/diagnostic-work/media \
             -v "${TEMP_ROOT}/source.pptx:/diagnostic/source.pptx:ro" \
             -v "${GITHUB_WORKSPACE}:/diagnostic/repo:ro" \
             --entrypoint python3 \
