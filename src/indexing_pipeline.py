@@ -57,6 +57,7 @@ from .ingest import (
 from .document_locations import DocumentLocation, write_location_sidecar
 from .office_convert import (
     _md_path_for_office,
+    _pptx_source_slides,
     convert_docx_to_markdown,
     convert_pptx_to_markdown,
     convert_pptx_to_pdf,
@@ -468,7 +469,7 @@ def _build_pptx_doc(
     if md_path.exists():
         on_status("parsing")
         markdown = md_path.read_text(encoding="utf-8")
-        slides = []
+        slides = _pptx_source_slides(source_path)
     else:
         try:
             on_status("parsing")
@@ -477,11 +478,10 @@ def _build_pptx_doc(
         except Exception as exc:
             logger.error("PPTX parsing failed: %s", exc)
             raise
-    if slides:
-        write_location_sidecar(
-            location_map_path,
-            (DocumentLocation(text=item["text"], page_number=item["slide_number"], slide_number=item["slide_number"]) for item in slides),
-        )
+    write_location_sidecar(
+        location_map_path,
+        (DocumentLocation(text=item["text"], page_number=item["slide_number"], slide_number=item["slide_number"]) for item in slides),
+    )
 
     preview_path = source_path.with_suffix(".preview.pdf")
     if write_preview and not is_valid_pdf_file(preview_path):

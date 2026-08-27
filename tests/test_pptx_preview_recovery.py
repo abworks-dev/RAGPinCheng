@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from src import indexing_pipeline
+from src.document_locations import DocumentLocation, read_location_sidecar, write_location_sidecar
 
 
 def test_cached_pptx_markdown_still_generates_missing_preview(tmp_path: Path, monkeypatch):
@@ -43,3 +44,23 @@ def test_cached_pptx_keeps_existing_valid_preview(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(indexing_pipeline, "convert_pptx_to_pdf", convert)
 
     indexing_pipeline._build_pptx_doc(source, lambda _status: None, parsed_dir=parsed_dir)
+
+
+def test_cached_pptx_replaces_legacy_guessed_location_sidecar(tmp_path: Path, monkeypatch):
+    source = tmp_path / "sample.pptx"
+    source.write_bytes(b"synthetic")
+    source.with_suffix(".preview.pdf").write_bytes(b"%PDF-1.7\nsynthetic")
+    parsed_dir = tmp_path / "parsed"
+    parsed_dir.mkdir()
+    markdown_path = parsed_dir / "cached.md"
+    markdown_path.write_text("# cached heading", encoding="utf-8")
+    location_path = markdown_path.with_suffix(".locations.json")
+    write_location_sidecar(
+        location_path,
+        [DocumentLocation(text="cached heading", page_number=1, slide_number=1)],
+    )
+    monkeypatch.setattr(indexing_pipeline, "_md_path_for_office", lambda *_args: markdown_path)
+
+    indexing_pipeline._build_pptx_doc(source, lambda _status: None, parsed_dir=parsed_dir)
+
+    assert read_location_sidecar(location_path) == []
