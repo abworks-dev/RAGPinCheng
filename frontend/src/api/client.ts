@@ -1112,8 +1112,8 @@ export const api = {
       body: JSON.stringify({ media_ids: mediaIds }),
     }),
   archiveMediaAsset: (mediaId: string) => jsonFetch(`/api/admin/media/${mediaId}/archive`, { method: "POST", body: JSON.stringify({}) }),
-  returnTranscriptToReview: (mediaId: string) =>
-    jsonFetch<TranscriptVersion>(`/api/admin/transcription/media/${mediaId}/return-to-review`, { method: "POST", body: JSON.stringify({}) }),
+  returnTranscriptToReview: (versionId: string) =>
+    jsonFetch<TranscriptVersion>(`/api/admin/transcription/versions/${versionId}/return-to-review`, { method: "POST", body: JSON.stringify({}) }),
   listTranscriptionProfiles: () =>
     jsonFetch<TranscriptionProfile[]>("/api/admin/transcription/profiles"),
   listTranscriptionSchemes: () =>

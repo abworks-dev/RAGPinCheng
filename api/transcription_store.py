@@ -795,7 +795,12 @@ class SQLiteTranscriptionStore:
                 raise ContractValidationError("publication_already_active", "publication_status")
             changed = self._conn.execute(
                 """UPDATE transcript_versions SET publication_status='publishing',updated_at=?
-                   WHERE id=? AND publication_status IN ('not_published','publication_failed')""",
+                   WHERE id=? AND review_status IN ('review_approved','not_required')
+                     AND publication_status IN ('not_published','publication_failed')
+                     AND EXISTS(
+                       SELECT 1 FROM media_assets m
+                       WHERE m.media_id=transcript_versions.media_id AND m.status<>'archived'
+                     )""",
                 (now, version_id),
             ).rowcount
             if changed != 1:

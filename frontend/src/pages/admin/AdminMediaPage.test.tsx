@@ -80,6 +80,7 @@ const assets = [{
   status: "transcript_ready",
   review_status: "awaiting_review",
   publication_status: "not_published",
+  latest_version_id: "version-1",
   index_status: null,
   created_at: 1785686400,
   updated_at: 1785686400,

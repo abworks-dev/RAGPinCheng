@@ -2097,8 +2097,6 @@ def _archive_media_transcript_item_locked(conn: sqlite3.Connection, item_id: str
         raise ValueError("content_delete_in_progress")
     conn.execute("UPDATE content_items SET archived_at=?,updated_at=? WHERE id=?", (now, now, item_id))
     conn.execute("UPDATE media_assets SET status='archived',updated_at=? WHERE media_id=?", (now, row["media_id"]))
-    conn.execute("""UPDATE media_publication_requests SET status='cancelled',completed_at=?,updated_at=?
-                    WHERE media_id=? AND status IN ('pending_transcription','ready_to_publish')""", (now, now, row["media_id"]))
     audit_event(conn, "content.archived", actor_user_id=actor_user_id, item_id=item_id, category_id=row["category_id"], metadata={"previous_status": row["lifecycle_status"], "media_status": row["media_status"], "content_kind": "media_transcript", "transcript_version_id": row["current_version_id"], "publication_withdrawn": False})
     return ArchivedContent(item_id=item_id, version_id=version_id, archived_at=now, previous_status=str(row["lifecycle_status"]), publication_withdrawn=False)
 

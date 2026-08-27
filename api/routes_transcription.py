@@ -1105,19 +1105,15 @@ def review_transcript_version(
         conn.close()
 
 
-@router.post("/media/{media_id}/return-to-review", response_model=TranscriptVersionDTO)
-def return_media_to_review(media_id: str, _admin: CurrentUser = Depends(require_csrf_admin)):
+@router.post("/versions/{version_id}/return-to-review", response_model=TranscriptVersionDTO)
+def return_version_to_review(version_id: str, _admin: CurrentUser = Depends(require_csrf_admin)):
     conn = connect()
     try:
-        row = conn.execute(
-            "SELECT id FROM transcript_versions WHERE media_id=? ORDER BY created_at DESC,id DESC LIMIT 1",
-            (media_id,),
-        ).fetchone()
-        if row is None:
-            raise HTTPException(status_code=404, detail="转录版本不存在")
         service = _build_publication_service(conn)
-        version = service.return_to_review(str(row["id"]))
+        version = service.return_to_review(version_id)
         return _version_dto(version, service.store.current_head(version.media_id))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="转录版本不存在")
     except (ContractValidationError, StoreConflictError):
         raise HTTPException(status_code=409, detail="当前版本不能退回审核")
     finally:

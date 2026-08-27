@@ -2015,7 +2015,7 @@ def list_media_assets(
                EXISTS(SELECT 1 FROM index_jobs active_index
                       WHERE active_index.media_id=m.media_id
                         AND active_index.status NOT IN ('done','failed')) AS has_active_index_job,
-               v.review_status, v.publication_status,
+               v.id AS latest_version_id,v.review_status, v.publication_status,
                (SELECT request.status FROM media_publication_requests request
                 WHERE request.media_id=m.media_id
                 ORDER BY request.created_at DESC,request.id DESC LIMIT 1) AS publication_request_status,
@@ -2130,6 +2130,7 @@ def list_media_assets(
             category_id=r["category_id"],
             catalog_item_id=r["catalog_item_id"],
             current_version_id=r["current_version_id"],
+            latest_version_id=r["latest_version_id"],
             storage_kind=r["storage_kind"],
             external_source_id=r["external_source_id"],
             external_relative_path=r["external_relative_path"],
