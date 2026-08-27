@@ -38,6 +38,14 @@ class Answer:
     # Token usage from the provider (populated when the API returns it).
     # Keys: prompt_tokens, completion_tokens, total_tokens.
     usage: dict = field(default_factory=dict)
+    citation_diagnostics: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class CitationFinalization:
+    text: str
+    sources: list[RetrievedParent]
+    diagnostics: dict
 
 
 @dataclass
@@ -68,14 +76,28 @@ def finalize_answer_sources(
     citation remains aligned with ``sources[N-1]``. Invalid source numbers are
     dropped instead of exposing unrelated retrieval candidates to the UI.
     """
+    result = finalize_answer_sources_with_diagnostics(text, candidate_sources)
+    return result.text, result.sources
+
+
+def finalize_answer_sources_with_diagnostics(
+    text: str,
+    candidate_sources: list[RetrievedParent],
+) -> CitationFinalization:
+    """Normalize citations and retain non-sensitive citation quality signals."""
     source_indexes: list[int] = []
     source_number_by_index: dict[int, int] = {}
+    invalid_numbers: set[int] = set()
+    marker_count = 0
 
     def replace(match: re.Match[str]) -> str:
+        nonlocal marker_count
         rewritten: list[str] = []
         for raw_number in re.split(r"\s*[,，、]\s*", match.group(1)):
+            marker_count += 1
             source_index = int(raw_number) - 1
             if source_index < 0 or source_index >= len(candidate_sources):
+                invalid_numbers.add(int(raw_number))
                 continue
             if source_index not in source_number_by_index:
                 source_indexes.append(source_index)
@@ -86,7 +108,55 @@ def finalize_answer_sources(
         return "".join(rewritten)
 
     normalized_text = _NUMBERED_CITATION_RE.sub(replace, text)
-    return normalized_text, [candidate_sources[index] for index in source_indexes]
+    cited_sources = [candidate_sources[index] for index in source_indexes]
+    no_answer = "未找到相关内容" in normalized_text
+    completed_statements = re.findall(r"[^。！？；\n]+[。！？；]", normalized_text)
+    uncited_statement_count = sum(
+        1 for statement in completed_statements
+        if not _NUMBERED_CITATION_RE.search(statement)
+        and len(re.sub(r"\s+", "", statement)) >= 4
+    )
+    if no_answer:
+        uncited_statement_count = 0
+    if no_answer:
+        status = "no_answer"
+    elif invalid_numbers:
+        status = "invalid_citations"
+    elif not cited_sources or uncited_statement_count:
+        status = "uncited"
+    else:
+        status = "valid"
+
+    location_fields = (
+        "start_time", "sheet_name", "cell_range", "slide_number",
+        "paragraph_anchor", "page_number", "topic_id", "heading_anchor",
+    )
+    located_count = sum(
+        1 for source in cited_sources
+        if any(getattr(source, field_name, None) not in (None, "") for field_name in location_fields)
+    )
+    versions_by_item: dict[str, set[str]] = {}
+    for source in cited_sources:
+        item_id = getattr(source, "content_item_id", None)
+        version_id = getattr(source, "content_version_id", None)
+        if item_id and version_id:
+            versions_by_item.setdefault(str(item_id), set()).add(str(version_id))
+
+    return CitationFinalization(
+        text=normalized_text,
+        sources=cited_sources,
+        diagnostics={
+            "status": status,
+            "candidate_count": len(candidate_sources),
+            "citation_marker_count": marker_count,
+            "cited_count": len(cited_sources),
+            "invalid_citation_numbers": sorted(invalid_numbers),
+            "uncited_answer": status == "uncited",
+            "uncited_statement_count": uncited_statement_count,
+            "located_count": located_count,
+            "version_conflict": any(len(versions) > 1 for versions in versions_by_item.values()),
+        },
+    )
 
 
 def _render_source(p: RetrievedParent, n: int) -> str:
@@ -320,19 +390,20 @@ def generate(
         record_usage("zhipu", "answer", success=False, latency_ms=int((perf_counter() - started) * 1000))
         raise
     record_usage("zhipu", "answer", usage=_extract_usage(resp), latency_ms=int((perf_counter() - started) * 1000))
-    answer_text, cited_sources = finalize_answer_sources(
+    finalized = finalize_answer_sources_with_diagnostics(
         resp.choices[0].message.content or "",
         prep.used_sources,
     )
     return Answer(
-        text=answer_text,
-        sources=cited_sources,
+        text=finalized.text,
+        sources=finalized.sources,
         messages=prep.messages,
         model=prep.model,
         context_chars=prep.context_chars,
         budget_used=prep.context_chars,
         budget=prep.budget,
         usage=_extract_usage(resp),
+        citation_diagnostics=finalized.diagnostics,
     )
 
 

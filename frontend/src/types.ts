@@ -59,6 +59,17 @@ export type DoneData = {
   budget: number;
   finish_reason?: string;
   relevance?: Record<string, unknown>;
+  citation_diagnostics?: {
+    status: "valid" | "no_answer" | "uncited" | "invalid_citations";
+    candidate_count: number;
+    citation_marker_count: number;
+    cited_count: number;
+    invalid_citation_numbers: number[];
+    uncited_answer: boolean;
+    uncited_statement_count: number;
+    located_count: number;
+    version_conflict: boolean;
+  };
   policy_version?: string;
   answer_max_output_tokens?: number;
   answer_context_chars?: number;

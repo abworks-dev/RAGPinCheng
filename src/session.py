@@ -28,7 +28,7 @@ from .answer_policy import MAX_CONTEXT_CHARS_CONFIG, AnswerPolicy, load_answer_p
 from .generate import (
     Answer,
     GenerationPrep,
-    finalize_answer_sources,
+    finalize_answer_sources_with_diagnostics,
     generate,
     rewrite_query,
     stream_generate,
@@ -174,6 +174,7 @@ class TurnResult:
     guard_reason: str = ""
     relevance: dict = field(default_factory=dict)
     policy_snapshot: dict = field(default_factory=dict)
+    citation_diagnostics: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -606,6 +607,7 @@ class ChatSession:
             guard_reason="",
             relevance=relevance,
             policy_snapshot=policy_snapshot,
+            citation_diagnostics=dict(answer.citation_diagnostics),
         )
         self.last_turn_result = result
         return result
@@ -929,7 +931,8 @@ class ChatSession:
             )
             return
 
-        full_text, cited_sources = finalize_answer_sources(full_text, gen_prep.used_sources)
+        finalized = finalize_answer_sources_with_diagnostics(full_text, gen_prep.used_sources)
+        full_text, cited_sources = finalized.text, finalized.sources
         sources_for_ui = self._sources_for_ui(cited_sources)
         policy_snapshot = gen_prep.policy.public_dict()
         self.state.append_turn(query, full_text, sources_for_ui=sources_for_ui, policy_snapshot=policy_snapshot)
@@ -945,6 +948,7 @@ class ChatSession:
             budget_used=gen_prep.context_chars,
             budget=gen_prep.budget,
             usage=dict(gen_prep.usage),
+            citation_diagnostics=finalized.diagnostics,
         )
         usage_total, usage_by_call = _aggregate_usage(rewrite_usage, gen_prep.usage)
         self.last_turn_result = TurnResult(
@@ -963,4 +967,5 @@ class ChatSession:
             guard_reason="",
             relevance=dict(relevance or {}),
             policy_snapshot=policy_snapshot,
+            citation_diagnostics=dict(finalized.diagnostics),
         )

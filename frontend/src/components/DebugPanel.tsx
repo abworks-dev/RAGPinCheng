@@ -64,6 +64,21 @@ export function DebugPanel({ msg }: { msg: ChatMessage }) {
               · 引用：<code>{String((done?.relevance ?? prep?.relevance)?.cited_count ?? done?.sources.length ?? 0)}</code>
             </div>
           )}
+          {done?.citation_diagnostics && (
+            <div>
+              引用状态：<code>{done.citation_diagnostics.status}</code>{" "}
+              · 候选：<code>{done.citation_diagnostics.candidate_count}</code>{" "}
+              · 引用：<code>{done.citation_diagnostics.cited_count}</code>{" "}
+              · 可定位：<code>{done.citation_diagnostics.located_count}</code>
+              {done.citation_diagnostics.uncited_statement_count > 0 && (
+                <> · 未引用句：<code>{done.citation_diagnostics.uncited_statement_count}</code></>
+              )}
+              {done.citation_diagnostics.invalid_citation_numbers.length > 0 && (
+                <> · 无效编号：<code>{done.citation_diagnostics.invalid_citation_numbers.join(", ")}</code></>
+              )}
+              {done.citation_diagnostics.version_conflict && <> · 版本冲突：是</>}
+            </div>
+          )}
           {(done?.sources?.length ?? prep?.used_sources?.length ?? 0) > 0 && (
             <div className="mt-1">
               <div className="font-medium">来源得分:</div>
