@@ -14,6 +14,7 @@ export const adminMediaApi = {
   profiles: (...args: Parameters<typeof api.listTranscriptionProfiles>) => api.listTranscriptionProfiles(...args),
   schemes: (...args: Parameters<typeof api.listTranscriptionSchemes>) => api.listTranscriptionSchemes(...args),
   jobs: (...args: Parameters<typeof api.listTranscriptionJobs>) => api.listTranscriptionJobs(...args),
+  startTranscription: (...args: Parameters<typeof api.startMediaTranscription>) => api.startMediaTranscription(...args),
   getJob: (...args: Parameters<typeof api.getTranscriptionJob>) => api.getTranscriptionJob(...args),
   cancelJob: (...args: Parameters<typeof api.cancelTranscriptionJob>) => api.cancelTranscriptionJob(...args),
   retryJob: (...args: Parameters<typeof api.retryTranscription>) => api.retryTranscription(...args),

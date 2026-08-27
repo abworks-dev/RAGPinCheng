@@ -438,6 +438,15 @@ function ManagedJobsTable({
         </thead>
         <tbody className="block divide-y divide-border lg:table-row-group">
           {jobs.map((job) => {
+            const publicationJob = job as ManagedIndexJob & Partial<UnifiedPublicationJob>;
+            const isVideoIntent = publicationJob.task_type === "video_transcript"
+              && Boolean(publicationJob.media_id)
+              && Boolean(publicationJob.transcription_action);
+            const transcriptionHref = publicationJob.transcription_action === "start_transcription"
+              ? `/admin/content?view=transcription&media_id=${encodeURIComponent(publicationJob.media_id || "")}&action=start-transcription`
+              : publicationJob.transcription_action === "open_transcript_workbench"
+                ? `/admin/content?view=transcription&media_id=${encodeURIComponent(publicationJob.media_id || "")}&workbench=1`
+                : `/admin/content?view=transcription&media_id=${encodeURIComponent(publicationJob.media_id || "")}&task=1`;
             const meta = STATUS_META[job.status] || { label: job.status, hint: "状态待确认", variant: "secondary" as const };
             const statusHint = job.is_archived
               ? "资料已移入回收站，不参与知识库检索"
@@ -486,15 +495,26 @@ function ManagedJobsTable({
                 </td>
                 <td className="col-span-2 flex flex-wrap justify-end gap-2 lg:table-cell lg:px-3 lg:py-3">
                   <div className="flex flex-wrap justify-end gap-2">
-                    <a
-                      className={cn(buttonVariants({ variant: "outline", size: "sm" }), "max-sm:h-control-md")}
-                      href={adminContentApi.fileUrl(job.version_id)}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <Eye className="size-4" />
-                      查看文件
-                    </a>
+                    {isVideoIntent ? (
+                      <a
+                        className={cn(buttonVariants({ variant: "outline", size: "sm" }), "max-sm:h-control-md")}
+                        href={transcriptionHref}
+                        aria-label={`转录“${job.title || job.original_filename || "视频"}”`}
+                      >
+                        <Rocket className="size-4" />
+                        转录
+                      </a>
+                    ) : (
+                      <a
+                        className={cn(buttonVariants({ variant: "outline", size: "sm" }), "max-sm:h-control-md")}
+                        href={adminContentApi.fileUrl(job.version_id)}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <Eye className="size-4" />
+                        查看文件
+                      </a>
+                    )}
                     <Button
                       size="sm"
                       className="max-sm:h-control-md"

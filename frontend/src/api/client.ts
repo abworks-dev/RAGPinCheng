@@ -880,6 +880,22 @@ export const api = {
       `/api/admin/content/versions/${encodeURIComponent(versionId)}/publish`,
       { method: "POST", body: JSON.stringify({}) },
     ),
+  publishManagedMedia: (
+    itemId: string,
+    expectedVersionId: string,
+    requestIdempotencyKey: string,
+  ) => jsonFetch<{
+    id: string;
+    media_id: string;
+    item_id: string;
+    status: string;
+  }>(`/api/admin/content/items/${encodeURIComponent(itemId)}/publish`, {
+    method: "POST",
+    body: JSON.stringify({
+      expected_version_id: expectedVersionId,
+      request_idempotency_key: requestIdempotencyKey,
+    }),
+  }),
   regenerateManagedContentPreview: (versionId: string) =>
     jsonFetch<ManagedPreview>(
       `/api/admin/content/versions/${encodeURIComponent(versionId)}/preview`,

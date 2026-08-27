@@ -1845,7 +1845,7 @@ _CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
                  WHEN mj.status='failed' THEN 'transcription_failed'
                  WHEN tv.id IS NOT NULL THEN 'transcript_ready'
                  WHEN mj.status='succeeded' THEN 'transcript_ready'
-                 ELSE 'awaiting_transcription'
+                 ELSE 'pending_publication'
                END AS lifecycle_status,
                NULL AS object_sha256,'transcription' AS source_origin,
                (SELECT e.batch_id FROM upload_batch_entries e
@@ -2063,7 +2063,7 @@ def _archive_media_transcript_item_locked(conn: sqlite3.Connection, item_id: str
                                    WHEN m.status='failed' OR latest_job.status='failed' THEN 'transcription_failed'
                                    WHEN tv.id IS NOT NULL THEN 'transcript_ready'
                                    WHEN latest_job.status='succeeded' THEN 'transcript_ready'
-                                   ELSE 'awaiting_transcription'
+                                   ELSE 'pending_publication'
                                  END AS lifecycle_status
                           FROM content_items i JOIN media_assets m ON m.media_id=i.media_id
                           LEFT JOIN media_transcript_heads h ON h.media_id=m.media_id
@@ -2081,6 +2081,8 @@ def _archive_media_transcript_item_locked(conn: sqlite3.Connection, item_id: str
     if not can_archive_published:
         raise ValueError("content_delete_forbidden")
     if conn.execute("SELECT 1 FROM transcription_jobs WHERE media_id=? AND status IN ('pending','running')", (row["media_id"],)).fetchone():
+        raise ValueError("content_delete_in_progress")
+    if conn.execute("SELECT 1 FROM media_publication_requests WHERE media_id=? AND status IN ('pending_transcription','ready_to_publish','publishing')", (row["media_id"],)).fetchone():
         raise ValueError("content_delete_in_progress")
     if row["current_version_id"] and conn.execute("SELECT 1 FROM transcript_publication_index_jobs WHERE transcript_version_id=? AND status IN ('pending','parsing','chunking','embedding')", (row["current_version_id"],)).fetchone():
         raise ValueError("content_delete_in_progress")

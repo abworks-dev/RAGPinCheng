@@ -1056,6 +1056,28 @@ class ManagedPublicationDTO(BaseModel):
     status: str
 
 
+class CreateMediaPublicationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version_id: str = Field(min_length=1, max_length=100)
+    request_idempotency_key: str = Field(min_length=36, max_length=36)
+
+
+class MediaPublicationIntentDTO(BaseModel):
+    id: str
+    media_id: str
+    status: Literal[
+        "pending_transcription",
+        "ready_to_publish",
+        "publishing",
+        "published",
+        "failed",
+        "cancelled",
+    ]
+    created_at: int
+    updated_at: int
+
+
 class ManagedPreviewDTO(BaseModel):
     version_id: str
     preview_parent_id: str
@@ -1164,6 +1186,12 @@ class UnifiedPublicationJobDTO(BaseModel):
     file_size: int | None = None
     parent_count: int | None = None
     preview_parent_id: str | None = None
+    workflow_status: str | None = None
+    transcription_action: Literal[
+        "start_transcription",
+        "open_transcription_job",
+        "open_transcript_workbench",
+    ] | None = None
 
 
 class UnifiedPublicationJobListResponse(BaseModel):
@@ -1269,6 +1297,7 @@ class MediaAssetDTO(BaseModel):
     review_status: str | None = None
     publication_status: str | None = None
     publication_index_status: str | None = None
+    publication_request_status: str | None = None
     is_current_version: bool = False
     replacement_source_media_id: str | None = None
     replacement_candidate_media_id: str | None = None

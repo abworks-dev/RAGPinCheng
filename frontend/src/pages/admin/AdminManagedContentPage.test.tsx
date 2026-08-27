@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   createFolderRequest: vi.fn(),
   reviewFolderRequest: vi.fn(),
   publish: vi.fn(),
+  publishMedia: vi.fn(),
   publishTranscript: vi.fn(),
   regeneratePreview: vi.fn(),
   bulkPublish: vi.fn(),
@@ -131,6 +132,7 @@ vi.mock("../../api/client", () => ({
     createFolderRequest: mocks.createFolderRequest,
     reviewFolderRequest: mocks.reviewFolderRequest,
     publishManagedContent: mocks.publish,
+    publishManagedMedia: mocks.publishMedia,
     publishTranscriptVersion: mocks.publishTranscript,
     regenerateManagedContentPreview: mocks.regeneratePreview,
     bulkPublishManagedContent: mocks.bulkPublish,
@@ -328,6 +330,7 @@ describe("AdminManagedContentPage", () => {
     mocks.downloadFile.mockResolvedValue({ blob: new Blob(["file"]), filename: "standard.pdf" });
     mocks.downloadMedia.mockResolvedValue({ blob: new Blob(["media"]), filename: "WhisperX 培训视频-视频资料.zip" });
     mocks.createMediaMetadataRevision.mockResolvedValue({});
+    mocks.publishMedia.mockResolvedValue({ id: "intent-1", media_id: "media-1", status: "pending_transcription" });
     mocks.transcriptionSchemes.mockResolvedValue([{
       scheme_id: "scheme-1", name: "标准转录", description: "测试方案", base_id: "base-1",
       config_hash: "a".repeat(64), enabled: true, archived: false, sort_order: 1, version: 1,
@@ -422,7 +425,7 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getAllByRole("button", { name: "调整“导论”的归档目录" })[0]).toBeDisabled();
     expect(screen.getAllByRole("button", { name: "下载“导论”" })[0]).toBeEnabled();
     expect(screen.getAllByRole("button", { name: "删除“导论”" })[0]).toBeDisabled();
-    expect(screen.getAllByRole("button", { name: "发布" })[0]).toBeEnabled();
+    expect(screen.getAllByRole("button", { name: "发布“导论”" })[0]).toBeEnabled();
     const overview = screen.getByRole("region", { name: "资料状态概览" });
     expect(within(overview).getByText("待发布").parentElement?.parentElement).toHaveTextContent("2");
     expect(screen.getByLabelText("搜索资料")).toBeInTheDocument();
@@ -1904,6 +1907,34 @@ describe("AdminManagedContentPage", () => {
     expect(within(moreMenu).getByRole("menuitem", { name: "编辑转录稿" })).toHaveAttribute("href", `/admin/content?view=transcription&media_id=${mediaItem.media_id}&workbench=1&action=edit-current`);
     expect(within(moreMenu).getByRole("menuitem", { name: "替换视频" })).toHaveAttribute("href", `/admin/content?view=transcription&media_id=${mediaItem.media_id}&action=replace`);
     expect(within(moreMenu).getByRole("menuitem", { name: "进入转录任务" })).toHaveAttribute("href", `/admin/content?view=transcription&media_id=${mediaItem.media_id}&workbench=1`);
+  });
+
+  it("publishes an uploaded video intent instead of starting transcription", async () => {
+    mocks.role = "admin";
+    mocks.permissions = PUBLISHER_PERMISSIONS;
+    const pendingVideo = {
+      ...mediaItem,
+      item_id: "media-pending-item",
+      media_id: "media-1",
+      version_id: "media-pending-media-1",
+      title: "待发布培训视频",
+      lifecycle_status: "pending_publication",
+      has_published_head: false,
+      transcription_job_id: null,
+      transcription_job_status: null,
+    };
+    mocks.items.mockResolvedValue({ items: [pendingVideo], total: 1, status_counts: { pending_publication: 1 } });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "发布“待发布培训视频”" })[0]);
+
+    await waitFor(() => expect(mocks.publishMedia).toHaveBeenCalledWith(
+      "media-pending-item",
+      "media-pending-media-1",
+      expect.any(String),
+    ));
+    expect(mocks.preflightBulkTranscription).not.toHaveBeenCalled();
   });
 
   it.each([

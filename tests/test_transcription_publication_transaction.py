@@ -80,7 +80,20 @@ def begin(workflow, profile, *, now=40):
 
 def test_done_candidate_promotes_head_atomically(tmp_path):
     conn, store, workflow, port, profile, version = persist_candidate(tmp_path)
+    conn.execute(
+        """INSERT INTO media_publication_requests(
+               id,media_id,request_idempotency_key,status,created_at,updated_at
+           ) VALUES ('intent-1',?,'intent-request-1','pending_transcription',35,35)""",
+        (version.media_id,),
+    )
+    conn.commit()
+    assert conn.execute(
+        "SELECT status FROM media_publication_requests WHERE id='intent-1'"
+    ).fetchone()[0] == "pending_transcription"
     target = begin(workflow, profile)
+    assert tuple(conn.execute(
+        "SELECT status,transcript_version_id,publication_index_job_id FROM media_publication_requests WHERE id='intent-1'"
+    ).fetchone()) == ("publishing", VERSION_ID, INDEX_JOB_ID)
     receipt = workflow.run_publication_index(index_job_id=INDEX_JOB_ID, now=41)
     published = workflow.promote(
         version_id=VERSION_ID,
@@ -93,6 +106,9 @@ def test_done_candidate_promotes_head_atomically(tmp_path):
     assert target != "live"
     assert store.current_head(version.media_id) == VERSION_ID
     assert published.publication_status.value == "published"
+    assert tuple(conn.execute(
+        "SELECT status,completed_at FROM media_publication_requests WHERE id='intent-1'"
+    ).fetchone()) == ("published", 42)
     assert port.calls == 1
     catalog = conn.execute(
         "SELECT content_kind,category_id,media_id,normalized_filename FROM content_items"
@@ -141,6 +157,13 @@ def test_receipt_identity_mismatch_fails_closed(tmp_path):
 
 def test_failed_index_keeps_old_head_and_allows_new_target_attempt(tmp_path):
     conn, store, workflow, _port, profile, version = persist_candidate(tmp_path)
+    conn.execute(
+        """INSERT INTO media_publication_requests(
+               id,media_id,request_idempotency_key,status,created_at,updated_at
+           ) VALUES ('intent-2',?,'intent-request-2','pending_transcription',35,35)""",
+        (version.media_id,),
+    )
+    conn.commit()
     begin(workflow, profile)
     request = store.load_index_request(INDEX_JOB_ID)
     failed = PublicationIndexReceipt(
@@ -156,6 +179,9 @@ def test_failed_index_keeps_old_head_and_allows_new_target_attempt(tmp_path):
         "fake index adapter failed",
     )
     store.record_index_receipt(failed, now=41)
+    assert tuple(conn.execute(
+        "SELECT status,error_code FROM media_publication_requests WHERE id='intent-2'"
+    ).fetchone()) == ("failed", "index_adapter_failed")
     assert store.current_head(version.media_id) is None
     retry_id = "123e4567-e89b-12d3-a456-426614174023"
     target = workflow.begin_publication(
@@ -167,6 +193,52 @@ def test_failed_index_keeps_old_head_and_allows_new_target_attempt(tmp_path):
         now=42,
     )
     assert target.endswith("-a2") and target != request.target_index_id
+    conn.close()
+
+
+def test_new_intent_is_bound_without_reactivating_historical_failure(tmp_path):
+    conn, _store, workflow, _port, profile, version = persist_candidate(tmp_path)
+    conn.execute(
+        """INSERT INTO media_publication_requests(
+               id,media_id,request_idempotency_key,status,created_at,updated_at
+           ) VALUES ('old-failed',?,'old-request','failed',31,31),
+                    ('current-intent',?,'current-request','ready_to_publish',35,35)""",
+        (version.media_id, version.media_id),
+    )
+    conn.commit()
+
+    begin(workflow, profile)
+
+    assert conn.execute(
+        "SELECT status FROM media_publication_requests WHERE id='old-failed'"
+    ).fetchone()[0] == "failed"
+    assert tuple(conn.execute(
+        "SELECT status,publication_index_job_id FROM media_publication_requests WHERE id='current-intent'"
+    ).fetchone()) == ("publishing", INDEX_JOB_ID)
+    conn.close()
+
+
+def test_worker_failure_marks_bound_intent_failed(tmp_path):
+    conn, store, workflow, _port, profile, version = persist_candidate(tmp_path)
+    conn.execute(
+        """INSERT INTO media_publication_requests(
+               id,media_id,request_idempotency_key,status,created_at,updated_at
+           ) VALUES ('intent-worker',?,'worker-request','ready_to_publish',35,35)""",
+        (version.media_id,),
+    )
+    conn.commit()
+    begin(workflow, profile)
+
+    store.fail_publication_job(
+        INDEX_JOB_ID,
+        error_code="publication_worker_failed",
+        error_summary="controlled worker failure",
+        now=41,
+    )
+
+    assert tuple(conn.execute(
+        "SELECT status,error_code FROM media_publication_requests WHERE id='intent-worker'"
+    ).fetchone()) == ("failed", "publication_worker_failed")
     conn.close()
 
 

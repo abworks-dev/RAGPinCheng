@@ -74,15 +74,6 @@ const publicationMeta: Record<string, { label: string; variant: StatusVariant }>
   publication_failed: { label: "发布失败", variant: "destructive" },
 };
 
-const indexMeta: Record<string, { label: string; variant: StatusVariant }> = {
-  pending: { label: "等待索引", variant: "secondary" },
-  parsing: { label: "解析中", variant: "warning" },
-  chunking: { label: "分块中", variant: "warning" },
-  embedding: { label: "向量化中", variant: "warning" },
-  done: { label: "索引成功", variant: "success" },
-  failed: { label: "索引失败", variant: "destructive" },
-};
-
 const stageLabels: Record<string, string> = {
   validating_input: "校验输入",
   transcribing: "转录中",
@@ -149,10 +140,9 @@ function LifecycleRail({ asset }: { asset: MediaAsset }) {
   const stages = [
     { label: "审核", value: asset.review_status, meta: reviewMeta },
     { label: "发布", value: asset.publication_status, meta: publicationMeta },
-    { label: "索引", value: asset.publication_index_status, meta: indexMeta },
   ];
   return (
-    <ol className="grid gap-1.5 sm:grid-cols-3" aria-label="审核、发布、索引流程">
+    <ol className="grid gap-1.5 sm:grid-cols-2" aria-label="审核、发布流程">
       {stages.map((stage) => (
         <li key={stage.label} className="flex min-w-0 items-center justify-between gap-2 rounded-ui-sm border border-border/70 bg-background/60 px-2 py-1.5" aria-label={`${stage.label}：${stage.value ? stage.meta[stage.value]?.label || stage.value : "未开始"}`}>
           <span className="text-ui-xs font-medium text-muted-foreground">{stage.label}</span>
@@ -216,6 +206,15 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const [batchMenuOpen, setBatchMenuOpen] = useState(false);
   const [batchCleanupTargetIds, setBatchCleanupTargetIds] = useState<string[]>([]);
   const [batchActionBusy, setBatchActionBusy] = useState(false);
+  const [startDialogMediaIds, setStartDialogMediaIds] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    const params = new URLSearchParams(window.location.search);
+    const mediaId = params.get("media_id");
+    return params.get("action") === "start-transcription" && mediaId ? [mediaId] : [];
+  });
+  const [startDefaultSchemeId, setStartDefaultSchemeId] = useState("");
+  const [startSchemeOverrides, setStartSchemeOverrides] = useState<Record<string, string>>({});
+  const [startBusy, setStartBusy] = useState(false);
   const [batchFeedback, setBatchFeedback] = useState<{
     title: string;
     succeeded: number;
@@ -267,6 +266,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
         const first = items.find((item) => item.enabled && !item.archived && item.availability === "available");
         if (first) {
           setBulkProfileId(first.scheme_id);
+          setStartDefaultSchemeId((current) => current || first.scheme_id);
           setReplacementProfileId((current) => current || first.scheme_id);
           setPending((current) => current.map((item) => item.profileId ? item : { ...item, profileId: first.scheme_id }));
         }
@@ -358,7 +358,8 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
     return job?.status === "failed" || asset.status === "failed" || asset.publication_status === "publication_failed" || asset.publication_index_status === "failed";
   };
   const transcriptionTaskAssets = mediaAssets.filter((asset) =>
-    Boolean(asset.transcription_job_id)
+    Boolean(asset.publication_request_status)
+    || Boolean(asset.transcription_job_id)
     || jobsByMediaId.has(asset.media_id)
     || asset.status === "failed"
     || asset.available_actions.includes("finalize_failed_cleanup"),
@@ -372,6 +373,14 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const pageIds = pagedMediaAssets.map((asset) => asset.media_id);
   const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedMediaIds.includes(id));
   const selectedAssets = selectedMediaIds
+    .map((id) => mediaAssets.find((asset) => asset.media_id === id))
+    .filter((asset): asset is MediaAsset => Boolean(asset));
+  const startableSelectedAssets = selectedAssets.filter((asset) =>
+    Boolean(asset.publication_request_status)
+    && !activeJobStatuses.has(jobsByMediaId.get(asset.media_id)?.status || "")
+    && !asset.current_version_id,
+  );
+  const startDialogAssets = startDialogMediaIds
     .map((id) => mediaAssets.find((asset) => asset.media_id === id))
     .filter((asset): asset is MediaAsset => Boolean(asset));
   const selectedJobs = selectedMediaIds.map((id) => jobsByMediaId.get(id)).filter((job): job is TranscriptionJob => Boolean(job));
@@ -412,6 +421,44 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
     } finally {
       setBatchActionBusy(false);
     }
+  };
+  const openStartDialog = (assets: MediaAsset[]) => {
+    const ids = assets.map((asset) => asset.media_id);
+    setStartDialogMediaIds(ids);
+    setStartDefaultSchemeId((current) => current || enabledSchemes[0]?.scheme_id || "");
+    setStartSchemeOverrides({});
+    setBatchMenuOpen(false);
+  };
+  const closeStartDialog = () => {
+    if (startBusy) return;
+    setStartDialogMediaIds([]);
+    setStartSchemeOverrides({});
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("action") === "start-transcription") params.delete("action");
+    const query = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+  };
+  const startSelectedTranscriptions = async () => {
+    if (!startDialogAssets.length || !startDefaultSchemeId || startBusy) return;
+    setStartBusy(true);
+    const failures: string[] = [];
+    let succeeded = 0;
+    for (const asset of startDialogAssets) {
+      const schemeId = startSchemeOverrides[asset.media_id] || startDefaultSchemeId;
+      try {
+        await adminMediaApi.startTranscription(asset.media_id, schemeId, createRequestId());
+        succeeded += 1;
+      } catch (cause) {
+        failures.push(`${asset.title}：${cause instanceof Error ? cause.message : "启动失败"}`);
+      }
+    }
+    setBatchFeedback({ title: failures.length ? "批量转录部分完成" : "转录任务已创建", succeeded, failures });
+    setStartBusy(false);
+    if (!failures.length) {
+      setStartDialogMediaIds([]);
+      setStartSchemeOverrides({});
+    }
+    await refreshMediaState();
   };
   const runBatchCancel = async () => { for (const job of cancellableSelectedJobs) await cancelJob(job); setSelectedMediaIds([]); setBatchMenuOpen(false); };
   const runBatchCleanup = async () => {
@@ -1050,7 +1097,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
             <div className="relative min-w-0"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /><Input type="search" aria-label="搜索转录任务" placeholder="搜索标题或文件名…" className="h-control-md pl-9 text-ui-xs" value={mediaQuery} onChange={(event) => setMediaQuery(event.target.value)} /></div>
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
               <Button size="sm" variant="outline" className="h-control-md" aria-label="刷新媒体资源" title="刷新媒体资源" disabled={loading} onClick={() => void refreshMediaState()}><RefreshCw className="size-4" aria-hidden="true" />刷新列表</Button>
-              <div className="relative"><Button size="sm" variant="outline" disabled={!selectedMediaIds.length || batchActionBusy} aria-haspopup="menu" aria-expanded={batchMenuOpen} onClick={() => setBatchMenuOpen((open) => !open)}>批量操作<ChevronDown className="size-4" /></Button>{batchMenuOpen && <div role="menu" aria-label="批量操作" className="absolute right-0 top-full z-dropdown mt-1 w-48 rounded-ui-md border border-border bg-popover p-1 shadow-overlay"><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" disabled={!retryableSelectedAssets.length || batchActionBusy} onClick={() => void runBatchRetry()}><RotateCcw className="size-4" />重试所选（{retryableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" disabled={!cancellableSelectedJobs.length || batchActionBusy} onClick={() => void runBatchCancel()}><Ban className="size-4" />取消所选（{cancellableSelectedJobs.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm text-destructive hover:bg-destructive/10 disabled:opacity-40" disabled={!cleanableSelectedAssets.length || batchActionBusy} onClick={() => { setBatchCleanupTargetIds(cleanableSelectedAssets.map((asset) => asset.media_id)); setBatchMenuOpen(false); }}><Trash2 className="size-4" />清理所选（{cleanableSelectedAssets.length}）</button></div>}</div>
+              <div className="relative"><Button size="sm" variant="outline" disabled={!selectedMediaIds.length || batchActionBusy} aria-haspopup="menu" aria-expanded={batchMenuOpen} onClick={() => setBatchMenuOpen((open) => !open)}>批量操作<ChevronDown className="size-4" /></Button>{batchMenuOpen && <div role="menu" aria-label="批量操作" className="absolute right-0 top-full z-dropdown mt-1 w-48 rounded-ui-md border border-border bg-popover p-1 shadow-overlay"><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" disabled={!startableSelectedAssets.length || batchActionBusy} onClick={() => openStartDialog(startableSelectedAssets)}><Rocket className="size-4" />开始转录（{startableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" disabled={!retryableSelectedAssets.length || batchActionBusy} onClick={() => void runBatchRetry()}><RotateCcw className="size-4" />重试所选（{retryableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" disabled={!cancellableSelectedJobs.length || batchActionBusy} onClick={() => void runBatchCancel()}><Ban className="size-4" />取消所选（{cancellableSelectedJobs.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm text-destructive hover:bg-destructive/10 disabled:opacity-40" disabled={!cleanableSelectedAssets.length || batchActionBusy} onClick={() => { setBatchCleanupTargetIds(cleanableSelectedAssets.map((asset) => asset.media_id)); setBatchMenuOpen(false); }}><Trash2 className="size-4" />清理所选（{cleanableSelectedAssets.length}）</button></div>}</div>
               <a className={buttonVariants({ variant: "outline", size: "sm" })} href="/admin/asr"><Settings2 className="size-4" />转录配置</a>
               {!embedded && <Button size="sm" onClick={() => setUploadDialogOpen(true)}><Upload className="size-4" />{hasUploadDraft ? `继续上传${pending.length ? `（${pending.length}）` : ""}` : "上传视频"}</Button>}
             </div>
@@ -1059,7 +1106,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
         {batchFeedback && <Alert variant={batchFeedback.failures.length ? "destructive" : "default"} role={batchFeedback.failures.length ? "alert" : "status"}><AlertTitle>{batchFeedback.title}</AlertTitle><AlertDescription><p>成功 {batchFeedback.succeeded} 项{batchFeedback.failures.length ? `，失败 ${batchFeedback.failures.length} 项。` : "。"}</p>{batchFeedback.failures.length > 0 && <ul className="mt-1 list-disc space-y-1 pl-5">{batchFeedback.failures.map((message, index) => <li key={`${message}-${index}`}>{message}</li>)}</ul>}</AlertDescription></Alert>}
         {loadError ? <ErrorState title="媒体资源加载失败" description={loadError} action={<Button variant="outline" size="sm" onClick={refresh}>重新加载</Button>} />
           : loading ? <Card><LoadingState className="min-h-48" label="正在加载媒体资源…" /></Card>
-          : transcriptionTaskAssets.length === 0 ? <EmptyState title="暂无转录任务" description="在资料列表为视频选择转录方案后，任务和各阶段状态会显示在这里。" />
+          : transcriptionTaskAssets.length === 0 ? <EmptyState title="暂无转录任务" description="视频在资料列表发布后，会进入这里等待选择转录方案。" />
           : <>
             <div className="hidden grid-cols-[2rem_minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] gap-4 border-b border-border bg-surface-muted px-5 py-3 text-ui-xs font-medium text-muted-foreground lg:grid" data-testid="media-record-header">
               <Checkbox aria-label="选择当前页视频" checked={allPageSelected} onChange={() => setSelectedMediaIds(allPageSelected ? [] : pageIds)} /><span>媒体信息</span><span>处理进度</span><span>最近提交</span><span>操作</span>
@@ -1099,6 +1146,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
                     </div>
                     <p className="text-ui-xs text-muted-foreground"><span className="sr-only">提交时间：</span>{formatAdminDate(asset.created_at)}</p>
                     <div className="flex flex-wrap gap-1.5 lg:justify-end" aria-label={`媒体操作：${asset.title}`}>
+                      {asset.publication_request_status && !job && !asset.current_version_id && <Button size="sm" onClick={() => openStartDialog([asset])}>转录</Button>}
                       <IconButton label="进入转写工作台" tooltip="进入转写工作台" className="border border-border max-sm:size-control-md" onClick={() => openWorkbench(asset.media_id)}><Film className="size-4" /></IconButton>
                       {asset.catalog_item_id && asset.current_version_id && <IconButton label="调整目录" tooltip="调整目录" className="border border-border max-sm:size-control-md" onClick={() => { setMoveTarget(asset); setMoveCategoryId(""); setMoveError(null); }}><FolderInput className="size-4" /></IconButton>}
                       {showCancel && <IconButton label="取消" tooltip={canCancel ? "取消当前转录任务" : disabledActions.cancel_transcription || "当前状态不可取消"} className="border border-border max-sm:size-control-md" disabled={!job || !canCancel || deletingMediaId === asset.media_id} onClick={() => job && void cancelJob(job)}><Ban className="size-4" /></IconButton>}
@@ -1117,6 +1165,32 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
         </Card>
       </section>
 
+      <Dialog open={startDialogMediaIds.length > 0} onOpenChange={(open) => { if (!open) closeStartDialog(); }}>
+        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>配置转录方案</DialogTitle>
+            <DialogDescription>为所选视频设置默认方案，也可逐个覆盖后批量启动。</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <label className="block text-ui-sm font-medium">默认转录方案
+              <Select aria-label="默认转录方案" className="mt-1" value={startDefaultSchemeId} disabled={startBusy} onChange={(event) => setStartDefaultSchemeId(event.target.value)}>
+                <option value="">请选择可用方案</option>
+                {schemes.map((scheme) => <option key={scheme.scheme_id} value={scheme.scheme_id} disabled={!scheme.enabled || scheme.archived || scheme.availability !== "available"}>{scheme.name}{scheme.availability !== "available" ? "（不可用）" : ""}</option>)}
+              </Select>
+            </label>
+            <ul className="divide-y divide-border rounded-ui-md border border-border" aria-label="受影响的视频文件">
+              {startDialogAssets.map((asset) => <li key={asset.media_id} className="grid gap-3 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(12rem,18rem)] sm:items-center">
+                <div className="min-w-0"><p className="truncate text-ui-sm font-medium">{asset.title}</p><p className="truncate text-ui-xs text-muted-foreground">{asset.original_filename}</p></div>
+                <Select aria-label={`${asset.title}的转录方案`} value={startSchemeOverrides[asset.media_id] || ""} disabled={startBusy} onChange={(event) => setStartSchemeOverrides((current) => ({ ...current, [asset.media_id]: event.target.value }))}>
+                  <option value="">使用默认方案</option>
+                  {schemes.map((scheme) => <option key={scheme.scheme_id} value={scheme.scheme_id} disabled={!scheme.enabled || scheme.archived || scheme.availability !== "available"}>{scheme.name}</option>)}
+                </Select>
+              </li>)}
+            </ul>
+          </div>
+          <DialogFooter><Button variant="outline" disabled={startBusy} onClick={closeStartDialog}>取消</Button><Button disabled={startBusy || !startDefaultSchemeId || !startDialogAssets.length} onClick={() => void startSelectedTranscriptions()}>{startBusy ? "启动中…" : `开始转录（${startDialogAssets.length}）`}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={Boolean(moveTarget)} onOpenChange={(open) => { if (!open && !moveBusy) { setMoveTarget(null); setMoveCategoryId(""); setMoveError(null); } }}>
         <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto"><DialogHeader><DialogTitle>调整归档目录</DialogTitle><DialogDescription>只调整资料库中的归档位置，不改变视频、转录稿、发布状态或索引。</DialogDescription></DialogHeader>{moveTarget && <CategoryTreePicker categories={categories} value={moveCategoryId} currentCategoryId={moveTarget.category_id} onChange={(categoryId) => { setMoveCategoryId(categoryId); setMoveError(null); }} label="目标目录" />}{moveError && <Alert variant="destructive" role="alert"><AlertTitle>调整失败</AlertTitle><AlertDescription>{moveError}</AlertDescription></Alert>}<DialogFooter><Button variant="outline" disabled={moveBusy} onClick={() => setMoveTarget(null)}>取消</Button><Button disabled={moveBusy || !moveCategoryId || moveCategoryId === moveTarget?.category_id} onClick={() => void moveMediaAsset()}>{moveBusy ? "处理中…" : "确认调整"}</Button></DialogFooter></DialogContent>
       </Dialog>

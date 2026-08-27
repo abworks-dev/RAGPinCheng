@@ -87,6 +87,10 @@ from .content_bulk_operations import (
 )
 from .content_storage import ContentStorage, StoredContentObject
 from .media_storage import MediaStorageError, resolve_media_path
+from .media_publication_intents import (
+    MediaPublicationIntentConflict,
+    MediaPublicationIntentStore,
+)
 from .content_trash_cleanup import (
     get_trash_settings,
     list_purge_runs,
@@ -188,6 +192,8 @@ from .schemas import (
     UnifiedPublicationJobListResponse,
     UnifiedPublicationJobRetryRequest,
     ManagedPublicationDTO,
+    CreateMediaPublicationRequest,
+    MediaPublicationIntentDTO,
     ManagedPreviewDTO,
     XMindPreviewDTO,
     ManagedUploadEntryDTO,
@@ -3498,6 +3504,55 @@ def publish_content_version(
     )
 
 
+@router.post(
+    "/items/{item_id}/publish",
+    response_model=MediaPublicationIntentDTO,
+    status_code=202,
+)
+def publish_media_content_item(
+    item_id: str,
+    body: CreateMediaPublicationRequest,
+    user: CurrentUser = Depends(require_content_permission("item.publish", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> MediaPublicationIntentDTO:
+    _require_feature()
+    row = conn.execute(
+        """SELECT i.media_id,i.archived_at,h.current_version_id
+           FROM content_items i JOIN media_assets m ON m.media_id=i.media_id
+           LEFT JOIN media_transcript_heads h ON h.media_id=i.media_id
+           WHERE i.id=? AND i.content_kind='media_transcript' AND m.status<>'archived'""",
+        (item_id,),
+    ).fetchone()
+    if row is None or row["archived_at"] is not None:
+        raise HTTPException(status_code=404, detail="视频资料不存在")
+    if row["current_version_id"] is not None:
+        raise HTTPException(status_code=409, detail="视频已发布，请从转录任务处理新版本")
+    expected = f"media-pending-{row['media_id']}"
+    if body.expected_version_id != expected:
+        current = conn.execute(
+            "SELECT current_version_id FROM media_transcript_heads WHERE media_id=?",
+            (row["media_id"],),
+        ).fetchone()
+        if current is None or body.expected_version_id != current["current_version_id"]:
+            raise HTTPException(status_code=409, detail="资料版本已变化，请刷新后重试")
+    try:
+        intent = MediaPublicationIntentStore(conn).create(
+            media_id=str(row["media_id"]),
+            requested_by=user.id,
+            request_idempotency_key=body.request_idempotency_key,
+            now=int(time.time()),
+        )
+    except MediaPublicationIntentConflict as exc:
+        raise HTTPException(status_code=409, detail="该视频已有待处理发布任务") from exc
+    return MediaPublicationIntentDTO(
+        id=intent.id,
+        media_id=intent.media_id,
+        status=intent.status,
+        created_at=intent.created_at,
+        updated_at=intent.updated_at,
+    )
+
+
 def _validate_bulk_version_ids(version_ids: list[str]) -> list[str]:
     if len(set(version_ids)) != len(version_ids):
         raise HTTPException(status_code=400, detail="批量操作包含重复资料")
@@ -3885,7 +3940,9 @@ def list_unified_publication_jobs(
              i.category_id, c.display_code || ' ' || c.display_name AS category_label,
              NULL AS category_path, v.source_origin, j.attempt_number,
              CASE WHEN i.archived_at IS NULL THEN 0 ELSE 1 END AS is_archived, CASE WHEN h.current_version_id=v.id THEN 1 ELSE 0 END AS is_current_head,
-             1 AS is_latest_attempt, v.doc_type, v.version_number, o.size_bytes AS file_size,
+             CASE WHEN j.id=(SELECT x.id FROM content_index_jobs x WHERE x.version_id=j.version_id ORDER BY x.attempt_number DESC,x.created_at DESC,x.id DESC LIMIT 1)
+                  THEN 1 ELSE 0 END AS is_latest_attempt,
+             v.doc_type, v.version_number, o.size_bytes AS file_size,
              NULL AS parent_count, NULL AS preview_parent_id,
              (SELECT count(*) FROM content_index_jobs x WHERE x.version_id=j.version_id) AS attempt_count,
              j.error_code, j.error_summary, j.created_at, j.started_at, j.finished_at, j.updated_at
@@ -3904,7 +3961,9 @@ def list_unified_publication_jobs(
              v.id AS version_id, NULL AS publication_id, v.media_id,
              m.title, m.original_filename, NULL AS category_id, NULL AS category_label,
              NULL AS category_path, 'transcription' AS source_origin, j.attempt_number,
-             0 AS is_archived, 0 AS is_current_head, 1 AS is_latest_attempt,
+             0 AS is_archived, 0 AS is_current_head,
+             CASE WHEN j.attempt_number=(SELECT max(x.attempt_number) FROM transcript_publication_index_jobs x WHERE x.transcript_version_id=j.transcript_version_id)
+                  THEN 1 ELSE 0 END AS is_latest_attempt,
              'transcript' AS doc_type, NULL AS version_number, m.file_size AS file_size,
              NULL AS parent_count, NULL AS preview_parent_id,
              (SELECT count(*) FROM transcript_publication_index_jobs x WHERE x.transcript_version_id=j.transcript_version_id) AS attempt_count,
@@ -3914,9 +3973,33 @@ def list_unified_publication_jobs(
         JOIN media_assets m ON m.media_id=v.media_id
        WHERE j.attempt_number=(SELECT max(x.attempt_number) FROM transcript_publication_index_jobs x WHERE x.transcript_version_id=j.transcript_version_id)
     """
+    intent_sql = """
+      SELECT 'intent:' || r.id AS id, 'video_transcript' AS task_type,
+             '视频文件' AS task_type_label, 'processing' AS unified_status,
+             'media-pending-' || r.media_id AS version_id,
+             NULL AS publication_id, r.media_id,
+             m.title, m.original_filename, i.category_id,
+             c.display_code || ' ' || c.display_name AS category_label,
+             NULL AS category_path, 'transcription' AS source_origin, 1 AS attempt_number,
+             CASE WHEN i.archived_at IS NULL THEN 0 ELSE 1 END AS is_archived,
+             0 AS is_current_head, 1 AS is_latest_attempt,
+             'video' AS doc_type, 0 AS version_number, m.file_size AS file_size,
+             NULL AS parent_count, NULL AS preview_parent_id, 1 AS attempt_count,
+             r.error_code, NULL AS error_summary, r.created_at,
+             NULL AS started_at, r.completed_at AS finished_at, r.updated_at
+        FROM media_publication_requests r
+        JOIN media_assets m ON m.media_id=r.media_id
+        JOIN content_items i ON i.media_id=r.media_id AND i.content_kind='media_transcript'
+        JOIN category_nodes c ON c.id=i.category_id
+       WHERE r.status IN ('pending_transcription','ready_to_publish')
+    """
     parts = []
     params: list[object] = []
-    for sql, kind in ((document_sql, "document"), (video_sql, "video_transcript")):
+    for sql, kind in (
+        (document_sql, "document"),
+        (video_sql, "video_transcript"),
+        (intent_sql, "video_transcript"),
+    ):
         if task_type and task_type != kind: continue
         clauses = []
         if term: clauses.append("lower(title || ' ' || COALESCE(original_filename,'')) LIKE ?"); params.append(f"%{term}%")
@@ -3925,8 +4008,16 @@ def list_unified_publication_jobs(
         if doc_type: clauses.append("doc_type=?"); params.append(doc_type)
         if source_origin: clauses.append("source_origin=?"); params.append(source_origin)
         if not include_archived: clauses.append("is_archived=0")
-        if history:
-            sql = sql.replace("j.id=(SELECT x.id", "1=1 /* history */ AND j.id=(SELECT x.id") if kind == "document" else sql.replace("j.attempt_number=(SELECT max(x.attempt_number)", "1=1 /* history */ AND j.attempt_number=(SELECT max(x.attempt_number)")
+        if history and kind == "document":
+            sql = sql.replace(
+                "WHERE j.id=(SELECT x.id FROM content_index_jobs x WHERE x.version_id=j.version_id ORDER BY x.attempt_number DESC,x.created_at DESC,x.id DESC LIMIT 1)",
+                "WHERE 1=1",
+            )
+        elif history and sql is video_sql:
+            sql = sql.replace(
+                "WHERE j.attempt_number=(SELECT max(x.attempt_number) FROM transcript_publication_index_jobs x WHERE x.transcript_version_id=j.transcript_version_id)",
+                "WHERE 1=1",
+            )
         parts.append(f"SELECT * FROM ({sql}) q WHERE {' AND '.join(clauses) if clauses else '1=1'}")
     union = " UNION ALL ".join(parts) or "SELECT * FROM (SELECT NULL AS id) WHERE 1=0"
     rows = conn.execute(f"SELECT * FROM ({union}) all_jobs ORDER BY updated_at DESC,id DESC LIMIT ? OFFSET ?", [*params, limit, offset]).fetchall()
@@ -3939,6 +4030,23 @@ def list_unified_publication_jobs(
         payload = dict(row)
         payload["status"] = payload.pop("unified_status")
         payload["retryable"] = payload["status"] == "failed"
+        if str(payload["id"]).startswith("intent:"):
+            intent_id = str(payload["id"])[len("intent:"):]
+            intent = MediaPublicationIntentStore(conn).load(intent_id)
+            latest_job = conn.execute(
+                """SELECT status,result_version_id FROM transcription_jobs
+                   WHERE media_id=? ORDER BY attempt_number DESC,created_at DESC LIMIT 1""",
+                (intent.media_id,),
+            ).fetchone()
+            payload["workflow_status"] = intent.status
+            if latest_job is None:
+                payload["transcription_action"] = "start_transcription"
+            elif latest_job["status"] in {"pending", "running"}:
+                payload["transcription_action"] = "open_transcription_job"
+            elif latest_job["result_version_id"]:
+                payload["transcription_action"] = "open_transcript_workbench"
+            else:
+                payload["transcription_action"] = "start_transcription"
         jobs.append(UnifiedPublicationJobDTO(**payload))
     return UnifiedPublicationJobListResponse(
         jobs=jobs,

@@ -502,6 +502,75 @@ def _insert_catalogued_media(
     return item_id, f"media-pending-{media_id}"
 
 
+def test_video_publish_creates_intent_without_index_job(content_api):
+    client, sessions, queued, db_path = content_api
+    media_id = "123e4567-e89b-42d3-a456-426614174260"
+    conn = connect(db_path)
+    item_id, version_id = _insert_catalogued_media(
+        conn, media_id=media_id, title="待发布视频", filename="publish.mp4", now=100,
+    )
+    conn.close()
+
+    response = client.post(
+        f"/api/admin/content/items/{item_id}/publish",
+        json={
+            "expected_version_id": version_id,
+            "request_idempotency_key": "123e4567-e89b-42d3-a456-426614174261",
+        },
+        **_auth(sessions, "admin", csrf=True),
+    )
+
+    assert response.status_code == 202, response.text
+    assert response.json()["status"] == "pending_transcription"
+    assert response.json()["media_id"] == media_id
+    assert queued == []
+    conn = connect(db_path)
+    assert conn.execute("SELECT count(*) FROM media_publication_requests").fetchone()[0] == 1
+    assert conn.execute("SELECT count(*) FROM content_index_jobs").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM transcript_publication_index_jobs").fetchone()[0] == 0
+    conn.close()
+
+    listing = client.get(
+        "/api/admin/content/publication-jobs?task_type=video_transcript",
+        **_auth(sessions, "admin"),
+    )
+    assert listing.status_code == 200, listing.text
+    assert listing.json()["jobs"][0]["media_id"] == media_id
+    assert listing.json()["jobs"][0]["workflow_status"] == "pending_transcription"
+    assert listing.json()["jobs"][0]["transcription_action"] == "start_transcription"
+
+
+def test_video_publish_requires_publish_permission_and_csrf(content_api):
+    client, sessions, _queued, db_path = content_api
+    media_id = "123e4567-e89b-42d3-a456-426614174262"
+    conn = connect(db_path)
+    item_id, version_id = _insert_catalogued_media(
+        conn, media_id=media_id, title="权限验证视频", filename="permission.mp4", now=100,
+    )
+    conn.close()
+    endpoint = f"/api/admin/content/items/{item_id}/publish"
+    body = {
+        "expected_version_id": version_id,
+        "request_idempotency_key": "123e4567-e89b-42d3-a456-426614174263",
+    }
+
+    missing_permission = client.post(
+        endpoint, json=body, **_auth(sessions, "plain", csrf=True),
+    )
+    assert missing_permission.status_code == 403
+
+    missing_csrf = client.post(
+        endpoint, json=body, **_auth(sessions, "publisher"),
+    )
+    assert missing_csrf.status_code == 403
+
+    published = client.post(
+        endpoint, json=body, **_auth(sessions, "publisher", csrf=True),
+    )
+    assert published.status_code == 202, published.text
+    assert published.json()["status"] == "pending_transcription"
+
+
 def test_untranscribed_video_can_move_to_trash_and_restore(content_api):
     client, sessions, _queued, db_path = content_api
     media_id = "123e4567-e89b-42d3-a456-426614174250"
@@ -516,7 +585,7 @@ def test_untranscribed_video_can_move_to_trash_and_restore(content_api):
         json={"expected_version_id": version_id}, **_auth(sessions, "admin", csrf=True),
     )
     assert archived.status_code == 200, archived.text
-    assert archived.json()["previous_status"] == "awaiting_transcription"
+    assert archived.json()["previous_status"] == "pending_publication"
 
     refs = [{"item_id": item_id, "expected_version_id": version_id}]
     blocked_preflight = client.post(
@@ -575,7 +644,7 @@ def test_untranscribed_video_can_move_to_trash_and_restore(content_api):
     ("job_status", "media_status", "failure_classification", "expected_lifecycle"),
     [
         ("failed", "failed", "transient", "transcription_failed"),
-        ("cancelled", "uploaded", None, "awaiting_transcription"),
+        ("cancelled", "uploaded", None, "pending_publication"),
     ],
 )
 def test_retryable_terminal_video_can_move_to_trash_and_restore(
@@ -3914,6 +3983,18 @@ def test_managed_index_jobs_default_to_latest_attempt_and_allow_history(content_
         "retryable": False,
         "recommended_action": "请上传已解除密码保护的 PDF。",
     }
+
+    unified_latest = client.get(
+        "/api/admin/content/publication-jobs", **_auth(sessions, "publisher")
+    ).json()
+    assert unified_latest["total"] == 1
+    assert unified_latest["jobs"][0]["attempt_number"] == 2
+
+    unified_history = client.get(
+        "/api/admin/content/publication-jobs?history=true", **_auth(sessions, "publisher")
+    ).json()
+    assert unified_history["total"] == 2
+    assert sum(job["is_latest_attempt"] for job in unified_history["jobs"]) == 1
 
     listing = client.get("/api/admin/content/items-page?lifecycle_status=publishing", **_auth(sessions, "publisher")).json()
     assert listing["items"][0]["publication_attempt_count"] == 2
