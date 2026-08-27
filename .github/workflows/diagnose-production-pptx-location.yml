@@ -1,0 +1,110 @@
+name: Diagnose Production PPTX Location Coverage
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_diagnostic:
+        description: Select DIAGNOSE_PPTX_LOCATION to read the suspected PPTX metadata
+        required: true
+        default: CANCEL
+        type: choice
+        options:
+          - CANCEL
+          - DIAGNOSE_PPTX_LOCATION
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-app-manual-v1
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    environment: production-asr
+    runs-on: [self-hosted, linux, ubuntu, production, app]
+    timeout-minutes: 10
+    env:
+      REPO_PATH: ${{ vars.PRODUCTION_APP_REPO_PATH }}
+      DATA_PATH: ${{ vars.PRODUCTION_APP_DATA_PATH }}
+      CONFIRM_DIAGNOSTIC: ${{ inputs.confirm_diagnostic }}
+    steps:
+      - name: Report the suspected PPTX metadata without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          [ "${CONFIRM_DIAGNOSTIC}" = "DIAGNOSE_PPTX_LOCATION" ] || {
+            echo "ERROR: production PPTX location diagnostic was not confirmed"
+            exit 1
+          }
+          [ "${GITHUB_REF}" = "refs/heads/master" ] || {
+            echo "ERROR: production PPTX location diagnostic must run from master"
+            exit 1
+          }
+          [ "${REPO_PATH}" = "/data/workspace/projects/ragpincheng" ] || {
+            echo "ERROR: production application repository is not the approved path"
+            exit 1
+          }
+          [ "${DATA_PATH}" = "/data/services/docker/data/ragpincheng/prod/app" ] || {
+            echo "ERROR: production application data directory is not the approved path"
+            exit 1
+          }
+          [ -d "${REPO_PATH}" ] && [ ! -L "${REPO_PATH}" ] || {
+            echo "ERROR: production application repository is unavailable"
+            exit 1
+          }
+          [ -d "${DATA_PATH}" ] && [ ! -L "${DATA_PATH}" ] || {
+            echo "ERROR: production application data directory is unavailable"
+            exit 1
+          }
+          APP_DATABASE="${DATA_PATH}/app.sqlite"
+          [ -f "${APP_DATABASE}" ] && [ ! -L "${APP_DATABASE}" ] || {
+            echo "ERROR: production application database is unavailable"
+            exit 1
+          }
+          [ "$(git -C "${REPO_PATH}" branch --show-current)" = "master" ] || {
+            echo "ERROR: production application repository must be on master"
+            exit 1
+          }
+          [ -z "$(git -C "${REPO_PATH}" status --porcelain --untracked-files=no)" ] || {
+            echo "ERROR: production application repository has tracked local changes"
+            exit 1
+          }
+
+          APP_DATABASE="${APP_DATABASE}" python3 - <<'PY'
+          import json
+          import os
+          import sqlite3
+
+          database = os.environ["APP_DATABASE"]
+          query = """
+          SELECT
+            h.item_id,
+            h.current_version_id AS version_id,
+            COALESCE(v.title, i.title) AS title,
+            v.original_filename,
+            v.doc_type
+          FROM content_item_heads h
+          JOIN content_items i ON i.id = h.item_id
+          JOIN content_versions v
+            ON v.id = h.current_version_id
+           AND v.item_id = h.item_id
+          ORDER BY h.item_id
+          LIMIT 1 OFFSET 72
+          """
+          with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+              row = connection.execute(query).fetchone()
+          if row is None:
+              raise SystemExit("ERROR: the 73rd managed content head does not exist")
+          fields = ("item_id", "version_id", "title", "original_filename", "doc_type")
+          result = dict(zip(fields, row, strict=True))
+          if result["doc_type"] != "pptx":
+              raise SystemExit("ERROR: the suspected managed content head is not a PPTX")
+          print("PPTX_LOCATION_DIAGNOSTIC " + json.dumps(result, ensure_ascii=False, sort_keys=True))
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("## Production PPTX location diagnostic\n\n")
+              summary.write("- Status: read-only metadata query completed\n")
+              for field in fields:
+                  summary.write(f"- `{field}`: `{result[field]}`\n")
+          PY
