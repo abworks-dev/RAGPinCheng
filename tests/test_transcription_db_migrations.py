@@ -508,6 +508,7 @@ def test_schema_5_database_adds_later_tables_without_changing_users(tmp_path):
     conn.execute("DROP TABLE content_permission_group_items")
     conn.execute("DROP TABLE content_permission_groups")
     conn.execute("DROP TABLE upload_batch_entries")
+    conn.execute("DROP TABLE media_publication_requests")
     conn.execute("DROP TABLE content_permissions")
     conn.execute(
         """CREATE TABLE content_permissions (
