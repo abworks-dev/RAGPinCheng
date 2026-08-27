@@ -2067,7 +2067,10 @@ def _archive_media_transcript_item_locked(conn: sqlite3.Connection, item_id: str
                                  END AS lifecycle_status
                           FROM content_items i JOIN media_assets m ON m.media_id=i.media_id
                           LEFT JOIN media_transcript_heads h ON h.media_id=m.media_id
-                          LEFT JOIN transcript_versions tv ON tv.id=h.current_version_id
+                          LEFT JOIN transcript_versions tv ON tv.id=(
+                            SELECT latest.id FROM transcript_versions latest WHERE latest.media_id=m.media_id
+                            ORDER BY latest.created_at DESC,latest.id DESC LIMIT 1
+                          )
                           LEFT JOIN transcription_jobs latest_job ON latest_job.id=(
                             SELECT j.id FROM transcription_jobs j WHERE j.media_id=m.media_id
                             ORDER BY j.attempt_number DESC,j.created_at DESC,j.id DESC LIMIT 1
@@ -2082,7 +2085,7 @@ def _archive_media_transcript_item_locked(conn: sqlite3.Connection, item_id: str
         raise ValueError("content_delete_forbidden")
     if conn.execute("SELECT 1 FROM transcription_jobs WHERE media_id=? AND status IN ('pending','running')", (row["media_id"],)).fetchone():
         raise ValueError("content_delete_in_progress")
-    if conn.execute("SELECT 1 FROM media_publication_requests WHERE media_id=? AND status IN ('pending_transcription','ready_to_publish','publishing')", (row["media_id"],)).fetchone():
+    if conn.execute("SELECT 1 FROM media_publication_requests WHERE media_id=? AND status='publishing'", (row["media_id"],)).fetchone():
         raise ValueError("content_delete_in_progress")
     if row["current_version_id"] and conn.execute("SELECT 1 FROM transcript_publication_index_jobs WHERE transcript_version_id=? AND status IN ('pending','parsing','chunking','embedding')", (row["current_version_id"],)).fetchone():
         raise ValueError("content_delete_in_progress")

@@ -1292,6 +1292,7 @@ export type MediaAsset = {
   category_path?: string | null;
   catalog_item_id?: string | null;
   current_version_id?: string | null;
+  latest_version_id?: string | null;
   storage_kind?: "managed" | "external";
   external_source_id?: string | null;
   external_relative_path?: string | null;

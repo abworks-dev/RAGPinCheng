@@ -2,6 +2,8 @@ import sqlite3
 
 import pytest
 
+from api.transcription_store import StoreConflictError
+
 from src.transcription.formatter import format_transcript
 from src.transcription.normalizer import normalize_candidate
 from src.transcription.persistence import (
@@ -257,6 +259,67 @@ def test_experimental_profile_requires_actual_review(tmp_path):
     conn.commit()
     store.review_version(VERSION_ID, approved=True, reviewed_by=1, review_note="approved fixture", now=35)
     assert begin(workflow, profile).endswith("-a1")
+    conn.close()
+
+
+def test_approved_unpublished_version_can_return_to_review_but_publishing_cannot(tmp_path):
+    profile = make_profile(
+        qualification=ProfileQualification.experimental,
+        release_policy=ReleasePolicy(True, False, False),
+    )
+    conn, store, workflow, _port, _profile, _version = persist_candidate(tmp_path, profile=profile)
+    conn.execute(
+        "INSERT INTO users(employee_id,real_name,password_hash,role,is_active,created_at) VALUES ('u','User','x','admin',1,1)"
+    )
+    conn.commit()
+    approved = store.review_version(
+        VERSION_ID, approved=True, reviewed_by=1, review_note="approved fixture", now=35
+    )
+    assert approved.review_status is ReviewStatus.review_approved
+
+    returned = store.return_version_to_review(VERSION_ID, now=36)
+    assert returned.review_status is ReviewStatus.awaiting_review
+    assert returned.reviewed_by is None
+    assert returned.reviewed_at is None
+    assert returned.review_note is None
+
+    with pytest.raises(StoreConflictError, match="publication_transition_conflict"):
+        store.begin_publication(
+            version_id=VERSION_ID,
+            index_job_id=INDEX_JOB_ID,
+            attempt_number=1,
+            target_index_id=f"transcript-candidate-{VERSION_ID}-a1",
+            now=40,
+        )
+
+    store.review_version(VERSION_ID, approved=True, reviewed_by=1, review_note=None, now=37)
+    begin(workflow, profile)
+    with pytest.raises(StoreConflictError, match="return_to_review_conflict"):
+        store.return_version_to_review(VERSION_ID, now=41)
+    conn.close()
+
+
+def test_archived_media_cannot_start_publication(tmp_path):
+    profile = make_profile(
+        qualification=ProfileQualification.experimental,
+        release_policy=ReleasePolicy(True, False, False),
+    )
+    conn, store, workflow, _port, _profile, _version = persist_candidate(tmp_path, profile=profile)
+    conn.execute(
+        "INSERT INTO users(employee_id,real_name,password_hash,role,is_active,created_at) VALUES ('u','User','x','admin',1,1)"
+    )
+    conn.commit()
+    store.review_version(VERSION_ID, approved=True, reviewed_by=1, review_note=None, now=35)
+    media_id = store.load_version(VERSION_ID).media_id
+    conn.execute("UPDATE media_assets SET status='archived' WHERE media_id=?", (media_id,))
+    conn.commit()
+
+    with pytest.raises(StoreConflictError, match="publication_transition_conflict"):
+        begin(workflow, profile)
+    assert conn.execute(
+        "SELECT count(*) FROM transcript_publication_index_jobs WHERE transcript_version_id=?",
+        (VERSION_ID,),
+    ).fetchone()[0] == 0
     conn.close()
 
 

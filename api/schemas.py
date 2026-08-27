@@ -1306,6 +1306,7 @@ class MediaAssetDTO(BaseModel):
     category_path: str | None = None
     catalog_item_id: str | None = None
     current_version_id: str | None = None
+    latest_version_id: str | None = None
     storage_kind: Literal["managed", "external"] = "managed"
     external_source_id: str | None = None
     external_relative_path: str | None = None

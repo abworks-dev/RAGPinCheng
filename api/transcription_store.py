@@ -750,6 +750,21 @@ class SQLiteTranscriptionStore:
                 )
         return self.load_version(version_id)
 
+    def return_version_to_review(self, version_id: str, *, now: int) -> TranscriptVersionRecord:
+        validate_uuid(version_id, "version_id")
+        with self._transaction():
+            changed = self._conn.execute(
+                """UPDATE transcript_versions
+                   SET review_status='awaiting_review',reviewed_by=NULL,reviewed_at=NULL,
+                       review_note=NULL,updated_at=?
+                   WHERE id=? AND review_status='review_approved'
+                     AND publication_status IN ('not_published','publication_failed')""",
+                (now, version_id),
+            ).rowcount
+            if changed != 1:
+                raise StoreConflictError("return_to_review_conflict")
+        return self.load_version(version_id)
+
     def begin_publication(
         self,
         *,
@@ -780,7 +795,12 @@ class SQLiteTranscriptionStore:
                 raise ContractValidationError("publication_already_active", "publication_status")
             changed = self._conn.execute(
                 """UPDATE transcript_versions SET publication_status='publishing',updated_at=?
-                   WHERE id=? AND publication_status IN ('not_published','publication_failed')""",
+                   WHERE id=? AND review_status IN ('review_approved','not_required')
+                     AND publication_status IN ('not_published','publication_failed')
+                     AND EXISTS(
+                       SELECT 1 FROM media_assets m
+                       WHERE m.media_id=transcript_versions.media_id AND m.status<>'archived'
+                     )""",
                 (now, version_id),
             ).rowcount
             if changed != 1:
