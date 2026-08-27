@@ -83,6 +83,44 @@ jobs:
           }
           docker image inspect pincheng-rag-backend:latest >/dev/null
 
+          TEMP_ROOT="$(mktemp -d)"
+          trap 'rm -rf -- "${TEMP_ROOT}"' EXIT
+          export APP_DATABASE CONTENT_ROOT ITEM_ID VERSION_ID TEMP_ROOT
+          OBJECT_SHA256="$(python3 - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          import shutil
+          import sqlite3
+
+          with sqlite3.connect(f"file:{os.environ['APP_DATABASE']}?mode=ro", uri=True) as connection:
+              row = connection.execute(
+                  """SELECT o.storage_rel_path,o.sha256,v.doc_type
+                       FROM content_item_heads h
+                       JOIN content_versions v
+                         ON v.id=h.current_version_id AND v.item_id=h.item_id
+                       JOIN content_objects o ON o.sha256=v.object_sha256
+                      WHERE h.item_id=? AND h.current_version_id=?""",
+                  (os.environ["ITEM_ID"], os.environ["VERSION_ID"]),
+              ).fetchone()
+          if row is None or str(row[2]) != "pptx":
+              raise SystemExit("ERROR: approved production PPTX target is unavailable")
+          root = Path(os.environ["CONTENT_ROOT"]).resolve(strict=True)
+          source = (root / str(row[0])).resolve(strict=True)
+          if source == root or root not in source.parents or not source.is_file() or source.is_symlink():
+              raise SystemExit("ERROR: approved production PPTX object is unsafe")
+          expected = str(row[1])
+          digest = hashlib.sha256(source.read_bytes()).hexdigest()
+          if digest != expected:
+              raise SystemExit("ERROR: approved production PPTX object hash mismatch")
+          target = Path(os.environ["TEMP_ROOT"]) / "source.pptx"
+          shutil.copyfile(source, target)
+          if hashlib.sha256(target.read_bytes()).hexdigest() != expected:
+              raise SystemExit("ERROR: temporary PPTX copy hash mismatch")
+          print(expected)
+          PY
+          )"
+
           OUTPUT="$(docker run --rm \
             --read-only \
             --network none \
@@ -92,16 +130,13 @@ jobs:
             -e HOME=/tmp \
             -e PYTHONDONTWRITEBYTECODE=1 \
             -e PYTHONPATH=/diagnostic/repo \
-            -v "${DATA_PATH}:/diagnostic/data:ro" \
-            -v "${CONTENT_ROOT}:/diagnostic/content:ro" \
+            -v "${TEMP_ROOT}/source.pptx:/diagnostic/source.pptx:ro" \
             -v "${GITHUB_WORKSPACE}:/diagnostic/repo:ro" \
             --entrypoint python3 \
             pincheng-rag-backend:latest \
             /diagnostic/repo/scripts/diagnose_single_pptx_location.py \
-              --app-database /diagnostic/data/app.sqlite \
-              --content-root /diagnostic/content \
-              --item-id "${ITEM_ID}" \
-              --version-id "${VERSION_ID}" \
+              --source /diagnostic/source.pptx \
+              --expected-sha256 "${OBJECT_SHA256}" \
               --work-dir /diagnostic-work)"
           printf '%s\n' "${OUTPUT}"
           DIAGNOSTIC_JSON="$(printf '%s\n' "${OUTPUT}" | sed -n \
