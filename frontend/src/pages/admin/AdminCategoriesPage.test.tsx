@@ -279,7 +279,7 @@ describe("AdminCategoriesPage", () => {
     expect(screen.queryByRole("heading", { name: "暂无分类" })).not.toBeInTheDocument();
   });
 
-  it("expands shared folders and files inside the category tree", async () => {
+  it("shows only shared folders inside the category tree", async () => {
     const shared = {
       ...category,
       id: "cat-shared",
@@ -305,7 +305,8 @@ describe("AdminCategoriesPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "展开共享培训" }));
 
     expect(await screen.findByTestId("shared-tree-item-folder-1")).toHaveTextContent("一级课程");
-    expect(screen.getByTestId("shared-tree-item-video-1")).toHaveTextContent("导论.mp4");
+    expect(screen.queryByTestId("shared-tree-item-video-1")).not.toBeInTheDocument();
+    expect(screen.queryByText("导论.mp4")).not.toBeInTheDocument();
     expect(screen.getAllByText("共享").length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByRole("region", { name: "共享培训远程目录" })).not.toBeInTheDocument();
     const root = screen.getByTestId("category-tree-item-cat-shared");

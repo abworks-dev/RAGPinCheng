@@ -24,7 +24,7 @@ async function openRootFolder(page: Parameters<typeof installAdminRoutes>[0], fo
 }
 
 test.describe("资料管理", () => {
-  test("共享目录复用资料条目并在分类树内联展开", async ({ page }) => {
+  test("共享目录在资料列表显示文件且在分类管理仅显示文件夹", async ({ page }) => {
     await openTab(page, "资料管理", "shared_library");
     const sharedFolder = page.viewportSize()!.width < 1024
       ? page.getByTestId("managed-folder-mobile-cat-shared")
@@ -43,7 +43,7 @@ test.describe("资料管理", () => {
     await page.getByRole("link", { name: "分类管理", exact: true }).click();
     await page.getByRole("button", { name: "展开共享培训资料" }).click();
     await expect(page.getByTestId("shared-tree-item-shared-folder-course")).toContainText("一级课程");
-    await expect(page.getByTestId("shared-tree-item-shared-video-intro")).toContainText("共享培训导论.mp4");
+    await expect(page.getByTestId("shared-tree-item-shared-video-intro")).toHaveCount(0);
     await expectNoBodyOverflow(page);
     expect((await page.screenshot({ fullPage: true })).byteLength).toBeGreaterThan(10_000);
   });

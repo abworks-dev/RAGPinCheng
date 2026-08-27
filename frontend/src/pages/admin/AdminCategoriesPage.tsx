@@ -749,7 +749,7 @@ function CategoryTreeNodeView({
     </div>
     {hasChildren && isExpanded && <div role="group" className="ml-5 border-l border-border bg-surface-muted/10 sm:ml-6">
       {children.map((child, childIndex) => <CategoryTreeNodeView key={child.category.id} node={child} level={level + 1} index={childIndex} siblingCount={children.length} selectedId={selectedId} expanded={expanded} visibleNodes={visibleNodes} nodeRefs={nodeRefs} onSelect={onSelect} onToggle={onToggle} />)}
-      {sharedSourceId && <ExternalCategoryTree sourceId={sharedSourceId} level={level + 1} />}
+      {sharedSourceId && <ExternalCategoryTree sourceId={sharedSourceId} level={level + 1} foldersOnly />}
     </div>}
   </>;
 }

@@ -155,15 +155,16 @@ export function ExternalFolderBrowser({
   </section>;
 }
 
-export function ExternalCategoryTree({ sourceId, parent = "", level }: { sourceId: string; parent?: string; level: number }) {
+export function ExternalCategoryTree({ sourceId, parent = "", level, foldersOnly = false }: { sourceId: string; parent?: string; level: number; foldersOnly?: boolean }) {
   const { entries, loading, error } = useExternalEntries(sourceId, parent);
+  const visibleEntries = foldersOnly ? entries.filter((entry) => entry.kind === "folder") : entries;
   if (loading) return <div className="px-4 py-3 text-ui-xs text-muted-foreground" role="status">正在读取共享目录…</div>;
   if (error) return <div className="px-4 py-3 text-ui-xs text-destructive" role="alert">{error}</div>;
-  if (entries.length === 0) return <div className="px-4 py-3 text-ui-xs text-muted-foreground">当前目录暂无资料</div>;
-  return <>{entries.map((entry) => <ExternalCategoryTreeEntry key={entry.id} sourceId={sourceId} entry={entry} level={level} />)}</>;
+  if (visibleEntries.length === 0) return <div className="px-4 py-3 text-ui-xs text-muted-foreground">当前目录暂无子文件夹</div>;
+  return <>{visibleEntries.map((entry) => <ExternalCategoryTreeEntry key={entry.id} sourceId={sourceId} entry={entry} level={level} foldersOnly={foldersOnly} />)}</>;
 }
 
-function ExternalCategoryTreeEntry({ sourceId, entry, level }: { sourceId: string; entry: ExternalMediaEntry; level: number }) {
+function ExternalCategoryTreeEntry({ sourceId, entry, level, foldersOnly }: { sourceId: string; entry: ExternalMediaEntry; level: number; foldersOnly: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const folder = entry.kind === "folder";
   return <>
@@ -171,6 +172,6 @@ function ExternalCategoryTreeEntry({ sourceId, entry, level }: { sourceId: strin
       <span className="flex w-11 shrink-0 items-center gap-1">{folder ? <button type="button" aria-label={expanded ? `收起${entry.name}` : `展开${entry.name}`} onClick={() => setExpanded((value) => !value)} className="inline-flex size-6 items-center justify-center rounded-ui-sm text-muted-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}</button> : <span className="size-6" />}{folder ? expanded ? <FolderOpen className="size-4 text-info" /> : <Folder className="size-4 text-info" /> : <Film className="size-4 text-primary" />}</span>
       <span className="flex min-w-0 flex-1 items-center gap-2"><span className="inline-flex w-11 shrink-0 items-center gap-1 text-ui-xs font-medium text-info"><span className="size-2 rounded-full bg-info" />共享</span><span className="min-w-0 flex-1 break-words font-medium">{entry.name} <Badge className="ml-1" variant="secondary">共享</Badge></span>{!folder && entry.lifecycle_status ? <Badge variant={lifecycleVariant(entry.lifecycle_status)}>{lifecycleLabel[entry.lifecycle_status] || entry.lifecycle_status}</Badge> : <span className="hidden shrink-0 text-ui-xs text-muted-foreground sm:block">{folder ? "共享子目录" : availabilityLabel(entry)}</span>}</span>
     </div>
-    {folder && expanded && <div role="group" className="ml-5 border-l border-border bg-surface-muted/10 sm:ml-6"><ExternalCategoryTree sourceId={sourceId} parent={entry.relative_path} level={level + 1} /></div>}
+    {folder && expanded && <div role="group" className="ml-5 border-l border-border bg-surface-muted/10 sm:ml-6"><ExternalCategoryTree sourceId={sourceId} parent={entry.relative_path} level={level + 1} foldersOnly={foldersOnly} /></div>}
   </>;
 }
