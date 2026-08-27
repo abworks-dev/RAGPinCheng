@@ -179,6 +179,11 @@ def test_production_workflow_is_exact_read_only_and_isolated():
         ":/diagnostic/source.pptx:ro",
         ":/diagnostic/repo:ro",
         "--tmpfs /diagnostic-work",
+        "RAG_DATA_DIR=/diagnostic-work/data",
+        "RAG_PARSED_DIR=/diagnostic-work/parsed",
+        "CONTENT_ROOT=/diagnostic-work/content",
+        "DOCS_DIR=/diagnostic-work/docs",
+        "MEDIA_DIR=/diagnostic-work/media",
     ):
         assert required in workflow
     for forbidden in (
