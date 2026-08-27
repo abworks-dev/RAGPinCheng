@@ -161,6 +161,8 @@ def test_single_pptx_location_diagnostic_cli_requires_bounded_inputs():
     assert "--item-id" in result.stdout
     assert "--version-id" in result.stdout
     assert "--work-dir" in result.stdout
+    assert "--source" in result.stdout
+    assert "--expected-sha256" in result.stdout
 
 
 def test_production_workflow_is_exact_read_only_and_isolated():
@@ -174,8 +176,7 @@ def test_production_workflow_is_exact_read_only_and_isolated():
         VERSION_ID,
         "--read-only",
         "--network none",
-        ":/diagnostic/data:ro",
-        ":/diagnostic/content:ro",
+        ":/diagnostic/source.pptx:ro",
         ":/diagnostic/repo:ro",
         "--tmpfs /diagnostic-work",
     ):
@@ -192,5 +193,9 @@ def test_production_workflow_is_exact_read_only_and_isolated():
     ):
         assert forbidden not in workflow
 
-    assert "--app-database /diagnostic/data/app.sqlite" in workflow
+    assert "--source /diagnostic/source.pptx" in workflow
+    assert "--expected-sha256" in workflow
+    assert "sqlite3.connect" in workflow
+    assert "shutil.copyfile" in workflow
+    assert ":/diagnostic/data:ro" not in workflow
     assert ":/diagnostic/app.sqlite:ro" not in workflow

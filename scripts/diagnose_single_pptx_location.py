@@ -187,19 +187,37 @@ def diagnose_target(target: TargetPptx, work_dir: Path) -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--app-database", type=Path, required=True)
-    parser.add_argument("--content-root", type=Path, required=True)
-    parser.add_argument("--item-id", required=True)
-    parser.add_argument("--version-id", required=True)
+    parser.add_argument("--app-database", type=Path)
+    parser.add_argument("--content-root", type=Path)
+    parser.add_argument("--item-id")
+    parser.add_argument("--version-id")
+    parser.add_argument("--source", type=Path)
+    parser.add_argument("--expected-sha256")
     parser.add_argument("--work-dir", type=Path, required=True)
     args = parser.parse_args()
 
-    target = load_target(
-        args.app_database,
-        args.content_root,
-        args.item_id,
-        args.version_id,
-    )
+    if args.source is not None:
+        if not args.expected_sha256 or any(
+            value is not None
+            for value in (args.app_database, args.content_root, args.item_id, args.version_id)
+        ):
+            parser.error("--source requires only --expected-sha256 and --work-dir")
+        source = args.source.resolve(strict=True)
+        if not source.is_file() or source.is_symlink():
+            raise ValueError("diagnostic_source_unavailable")
+        target = TargetPptx(source, "source.pptx", args.expected_sha256)
+    else:
+        if any(
+            value is None
+            for value in (args.app_database, args.content_root, args.item_id, args.version_id)
+        ):
+            parser.error("database mode requires app database, content root, item ID, and version ID")
+        target = load_target(
+            args.app_database,
+            args.content_root,
+            args.item_id,
+            args.version_id,
+        )
     report = diagnose_target(target, args.work_dir)
     print(
         "PPTX_SINGLE_FILE_DIAGNOSTIC "
