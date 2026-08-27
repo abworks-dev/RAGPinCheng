@@ -54,7 +54,7 @@
 - 代码支持 `DOCS_DIR`、`MEDIA_DIR`、`DOCS_HOST_PATH`、`MEDIA_HOST_PATH` 和 `TRANSCRIPTION_ARTIFACT_DIR` 显式配置；本地兼容模式的 `DOCS_DIR` 和 Compose 宿主机默认值仍指向 `content/legacy-docs`，仓库 `docs/` 只存放项目文档。生产完成标记为 `true` 时，仓库内最终 Compose overlay 必须位于私有生产 override 之后，并以 `!override` 完整替换 backend volumes：重新声明 `/app/data`、`/app/content`、`/app/media`，把 `/app/docs` 替换为空的只读 tmpfs。生产不再要求 `DOCS_HOST_PATH` 或宿主机 `content/legacy-docs`；部署、失败回滚和手工恢复共用该顺序。
 - `strict` 检索契约按身份分流：普通资料必须命中 `content_item_heads`，带 `transcript_version_id` 的转录由独立 `media_transcript_heads` 快照校验；双重无版本身份的旧 Parent/Child 被拒绝。生产部署会同时核对 strict 配置、受管 head、索引计数和容器 mount source，从容器 mountinfo 核对 `/app/docs` 是带 `ro` 选项的 tmpfs 并执行不可写探针，同时拒绝任何仍来自 `/data/business/ragpincheng/source` 的 `/app/media` 或 `/app/content` 挂载；失败时恢复上一镜像。
 - T12-B 提供精确 plan/apply/verify 和受控生产 workflow：候选 ID、媒体/head、正式版本及审计表均指纹化，活动任务或冻结摘要漂移会在写入前失败；执行仅归档旧媒体记录、删除旧 transcript head 和精确候选 Parent/Point，不重建 collection，也不删除旧文件。
-- 生产全量索引重建只允许通过 `rebuild-production-index-manual.yml`：它从 `content_item_heads` 与 `media_transcript_heads` 冻结正式可见版本，在独立 Parent SQLite、解析目录和 Qdrant collection 中强制重新解析并重建；旧解析缓存不会阻止页码、段落、工作表或主题定位 sidecar 生成。Actions 日志实时输出 head/Parent/Child 进度，并在切换前分别输出 Qdrant 精确计数与按文档类型聚合的定位覆盖；活动任务、head 指纹漂移、正式版本覆盖不完整、可定位文档缺少定位字段、Parent/Child 计数不一致或 Qdrant 非绿色状态都会终止切换。
+- 生产全量索引重建只允许通过 `rebuild-production-index-manual.yml`：它从 `content_item_heads` 与 `media_transcript_heads` 冻结正式可见版本，在独立 Parent SQLite、解析目录和 Qdrant collection 中强制重新解析并重建；旧解析缓存不会阻止页码、段落、工作表或主题定位 sidecar 生成。Actions 日志实时输出 head/Parent/Child 进度，并在切换前分别输出 Qdrant 精确计数与按文档类型聚合的定位覆盖。活动任务、head 指纹漂移、正式版本覆盖不完整、Parent/Child 计数不一致或 Qdrant 非绿色状态仍会终止切换；无法可靠生成定位字段的文档继续进入索引，其零覆盖或部分覆盖仅作为聚合质量指标报告，不猜测页码，也不单独阻断切换。
 
 ### 未实现
 

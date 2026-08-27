@@ -58,6 +58,17 @@ def test_location_matching_accepts_exact_short_office_line():
     assert result.paragraph_anchor == "short-anchor"
 
 
+def test_location_matching_rejects_matches_across_different_slides():
+    locations = [
+        DocumentLocation(text="项目总览", page_number=1, slide_number=1),
+        DocumentLocation(text="项目总览详细计划", page_number=2, slide_number=2),
+    ]
+
+    result = match_locations("# 项目总览详细计划", locations)
+
+    assert result is None
+
+
 def test_location_matching_selects_range_within_exact_sheet():
     locations = [
         DocumentLocation(

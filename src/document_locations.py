@@ -114,6 +114,11 @@ def match_locations(
             matches.append(item)
     if not matches:
         return None
+    slide_numbers = {
+        item.slide_number for item in matches if item.slide_number is not None
+    }
+    if len(slide_numbers) > 1:
+        return None
     pages = [item.page_number for item in matches if item.page_number is not None]
     first = matches[0]
     return DocumentLocation(
