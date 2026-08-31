@@ -91,6 +91,7 @@ import type {
   BulkRestorePreflightResult,
   ContentPermission,
   ContentTrashAuditEvent,
+  ExternalMediaEntry,
   FolderRequest,
   ManagedCategory,
   ManagedContentItem,
@@ -5119,6 +5120,115 @@ export function AdminManagedContentPage() {
     );
   };
 
+  const renderSharedFolderActions = (
+    entry: ExternalMediaEntry,
+    open: () => void,
+  ) => {
+    const disabled = Boolean(busyAction) || refreshing || !enabled;
+    const unavailableReason = busyAction
+      ? "正在处理其他操作，请稍候"
+      : refreshing
+        ? "资料列表正在刷新，请稍候"
+        : !enabled
+          ? "资料管理功能当前不可用"
+          : null;
+    const mirror =
+      categories.find(
+        (folder) =>
+          folder.external_relative_path === entry.relative_path &&
+          folder.id !== currentFolderId &&
+          (folder.parent_id === currentFolderId ||
+            Boolean(
+              folder.full_path?.startsWith(
+                `${currentFolder?.full_path || ""} / `,
+              ),
+            )),
+      ) || null;
+    const mirrorCount = mirror
+      ? (mirror.total_item_count ?? mirror.item_count)
+      : 0;
+    const detailTooltip =
+      unavailableReason ||
+      (mirror ? "查看文件夹详情" : "该远程目录尚未同步，暂无详情");
+    const downloadTooltip =
+      unavailableReason ||
+      (!can("item.download")
+        ? "当前账号没有下载资料的权限"
+        : !mirror
+          ? "该远程目录尚未同步，暂不支持打包下载"
+          : mirrorCount < 1
+            ? "镜像目录内没有可下载的资料"
+            : "打包下载整个镜像目录");
+    return (
+      <div
+        className="ml-auto flex min-h-10 shrink-0 items-center justify-end gap-1"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <IconButton
+          label={`打开文件夹“${entry.name}”`}
+          tooltip={unavailableReason || "打开文件夹"}
+          className="border border-border max-sm:size-10"
+          disabled={disabled}
+          onClick={open}
+        >
+          <ChevronRight className="size-4" />
+        </IconButton>
+        <IconButton
+          label={`查看文件夹“${entry.name}”的详细信息`}
+          tooltip={detailTooltip}
+          className="border border-border max-sm:size-10"
+          disabled={disabled || !mirror}
+          onClick={() => mirror && setFolderDetailTarget(mirror)}
+        >
+          <Info className="size-4" />
+        </IconButton>
+        <IconButton
+          label={`重命名文件夹“${entry.name}”`}
+          tooltip={unavailableReason || "共享源只读，不能重命名"}
+          className="border border-border max-sm:size-10"
+          disabled
+        >
+          <Pencil className="size-4" />
+        </IconButton>
+        <IconButton
+          label={`调整文件夹“${entry.name}”的编号`}
+          tooltip={unavailableReason || "共享源只读，不能调整文件夹编号"}
+          className="border border-border max-sm:size-10"
+          disabled
+        >
+          <ListOrdered className="size-4" />
+        </IconButton>
+        <IconButton
+          label={`移动文件夹“${entry.name}”`}
+          tooltip={unavailableReason || "共享源只读，不能调整远程目录"}
+          className="border border-border max-sm:size-10"
+          disabled
+        >
+          <FolderInput className="size-4" />
+        </IconButton>
+        <IconButton
+          label={`打包下载文件夹“${entry.name}”`}
+          tooltip={downloadTooltip}
+          className="border border-border max-sm:size-10"
+          disabled={
+            disabled || !can("item.download") || !mirror || mirrorCount < 1
+          }
+          onClick={() => mirror && void downloadFolder(mirror)}
+        >
+          <Download className="size-4" />
+        </IconButton>
+        <IconButton
+          label={`删除文件夹“${entry.name}”`}
+          tooltip={unavailableReason || "共享源只读，不能删除"}
+          className="border border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive max-sm:size-10"
+          disabled
+        >
+          <Trash2 className="size-4" />
+        </IconButton>
+      </div>
+    );
+  };
+
   const selectView = (nextView: ManagedContentView) => {
     setView(nextView);
     if (nextView === "library" || nextView === "trash") setPage(0);
@@ -6778,6 +6888,9 @@ export function AdminManagedContentPage() {
               onManagedItemsLoaded={setSharedManagedItems}
               renderItemStatus={renderItemStatus}
               renderItemActions={(item) => renderActions(item, true)}
+              renderFolderActions={(entry, open) =>
+                renderSharedFolderActions(entry, open)
+              }
             />
           ) : loading ? (
             <LoadingState

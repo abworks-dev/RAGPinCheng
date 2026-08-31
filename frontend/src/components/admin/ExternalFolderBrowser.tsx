@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronLeft, ChevronRight, Film, Folder, FolderOpen } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronLeft, ChevronRight, Film, Folder, FolderOpen } from "lucide-react";
 import { api } from "../../api/client";
 import type { ExternalMediaEntry, ManagedContentItem } from "../../types";
 import { Badge } from "../ui/badge";
@@ -8,6 +8,8 @@ import { Checkbox } from "../ui/checkbox";
 import { EmptyState } from "../ui/empty-state";
 import { LoadingState } from "../ui/loading-state";
 import { ManagedItemType } from "./ManagedItemType";
+
+type SharedSortKey = "docType" | "title" | "updatedAt" | "status" | "source";
 
 type BrowserProps = {
   sourceId: string;
@@ -23,6 +25,7 @@ type BrowserProps = {
   onManagedItemsLoaded?: (items: ManagedContentItem[]) => void;
   renderItemStatus?: (item: ManagedContentItem) => ReactNode;
   renderItemActions?: (item: ManagedContentItem) => ReactNode;
+  renderFolderActions?: (entry: ExternalMediaEntry, open: () => void) => ReactNode;
 };
 
 function useExternalEntries(sourceId: string, parent: string) {
@@ -90,8 +93,10 @@ export function ExternalFolderBrowser({
   onManagedItemsLoaded,
   renderItemStatus,
   renderItemActions,
+  renderFolderActions,
 }: BrowserProps) {
   const [parent, setParent] = useState("");
+  const [sort, setSort] = useState<{ key: SharedSortKey; direction: "asc" | "desc" } | null>(null);
   const { entries, loading, error } = useExternalEntries(sourceId, parent);
   const parentUp = parent.includes("/") ? parent.slice(0, parent.lastIndexOf("/")) : "";
   const [allManagedItems, setAllManagedItems] = useState<ManagedContentItem[]>(managedItems);
@@ -122,34 +127,128 @@ export function ExternalFolderBrowser({
     [allManagedItems],
   );
   useEffect(() => { setParent(""); }, [sourceId]);
+  const toggleSort = (key: SharedSortKey) =>
+    setSort((current) =>
+      current?.key === key
+        ? { key, direction: current.direction === "asc" ? "desc" : "asc" }
+        : { key, direction: "asc" },
+    );
+  const sortIcon = (key: SharedSortKey) =>
+    sort?.key !== key ? (
+      <ArrowUpDown className="size-3.5" />
+    ) : sort.direction === "asc" ? (
+      <ArrowUp className="size-3.5" />
+    ) : (
+      <ArrowDown className="size-3.5" />
+    );
+  const entryManagedItem = (entry: ExternalMediaEntry) =>
+    entry.media_id ? managedByMediaId.get(entry.media_id) : undefined;
+  const entrySortTime = (entry: ExternalMediaEntry) => {
+    const managedItem = entryManagedItem(entry);
+    return managedItem
+      ? ((managedItem.updated_at || 0) * 1_000)
+      : (entry.modified_ns ? entry.modified_ns / 1_000_000 : 0);
+  };
+  const entrySortStatus = (entry: ExternalMediaEntry) => {
+    const managedItem = entryManagedItem(entry);
+    return managedItem
+      ? (managedItem.lifecycle_status || "")
+      : (entry.lifecycle_status || entry.availability || "");
+  };
+  const visibleEntries = useMemo(() => {
+    const base = entries.filter((entry) => entry.kind === "folder" || managedByMediaId.has(entry.media_id || ""));
+    if (!sort) return base;
+    const direction = sort.direction === "asc" ? 1 : -1;
+    const compare = (left: ExternalMediaEntry, right: ExternalMediaEntry) => {
+      switch (sort.key) {
+        case "docType": {
+          const leftType = left.kind === "folder" ? "文件夹" : left.kind === "video" ? "视频" : left.kind;
+          const rightType = right.kind === "folder" ? "文件夹" : right.kind === "video" ? "视频" : right.kind;
+          return leftType.localeCompare(rightType, "zh-CN");
+        }
+        case "title":
+          return left.name.localeCompare(right.name, "zh-CN", { numeric: true, sensitivity: "base" });
+        case "updatedAt":
+          return entrySortTime(left) - entrySortTime(right);
+        case "status":
+          return entrySortStatus(left).localeCompare(entrySortStatus(right), "zh-CN");
+        default:
+          return 0;
+      }
+    };
+    const sortedFolders = base.filter((entry) => entry.kind === "folder").sort((a, b) => compare(a, b) * direction);
+    const sortedVideos = base.filter((entry) => entry.kind !== "folder").sort((a, b) => compare(a, b) * direction);
+    return [...sortedFolders, ...sortedVideos];
+  }, [entries, managedByMediaId, sort]);
+  const selectableRows = visibleEntries.filter((entry) => Boolean(entryManagedItem(entry) && onToggleItem));
+  const allSelected =
+    selectableRows.length > 0 &&
+    selectableRows.every((entry) => {
+      const managedItem = entryManagedItem(entry)!;
+      return selectedVersionIds.includes(managedItem.version_id);
+    });
+  const toggleAll = () => {
+    if (!onToggleItem) return;
+    selectableRows.forEach((entry) => {
+      const managedItem = entryManagedItem(entry)!;
+      if (allSelected) {
+        if (selectedVersionIds.includes(managedItem.version_id)) onToggleItem(managedItem);
+      } else if (!selectedVersionIds.includes(managedItem.version_id)) {
+        onToggleItem(managedItem);
+      }
+    });
+  };
+  const openEntry = (entry: ExternalMediaEntry) => setParent(entry.relative_path);
   return <section aria-label={title}>
     <div className="flex items-center gap-2 border-b border-border bg-surface-muted/40 px-4 py-2 text-ui-xs sm:px-5">
       <Button size="sm" variant="ghost" disabled={!parent} onClick={() => setParent(parentUp)}><ChevronLeft className="size-4" />上一级</Button>
       <span className="min-w-0 flex-1 truncate text-muted-foreground" title={parent || "根目录"}>{parent || "根目录"}</span>
       <Badge variant="secondary">共享</Badge>
     </div>
-    {loading ? <LoadingState className="min-h-48" label="正在读取共享目录…" /> : error ? <p className="p-4 text-ui-sm text-destructive" role="alert">{error}</p> : entries.length === 0 ? <EmptyState title="当前目录暂无资料" description="共享目录扫描后会在这里显示直属文件夹和文件。" /> : <>
+    {loading ? <LoadingState className="min-h-48" label="正在读取共享目录…" /> : error ? <p className="p-4 text-ui-sm text-destructive" role="alert">{error}</p> : visibleEntries.length === 0 ? <EmptyState title="当前目录暂无资料" description="共享目录扫描后会在这里显示直属文件夹和文件。" /> : <>
       <div className="hidden overflow-x-auto border-t border-border lg:block"><table className="w-full min-w-[72rem] text-ui-sm">
         <thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr>
-          <th className="w-8 px-1.5 py-3"><Checkbox aria-label="共享资料不可批量选择" disabled /></th>
-          <th className="w-16 px-1 py-3 text-center font-medium">类型</th><th className="px-1.5 py-3 font-medium">资料</th><th className="px-3 py-3 font-medium">更新时间</th><th className="px-3 py-3 font-medium">状态</th><th className="px-3 py-3 font-medium">来源</th><th className="px-3 py-3 text-right font-medium">操作</th>
+          <th className="w-8 px-1.5 py-3"><Checkbox aria-label="选择当前页资料" checked={allSelected} onChange={toggleAll} disabled={selectableRows.length === 0} /></th>
+          {([
+            ["docType", "类型"],
+            ["title", "资料"],
+            ["updatedAt", "更新时间"],
+            ["status", "状态"],
+            ["source", "来源"],
+          ] as [SharedSortKey, string][]).map(([key, label]) => (
+            <th
+              key={key}
+              aria-sort={sort?.key === key ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}
+              className={key === "docType" ? "w-16 px-1 py-3 text-center font-medium" : key === "title" ? "px-1.5 py-3 font-medium" : "px-3 py-3 font-medium"}
+            >
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => toggleSort(key)}
+              >
+                {label}
+                {sortIcon(key)}
+              </button>
+            </th>
+          ))}
+          <th className="px-3 py-3 text-right font-medium">操作</th>
         </tr></thead>
-        <tbody className="divide-y divide-border">{entries.filter((entry) => entry.kind === "folder" || managedByMediaId.has(entry.media_id || "")).map((entry) => {
-          const managedItem = entry.media_id ? managedByMediaId.get(entry.media_id) : undefined;
+        <tbody className="divide-y divide-border">{visibleEntries.map((entry) => {
+          const managedItem = entryManagedItem(entry);
           return <tr key={entry.id} data-testid={`shared-library-row-${entry.id}`} className="transition-colors duration-normal hover:bg-surface-muted/60">
           <td className="px-1.5 py-3"><Checkbox aria-label={managedItem ? `选择${managedItem.title}` : `共享资料${entry.name}不可选择`} checked={Boolean(managedItem && selectedVersionIds.includes(managedItem.version_id))} disabled={!managedItem || !onToggleItem} onChange={() => managedItem && onToggleItem?.(managedItem)} /></td>
           <td className="px-1 py-3"><ManagedItemType folder={entry.kind === "folder"} sharedFolder={entry.kind === "folder"} docType={entry.kind === "video" ? "video" : undefined} compact /></td>
-          <td className="max-w-xs px-1.5 py-3"><button type="button" className="block max-w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" disabled={entry.kind !== "folder"} onClick={() => entry.kind === "folder" && setParent(entry.relative_path)}><span className="flex flex-wrap items-center gap-2"><span className="break-words font-medium">{managedItem?.title || entry.name}</span><Badge variant="secondary">共享</Badge></span><span className="mt-0.5 block break-all text-ui-xs text-muted-foreground">{entry.relative_path}</span></button></td>
+          <td className="max-w-xs px-1.5 py-3"><button type="button" className="block max-w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" disabled={entry.kind !== "folder"} onClick={() => entry.kind === "folder" && openEntry(entry)}><span className="flex flex-wrap items-center gap-2"><span className="break-words font-medium">{managedItem?.title || entry.name}</span><Badge variant="secondary">共享</Badge></span><span className="mt-0.5 block break-all text-ui-xs text-muted-foreground">{entry.relative_path}</span></button></td>
           <td className="whitespace-nowrap px-3 py-3 tabular-nums">{managedItem ? managedUpdatedAt(managedItem.updated_at) : externalUpdatedAt(entry)}</td><td className="px-3 py-3">{managedItem && renderItemStatus ? renderItemStatus(managedItem) : <span className="text-muted-foreground">{availabilityLabel(entry)}</span>}</td><td className="px-3 py-3">共享目录</td>
-          <td className="px-3 py-3 text-right">{entry.kind === "folder" ? <Button size="sm" variant="outline" aria-label={`打开${entry.name}`} onClick={() => setParent(entry.relative_path)}>打开</Button> : managedItem && renderItemActions ? renderItemActions(managedItem) : <span className="text-ui-xs text-muted-foreground">资料状态加载中</span>}</td>
+          <td className="px-3 py-3 text-right">{entry.kind === "folder" ? renderFolderActions ? renderFolderActions(entry, () => openEntry(entry)) : <Button size="sm" variant="outline" aria-label={`打开${entry.name}`} onClick={() => openEntry(entry)}>打开</Button> : managedItem && renderItemActions ? renderItemActions(managedItem) : <span className="text-ui-xs text-muted-foreground">资料状态加载中</span>}</td>
         </tr>;})}</tbody>
       </table></div>
-      <ul className="divide-y divide-border border-t border-border lg:hidden" aria-label="共享目录内容">{entries.filter((entry) => entry.kind === "folder" || managedByMediaId.has(entry.media_id || "")).map((entry) => {
-        const managedItem = entry.media_id ? managedByMediaId.get(entry.media_id) : undefined;
+      <ul className="divide-y divide-border border-t border-border lg:hidden" aria-label="共享目录内容">{visibleEntries.map((entry) => {
+        const managedItem = entryManagedItem(entry);
         return <li key={entry.id} data-testid={`shared-library-mobile-${entry.id}`} className="space-y-3 px-4 py-4 sm:px-5">
-        <div className="flex items-start gap-2"><Checkbox className="mt-0.5" aria-label={managedItem ? `选择${managedItem.title}` : `共享资料${entry.name}不可选择`} checked={Boolean(managedItem && selectedVersionIds.includes(managedItem.version_id))} disabled={!managedItem || !onToggleItem} onChange={() => managedItem && onToggleItem?.(managedItem)} /><ManagedItemType folder={entry.kind === "folder"} sharedFolder={entry.kind === "folder"} docType={entry.kind === "video" ? "video" : undefined} /><button type="button" className="min-w-0 flex-1 text-left" disabled={entry.kind !== "folder"} onClick={() => entry.kind === "folder" && setParent(entry.relative_path)}><span className="flex flex-wrap items-center gap-2"><span className="break-words font-medium">{managedItem?.title || entry.name}</span><Badge variant="secondary">共享</Badge></span><span className="mt-0.5 block break-all text-ui-xs text-muted-foreground">{entry.relative_path}</span></button></div>
+        <div className="flex items-start gap-2"><Checkbox className="mt-0.5" aria-label={managedItem ? `选择${managedItem.title}` : `共享资料${entry.name}不可选择`} checked={Boolean(managedItem && selectedVersionIds.includes(managedItem.version_id))} disabled={!managedItem || !onToggleItem} onChange={() => managedItem && onToggleItem?.(managedItem)} /><ManagedItemType folder={entry.kind === "folder"} sharedFolder={entry.kind === "folder"} docType={entry.kind === "video" ? "video" : undefined} /><button type="button" className="min-w-0 flex-1 text-left" disabled={entry.kind !== "folder"} onClick={() => entry.kind === "folder" && openEntry(entry)}><span className="flex flex-wrap items-center gap-2"><span className="break-words font-medium">{managedItem?.title || entry.name}</span><Badge variant="secondary">共享</Badge></span><span className="mt-0.5 block break-all text-ui-xs text-muted-foreground">{entry.relative_path}</span></button></div>
         <dl className="grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui-sm"><dt className="text-muted-foreground">状态</dt><dd>{managedItem && renderItemStatus ? renderItemStatus(managedItem) : availabilityLabel(entry)}</dd><dt className="text-muted-foreground">更新时间</dt><dd className="tabular-nums">{externalUpdatedAt(entry)}</dd><dt className="text-muted-foreground">来源</dt><dd>共享目录</dd></dl>
-        {managedItem && renderItemActions && <div className="flex justify-end">{renderItemActions(managedItem)}</div>}
+        {entry.kind === "folder" ? (renderFolderActions && <div className="flex justify-end">{renderFolderActions(entry, () => openEntry(entry))}</div>) : (managedItem && renderItemActions && <div className="flex justify-end">{renderItemActions(managedItem)}</div>)}
       </li>;})}</ul>
     </>}
   </section>;
