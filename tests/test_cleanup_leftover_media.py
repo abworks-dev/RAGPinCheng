@@ -145,6 +145,50 @@ def fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     conn.close()
 
 
+def _seed_version(
+    conn: sqlite3.Connection,
+    version_id: str,
+    media_id: str,
+    *,
+    transcription_job_id: str | None,
+    supersedes_version_id: str | None = None,
+) -> None:
+    now = int(time.time())
+    conn.execute(
+        """INSERT INTO transcript_versions
+           (id,media_id,transcription_job_id,source,profile_id,markdown_storage_kind,
+            markdown_rel_path,markdown_sha256,markdown_size_bytes,review_status,
+            publication_status,supersedes_version_id,created_at,updated_at)
+           VALUES (?,?,?, 'automatic','profile-test','managed_artifact',
+                   ?, 'sha', 10,'awaiting_review','not_published',?,?,?)""",
+        (
+            version_id,
+            media_id,
+            transcription_job_id,
+            f"artifacts/{version_id}.md",
+            supersedes_version_id,
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+
+
+def _seed_version_artifact(conn: sqlite3.Connection, version_id: str) -> None:
+    now = int(time.time())
+    conn.execute(
+        """INSERT INTO transcript_version_artifacts
+           (version_id,artifact_id,kind,content_sha256,size_bytes)
+           VALUES (?,?, 'markdown','sha',10)""",
+        (version_id, version_id + "-artifact"),
+    )
+    conn.commit()
+
+
+def _seed_media_with_valid_shell(conn: sqlite3.Connection, media_id: str, title: str) -> None:
+    _seed_media(conn, media_id, title=title, filename=f"{media_id}.mp4", with_valid_shell=True)
+
+
 def test_inventory_only_lists_leftover_without_valid_shell(fixture: dict) -> None:
     conn = fixture["conn"]
     _seed_media(conn, "m-left-1", title="测试遗留一", filename="a.mp4", status="transcript_ready")
@@ -292,6 +336,39 @@ def test_delete_fails_closed_on_active_job_or_parents(fixture: dict, tmp_path: P
             actor_user_id=fixture["admin_id"],
             media_roots=[fixture["media_root"]],
         )
+
+
+def test_delete_handles_version_artifacts_and_supersede_chain(fixture: dict) -> None:
+    conn = fixture["conn"]
+    _seed_media(conn, "m-fk", title="外键图遗留", filename="i.mp4", status="transcript_ready")
+    _seed_job(conn, "m-fk", status="failed")
+    _seed_version(
+        conn, "v1", "m-fk", transcription_job_id="job-m-fk-1"
+    )
+    _seed_version(
+        conn, "v2", "m-fk", transcription_job_id=None, supersedes_version_id="v1"
+    )
+    _seed_version_artifact(conn, "v1")
+    _seed_version_artifact(conn, "v2")
+    items = tool.find_candidates(
+        conn,
+        media_roots=[fixture["media_root"]],
+        parents_database=fixture["parents_database"],
+        with_qdrant=True,
+    )
+    assert len(items) == 1
+    result = tool.delete_leftover(
+        conn, items, actor_user_id=fixture["admin_id"], media_roots=[fixture["media_root"]]
+    )
+    assert result["deleted_count"] == 1
+    assert conn.execute("SELECT 1 FROM transcript_versions WHERE media_id='m-fk'").fetchone() is None
+    assert conn.execute(
+        "SELECT 1 FROM transcript_version_artifacts"
+    ).fetchone() is None
+    assert conn.execute("SELECT 1 FROM transcription_jobs WHERE media_id='m-fk'").fetchone() is None
+    assert conn.execute(
+        "SELECT 1 FROM media_assets WHERE media_id='m-fk'"
+    ).fetchone() is None
 
 
 def test_manifest_mismatch_and_apply_guards(fixture: dict) -> None:
