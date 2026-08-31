@@ -55,7 +55,15 @@ def persist_candidate(tmp_path, *, profile=None):
         canonical = normalize_candidate(input_ref, make_candidate(profile.provider_key), snapshot, execution)
     store.create_job(job)
     running = job
-    for now, stage in enumerate(TranscriptionJobStage, start=20):
+    for now, stage in enumerate(
+        (
+            TranscriptionJobStage.validating_input,
+            TranscriptionJobStage.transcribing,
+            TranscriptionJobStage.normalizing,
+            TranscriptionJobStage.formatting,
+        ),
+        start=20,
+    ):
         running = store.mark_running(JOB_ID, stage, expected_updated_at=running.updated_at, now=now)
     port = FakePublicationIndexPort()
     workflow = TranscriptionPersistenceWorkflow(store, artifacts, port)
@@ -418,7 +426,15 @@ def test_new_publication_switches_one_head_and_keeps_old_published_history(tmp_p
     )
     store.create_job(second_job)
     running = second_job
-    for now, stage in enumerate(TranscriptionJobStage, start=51):
+    for now, stage in enumerate(
+        (
+            TranscriptionJobStage.validating_input,
+            TranscriptionJobStage.transcribing,
+            TranscriptionJobStage.normalizing,
+            TranscriptionJobStage.formatting,
+        ),
+        start=51,
+    ):
         running = store.mark_running(second_job_id, stage, expected_updated_at=running.updated_at, now=now)
     canonical = make_canonical()
     second = workflow.persist_success(

@@ -1758,7 +1758,7 @@ def test_automatic_upload_replays_existing_request_when_asr_is_now_unavailable(
         conn.close()
 
 
-def test_automatic_upload_prepares_staged_video_before_media_insert(tmp_path, monkeypatch):
+def test_automatic_upload_defers_audio_preparation_to_the_worker(tmp_path, monkeypatch):
     import api.routes_admin as routes_admin
 
     conn, _store, _artifacts = make_phase2_store(tmp_path)
@@ -1768,9 +1768,8 @@ def test_automatic_upload_prepares_staged_video_before_media_insert(tmp_path, mo
 
     class FakePreparer:
         def prepare(self, media_id: str, *, source_path: Path | None = None):
-            assert source_path is not None
-            assert source_path == media_root / media_id / "original.mp4"
-            assert source_path.is_file()
+            # The upload path must not run ffmpeg: audio preparation happens
+            # inside the transcription worker (preparing_audio stage).
             prepared_sources.append(source_path)
 
     class FakeService:
@@ -1804,7 +1803,7 @@ def test_automatic_upload_prepares_staged_video_before_media_insert(tmp_path, mo
             )
         )
         assert result.status == "uploaded"
-        assert prepared_sources == [media_root / result.media_id / "original.mp4"]
+        assert prepared_sources == []
         assert (media_root / result.media_id / "original.mp4").read_bytes() == b"new-video"
         assert conn.execute(
             "SELECT status FROM media_assets WHERE media_id=?", (result.media_id,)

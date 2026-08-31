@@ -24,9 +24,17 @@ from tests.transcription_fixture_helpers import (
 )
 
 
+RUNNING_STAGES = (
+    TranscriptionJobStage.validating_input,
+    TranscriptionJobStage.transcribing,
+    TranscriptionJobStage.normalizing,
+    TranscriptionJobStage.formatting,
+)
+
+
 def advance_to_formatting(store, job_id=JOB_ID):
     job = store.load_job(job_id)
-    for now, stage in enumerate(TranscriptionJobStage, start=20):
+    for now, stage in enumerate(RUNNING_STAGES, start=20):
         job = store.mark_running(job_id, stage, expected_updated_at=job.updated_at, now=now)
     return job
 
