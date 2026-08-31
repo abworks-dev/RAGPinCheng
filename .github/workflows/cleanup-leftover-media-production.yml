@@ -211,46 +211,46 @@ jobs:
           # 5) Host-side removal of media directories outside the container
           #    mount (content-root media + legacy source media), delete mode.
           if [ "${CONFIRM_CLEANUP}" = "DELETE_LEFT_OVER_MEDIA" ]; then
-            RUN_ROOT_ENV="${RUN_ROOT}" ROOTS_ENV="$(printf '%s\n' "${CONTENT_ROOT}/media" /data/business/ragpincheng/source/media)" python3 - <<'PY'
-            import json
-            import os
-            import shutil
-            from pathlib import Path
+          RUN_ROOT_ENV="${RUN_ROOT}" ROOTS_ENV="$(printf '%s\n' "${CONTENT_ROOT}/media" /data/business/ragpincheng/source/media)" python3 - <<'PY'
+          import json
+          import os
+          import shutil
+          from pathlib import Path
 
-            root = Path(os.environ["RUN_ROOT_ENV"])
-            report = json.loads((root / "apply-result.json").read_text(encoding="utf-8"))
-            if report.get("status") != "applied":
-                raise SystemExit("delete apply did not complete")
-            media_ids = report.get("deleted_media_ids") or []
-            roots = [
-                Path(line)
-                for line in os.environ["ROOTS_ENV"].splitlines()
-                if line and Path(line).is_dir()
-            ]
-            removed = []
-            for media_id in media_ids:
-                for base in roots:
-                    candidate = base / media_id
-                    if not candidate.exists():
-                        continue
-                    attributes = getattr(candidate.lstat(), "st_file_attributes", 0)
-                    if candidate.is_symlink() or bool(attributes & 0x400):
-                        raise SystemExit(f"media dir is a reparse point: {candidate}")
-                    total = 0
-                    for entry in candidate.rglob("*"):
-                        if entry.is_file():
-                            try:
-                                total += entry.stat().st_size
-                            except OSError:
-                                pass
-                    shutil.rmtree(candidate)
-                    removed.append({"media_id": media_id, "root": str(base), "bytes": total})
-            (root / "host-media-removal.json").write_text(
-                json.dumps(removed, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
-                encoding="utf-8",
-            )
-            print("HOST_MEDIA_REMOVAL count=%s" % len(removed))
-            PY
+          root = Path(os.environ["RUN_ROOT_ENV"])
+          report = json.loads((root / "apply-result.json").read_text(encoding="utf-8"))
+          if report.get("status") != "applied":
+              raise SystemExit("delete apply did not complete")
+          media_ids = report.get("deleted_media_ids") or []
+          roots = [
+              Path(line)
+              for line in os.environ["ROOTS_ENV"].splitlines()
+              if line and Path(line).is_dir()
+          ]
+          removed = []
+          for media_id in media_ids:
+              for base in roots:
+                  candidate = base / media_id
+                  if not candidate.exists():
+                      continue
+                  attributes = getattr(candidate.lstat(), "st_file_attributes", 0)
+                  if candidate.is_symlink() or bool(attributes & 0x400):
+                      raise SystemExit(f"media dir is a reparse point: {candidate}")
+                  total = 0
+                  for entry in candidate.rglob("*"):
+                      if entry.is_file():
+                          try:
+                              total += entry.stat().st_size
+                          except OSError:
+                              pass
+                  shutil.rmtree(candidate)
+                  removed.append({"media_id": media_id, "root": str(base), "bytes": total})
+          (root / "host-media-removal.json").write_text(
+              json.dumps(removed, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          print("HOST_MEDIA_REMOVAL count=%s" % len(removed))
+          PY
           fi
 
           # 6) Verify: zero leftovers, SQLite integrity, database health.
