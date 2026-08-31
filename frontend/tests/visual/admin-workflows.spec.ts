@@ -193,7 +193,8 @@ expect(await failedActions.evaluateAll((buttons) => buttons.map((button) => butt
     await expect(page.getByText("04 项目资料 / 02 竣工交付")).toBeVisible();
     await expect(page.getByText("01 行业规范与标准 / 02 文件夹上传测试")).toHaveCount(0);
 
-    await page.getByRole("button", { name: "清除筛选", exact: true }).click();
+    await search.fill("");
+    await search.press("Enter");
     await expect(page.getByText("01 行业规范与标准 / 02 文件夹上传测试")).toBeVisible();
     await page.getByRole("button", { name: /失败\s*1/ }).click();
     await expect(page.getByText("01 行业规范与标准 / 02 文件夹上传测试")).toBeVisible();

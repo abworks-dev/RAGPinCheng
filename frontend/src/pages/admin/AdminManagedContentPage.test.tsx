@@ -2288,7 +2288,8 @@ it("uses comfortable selection and type tracks in the managed content table", as
     await waitFor(() => expect(mocks.uploadTasks).toHaveBeenLastCalledWith(expect.objectContaining({ status: undefined })));
     expect(failedFilter).toHaveAttribute("aria-pressed", "false");
 
-    fireEvent.click(screen.getByRole("button", { name: "清除筛选" }));
+    fireEvent.change(search, { target: { value: "" } });
+    fireEvent.submit(screen.getByRole("search"));
     await waitFor(() => expect(mocks.uploadTasks).toHaveBeenLastCalledWith(expect.objectContaining({
       query: undefined,
       status: undefined,
