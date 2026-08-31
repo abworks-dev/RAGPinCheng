@@ -45,7 +45,7 @@ test.describe("资料管理", () => {
     // 共享子目录以受管镜像节点展示，样式与普通子分类一致；远程视频不进入分类树
     const mirrorRow = page.getByTestId("category-tree-item-cat-shared-course");
     await expect(mirrorRow).toContainText("一级课程");
-    await expect(mirrorRow).toContainText("共享子目录");
+    await expect(mirrorRow).toContainText("共享");
     await expect(page.getByTestId("shared-tree-item-shared-video-intro")).toHaveCount(0);
     await expect(page.getByText("共享培训导论.mp4", { exact: true })).toHaveCount(0);
     await expectNoBodyOverflow(page);

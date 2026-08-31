@@ -263,6 +263,56 @@ def test_mirrors_restore_from_entries_without_rescan(tmp_path: Path) -> None:
         conn.close()
 
 
+def test_reconcile_materializes_three_level_mirror_hierarchy(tmp_path: Path) -> None:
+    conn, source_id, root_id = _shared_environment(
+        tmp_path,
+        share_layout={"A/B/C/lesson.mp4": b"v1"},
+    )
+    try:
+        reconcile_source(conn, source_id, trigger_type="manual", roots={"share": tmp_path / "share"}, now=10)
+        mirrors = _mirror_rows(conn, source_id)
+        by_path = {str(r["external_relative_path"]): r for r in mirrors}
+        assert set(by_path) == {"A", "A/B", "A/B/C"}
+        assert by_path["A"]["parent_id"] == root_id
+        assert by_path["A/B"]["parent_id"] == by_path["A"]["id"]
+        assert by_path["A/B/C"]["parent_id"] == by_path["A/B"]["id"]
+        # entries-derived materialization must preserve the full chain too
+        for level in range(10, 1, -1):
+            conn.execute(
+                "DELETE FROM category_nodes WHERE level=? AND external_relative_path IS NOT NULL",
+                (level,),
+            )
+        conn.commit()
+        materialize_shared_folder_mirrors_from_entries(conn, source_id, now=200)
+        rebuilt = {str(r["external_relative_path"]): r for r in _mirror_rows(conn, source_id)}
+        assert set(rebuilt) == {"A", "A/B", "A/B/C"}
+        assert rebuilt["A/B/C"]["parent_id"] == rebuilt["A/B"]["id"]
+    finally:
+        conn.close()
+
+
+def test_entries_derivation_keeps_deep_folders_for_missing_files(tmp_path: Path) -> None:
+    conn, source_id, root_id = _shared_environment(
+        tmp_path,
+        share_layout={"A/B/deep.mp4": b"v1"},
+    )
+    try:
+        reconcile_source(conn, source_id, trigger_type="manual", roots={"share": tmp_path / "share"}, now=10)
+        # A remote file goes missing; its folder must remain visible because
+        # the folder is part of the remote structure regardless of file state.
+        conn.execute(
+            "UPDATE external_media_entries SET availability='missing' WHERE source_id=?",
+            (source_id,),
+        )
+        conn.commit()
+        materialize_shared_folder_mirrors_from_entries(conn, source_id, now=200)
+        by_path = {str(r["external_relative_path"]): r for r in _mirror_rows(conn, source_id)}
+        assert set(by_path) == {"A", "A/B"}
+        assert by_path["A/B"]["parent_id"] == by_path["A"]["id"]
+    finally:
+        conn.close()
+
+
 def test_resolve_shared_category_key_resolves_mirror_root_and_fallback(tmp_path: Path) -> None:
     conn, source_id, root_id = _shared_environment(
         tmp_path,
