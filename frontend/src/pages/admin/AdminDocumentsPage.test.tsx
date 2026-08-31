@@ -5,6 +5,7 @@ import { AdminDocumentsPage } from "./AdminDocumentsPage";
 const mocks = vi.hoisted(() => ({
   publicationJobs: vi.fn(),
   retryPublicationJob: vi.fn(),
+  cancelPublicationJob: vi.fn(),
   managedCategories: vi.fn(),
   publishManagedContent: vi.fn(),
   bulkPublishManagedContent: vi.fn(),
@@ -150,6 +151,80 @@ describe("AdminDocumentsPage", () => {
       "href",
       "/admin/content?view=transcription&media_id=media-1&action=start-transcription",
     );
+  });
+
+  it("cancels a cancellable video publication intent after confirmation", async () => {
+    mocks.publicationJobs.mockResolvedValue({
+      jobs: [{
+        ...failedJob,
+        id: "intent:intent-1",
+        version_id: "media-pending-media-1",
+        media_id: "media-1",
+        title: "培训视频",
+        original_filename: "training.mp4",
+        task_type: "video_transcript",
+        task_type_label: "视频文件",
+        status: "processing",
+        workflow_status: "pending_transcription",
+        transcription_action: "start_transcription",
+        cancelable: true,
+        doc_type: "video",
+        error_code: null,
+        error_summary: null,
+        retryable: false,
+      }],
+      total: 1,
+      status_counts: { processing: 1, published: 0, failed: 0 },
+    });
+    mocks.cancelPublicationJob.mockResolvedValue({
+      ...failedJob,
+      id: "intent:intent-1",
+      status: "processing",
+      workflow_status: "cancelled",
+      cancelable: false,
+    });
+
+    render(<AdminDocumentsPage />);
+
+    const cancel = await screen.findByRole("button", { name: "取消发布" });
+    expect(cancel).toBeEnabled();
+    fireEvent.click(cancel);
+    expect(screen.getByRole("dialog")).toHaveTextContent("取消发布该视频？");
+    expect(screen.getByRole("dialog")).toHaveTextContent("培训视频");
+    fireEvent.click(screen.getByRole("button", { name: "确认取消发布" }));
+
+    await waitFor(() => expect(mocks.cancelPublicationJob).toHaveBeenCalledWith("intent:intent-1", "video_transcript"));
+    await waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledWith("已取消发布，视频已恢复待发布状态"));
+  });
+
+  it("does not offer cancel for a video whose publication already started", async () => {
+    mocks.publicationJobs.mockResolvedValue({
+      jobs: [{
+        ...failedJob,
+        id: "intent:intent-2",
+        version_id: "media-pending-media-2",
+        media_id: "media-2",
+        title: "已发布视频",
+        original_filename: "published.mp4",
+        task_type: "video_transcript",
+        task_type_label: "视频文件",
+        status: "processing",
+        workflow_status: "publishing",
+        transcription_action: "open_transcript_workbench",
+        cancelable: false,
+        doc_type: "video",
+        error_code: null,
+        error_summary: null,
+        retryable: false,
+      }],
+      total: 1,
+      status_counts: { processing: 1, published: 0, failed: 0 },
+    });
+
+    render(<AdminDocumentsPage />);
+
+    await screen.findByText("已发布视频");
+    expect(screen.queryByRole("button", { name: "取消发布" })).not.toBeInTheDocument();
   });
 
   it("uses section headings when embedded in content management", async () => {

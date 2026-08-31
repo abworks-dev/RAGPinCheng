@@ -82,6 +82,28 @@ class MediaPublicationIntentStore:
         self.conn.commit()
         return self.load(intent_id)
 
+    def cancel(self, intent_id: str, *, now: int) -> MediaPublicationIntent:
+        """Cancel an intent that has not yet entered the formal publication stage.
+
+        Only intents in ``pending_transcription`` / ``ready_to_publish`` can be
+        cancelled; this returns the media to the not-yet-published state and
+        allows a fresh publish intent afterwards (cancelled intents are not
+        active). Intents already ``publishing`` / ``published`` are rejected.
+
+        Unlike the other store methods this does NOT commit: the caller
+        composes cancellation with the transcription-job cancellation and the
+        media reset inside one transaction and owns the commit/rollback.
+        """
+        changed = self.conn.execute(
+            """UPDATE media_publication_requests
+               SET status='cancelled',completed_at=?,updated_at=?
+               WHERE id=? AND status IN ('pending_transcription','ready_to_publish')""",
+            (now, now, intent_id),
+        ).rowcount
+        if changed != 1:
+            raise MediaPublicationIntentConflict("intent_not_cancellable")
+        return self.load(intent_id)
+
     def mark_publishing(
         self,
         intent_id: str,

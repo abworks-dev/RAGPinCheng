@@ -191,6 +191,7 @@ from .schemas import (
     UnifiedPublicationJobDTO,
     UnifiedPublicationJobListResponse,
     UnifiedPublicationJobRetryRequest,
+    UnifiedPublicationJobCancelRequest,
     ManagedPublicationDTO,
     CreateMediaPublicationRequest,
     MediaPublicationIntentDTO,
@@ -4039,6 +4040,7 @@ def list_unified_publication_jobs(
                 (intent.media_id,),
             ).fetchone()
             payload["workflow_status"] = intent.status
+            payload["cancelable"] = intent.status in {"pending_transcription", "ready_to_publish"}
             if latest_job is None:
                 payload["transcription_action"] = "start_transcription"
             elif latest_job["status"] in {"pending", "running"}:
@@ -4080,6 +4082,119 @@ def retry_unified_publication_job(
     except Exception as exc:
         conn.rollback()
         raise HTTPException(status_code=409, detail="视频发布任务重试失败") from exc
+
+
+@router.post(
+    "/publication-jobs/{job_id}/cancel",
+    response_model=UnifiedPublicationJobDTO,
+    status_code=202,
+)
+def cancel_unified_publication_job(
+    job_id: str,
+    body: UnifiedPublicationJobCancelRequest,
+    _admin: CurrentUser = Depends(require_csrf_admin),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> UnifiedPublicationJobDTO:
+    """Cancel a video publish intent before its formal publication.
+
+    Only intents that have not yet entered the formal publication stage
+    (pending_transcription / ready_to_publish) can be cancelled. Cancelling
+    also cancels any active transcription job for the media and resets the
+    media to the uploaded state, so the video returns to the not-yet-published
+    status in the content list. The intent, jobs and reset commit atomically.
+    """
+    if body.task_type != "video_transcript":
+        raise HTTPException(
+            status_code=400, detail="仅视频发布任务支持取消发布"
+        )
+    # The unified list exposes intents as "intent:<uuid>"; accept both forms.
+    intent_id = job_id[len("intent:") :] if job_id.startswith("intent:") else job_id
+    store = MediaPublicationIntentStore(conn)
+    try:
+        try:
+            intent = store.load(intent_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="视频发布任务不存在")
+        now = int(time.time())
+        cancelled = store.cancel(intent.id, now=now)
+        # Cancel any active transcription job bound to this media in the
+        # same transaction, mirroring the dedicated cancel endpoint's effects
+        # (job -> cancelled, media -> uploaded when no other job is active).
+        conn.execute(
+            """UPDATE transcription_jobs SET status='cancelled',finished_at=?,updated_at=?
+               WHERE media_id=? AND status IN ('pending','running')""",
+            (now, now, cancelled.media_id),
+        )
+        conn.execute(
+            """UPDATE media_assets SET status='uploaded',error=NULL,updated_at=?
+               WHERE media_id=?
+                 AND NOT EXISTS(
+                     SELECT 1 FROM transcription_jobs
+                     WHERE media_id=? AND status IN ('pending','running')
+                 )""",
+            (now, cancelled.media_id, cancelled.media_id),
+        )
+        catalog = conn.execute(
+            """SELECT id,category_id FROM content_items
+               WHERE media_id=? AND content_kind='media_transcript'
+               ORDER BY created_at DESC,id DESC LIMIT 1""",
+            (cancelled.media_id,),
+        ).fetchone()
+        audit_event(
+            conn,
+            "content.publication_cancelled",
+            actor_user_id=_admin.id,
+            item_id=str(catalog["id"]) if catalog is not None else None,
+            category_id=str(catalog["category_id"]) if catalog is not None else None,
+            metadata={
+                "content_kind": "media_transcript",
+                "publication_request_id": cancelled.id,
+                "publication_status": cancelled.status,
+            },
+        )
+        conn.commit()
+        payload = {
+            "id": f"intent:{cancelled.id}",
+            "task_type": "video_transcript",
+            "task_type_label": "视频文件",
+            "status": "processing",
+            "version_id": f"media-pending-{cancelled.media_id}",
+            "publication_id": None,
+            "media_id": cancelled.media_id,
+            "title": None,
+            "original_filename": None,
+            "category_id": None,
+            "category_label": None,
+            "category_path": None,
+            "source_origin": "transcription",
+            "attempt_number": 1,
+            "attempt_count": 1,
+            "error_code": None,
+            "error_summary": None,
+            "retryable": False,
+            "is_archived": False,
+            "is_current_head": False,
+            "is_latest_attempt": True,
+            "doc_type": "video",
+            "version_number": 0,
+            "file_size": None,
+            "parent_count": None,
+            "preview_parent_id": None,
+            "workflow_status": cancelled.status,
+            "transcription_action": None,
+            "cancelable": False,
+            "created_at": cancelled.created_at,
+            "updated_at": cancelled.updated_at,
+        }
+        return UnifiedPublicationJobDTO(**payload)
+    except MediaPublicationIntentConflict as exc:
+        conn.rollback()
+        raise HTTPException(
+            status_code=409, detail="当前视频发布状态不可取消"
+        ) from exc
+    except Exception:
+        conn.rollback()
+        raise
 
 
 @router.get("/permission-catalog", response_model=ContentPermissionCatalogResponse)

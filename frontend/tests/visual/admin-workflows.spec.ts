@@ -939,6 +939,33 @@ test.describe("索引任务", () => {
     if (page.viewportSize()!.width === 390) await expectTouchTarget(includeArchived.locator("xpath=ancestor::label"));
   });
 
+  test("video publish intent offers cancel publication with a confirmation dialog", async ({ page }) => {
+    await openTab(page, "索引任务", "normal", "admin", { includePendingVideoPublication: true });
+    const intentRow = page.getByText("待转录培训视频", { exact: true }).locator("xpath=ancestor::tr");
+    await expect(intentRow.getByText("待转录培训视频", { exact: true })).toBeVisible();
+    await expect(intentRow.getByText("training-pending.mp4")).toBeVisible();
+    const cancelButton = intentRow.getByRole("button", { name: "取消发布" });
+    await expect(cancelButton).toBeVisible();
+    await expect(cancelButton).toBeEnabled();
+    await expectNoBodyOverflow(page);
+
+    await cancelButton.click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("heading", { name: "取消发布该视频？" })).toBeVisible();
+    await expect(dialog.getByText(/将恢复为待发布状态/)).toBeVisible();
+    await expect(dialog.getByText(/转录任务会一并取消/)).toBeVisible();
+    await expectNoBodyOverflow(page);
+
+    if (page.viewportSize()!.width === 390) {
+      const confirm = dialog.getByRole("button", { name: "确认取消发布" });
+      await expectTouchTarget(confirm);
+    }
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expectNoBodyOverflow(page);
+  });
+
   for (const scenario of ["loading", "empty", "error"] as const) {
     test(`${scenario} state is explicit and contained`, async ({ page }) => {
       await openTab(page, "索引任务", scenario);

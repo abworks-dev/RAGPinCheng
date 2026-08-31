@@ -1,10 +1,11 @@
-import { CheckCircle2, CircleAlert, Clock3, ChevronDown, Download, Eye, ListChecks, RefreshCw, Rocket, Search, SlidersHorizontal } from "lucide-react";
+import { Ban, CheckCircle2, CircleAlert, Clock3, ChevronDown, Download, Eye, ListChecks, RefreshCw, Rocket, Search, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { adminContentApi } from "../../api/admin/content";
 import { Badge } from "../../components/ui/badge";
 import { Button, buttonVariants } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
 import { Checkbox } from "../../components/ui/checkbox";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 import { EmptyState } from "../../components/ui/empty-state";
 import { ErrorState } from "../../components/ui/error-state";
 import { Input } from "../../components/ui/input";
@@ -137,6 +138,8 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<ManagedIndexJob & Partial<UnifiedPublicationJob> | null>(null);
+  const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
   const [selectedJobIds, setSelectedJobIds] = useState<string[]>([]);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
@@ -265,6 +268,21 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
     }
   };
 
+  const cancelPublication = async () => {
+    if (!cancelTarget || cancellingJobId) return;
+    setCancellingJobId(cancelTarget.id);
+    try {
+      await adminContentApi.cancelPublicationJob(cancelTarget.id, "video_transcript");
+      toast.success("已取消发布，视频已恢复待发布状态");
+      setCancelTarget(null);
+      await load(true);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "取消发布失败");
+    } finally {
+      setCancellingJobId(null);
+    }
+  };
+
   const selectableJobs = listing.jobs.filter((job) => job.is_latest_attempt && !job.is_archived);
   const actionableJobs = listing.jobs.filter((job) => selectedJobIds.includes(job.id) && ["failed", "done"].includes(job.status) && job.is_latest_attempt && !job.is_archived);
   const toggleJob = (id: string) => setSelectedJobIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
@@ -382,6 +400,8 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
             retryingJobId={retryingJobId}
             canPublish={Boolean(canPublish)}
             onRetry={retryPublication}
+            onCancel={setCancelTarget}
+            cancellingJobId={cancellingJobId}
           />
         )}
 
@@ -397,6 +417,19 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
           </div>
         )}
       </Card>
+
+      <Dialog open={cancelTarget != null} onOpenChange={(open) => { if (!open && !cancellingJobId) setCancelTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>取消发布该视频？</DialogTitle>
+            <DialogDescription>“{cancelTarget?.title || cancelTarget?.original_filename || "该视频"}”将恢复为待发布状态，从发布任务列表中移除；进行中的转录任务会一并取消。已发布的视频不受影响，历史记录会保留。</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" disabled={Boolean(cancellingJobId)} onClick={() => setCancelTarget(null)}>取消</Button>
+            <Button variant="destructive" disabled={Boolean(cancellingJobId)} onClick={() => void cancelPublication()}>{cancellingJobId ? "取消发布中…" : "确认取消发布"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }
@@ -410,6 +443,8 @@ function ManagedJobsTable({
   selectableJobs,
   onToggleJob,
   onTogglePage,
+  onCancel,
+  cancellingJobId,
 }: {
   jobs: ManagedIndexJob[];
   history: boolean;
@@ -420,6 +455,8 @@ function ManagedJobsTable({
   selectableJobs: ManagedIndexJob[];
   onToggleJob: (id: string) => void;
   onTogglePage: (checked: boolean) => void;
+  onCancel: (job: ManagedIndexJob & Partial<UnifiedPublicationJob>) => void;
+  cancellingJobId: string | null;
 }) {
   return (
     <div className="overflow-x-auto border-t border-border">
@@ -514,6 +551,19 @@ function ManagedJobsTable({
                         <Eye className="size-4" />
                         查看文件
                       </a>
+                    )}
+                    {isVideoIntent && publicationJob.cancelable && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="max-sm:h-control-md"
+                        disabled={Boolean(cancellingJobId)}
+                        title="取消本次发布，视频恢复待发布状态"
+                        onClick={() => onCancel(publicationJob)}
+                      >
+                        <Ban className="size-4" />
+                        取消发布
+                      </Button>
                     )}
                     <Button
                       size="sm"

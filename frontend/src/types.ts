@@ -777,6 +777,7 @@ export type UnifiedPublicationJob = {
   preview_parent_id: string | null;
   workflow_status?: string | null;
   transcription_action?: "start_transcription" | "open_transcription_job" | "open_transcript_workbench" | null;
+  cancelable: boolean;
 };
 
 export type UnifiedPublicationJobList = {

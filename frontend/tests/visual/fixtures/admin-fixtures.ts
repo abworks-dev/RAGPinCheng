@@ -272,6 +272,31 @@ const publishedManagedIndexJob = {
   parent_count: 12,
 };
 
+const pendingVideoPublicationJob = {
+  ...managedIndexJobs[0],
+  id: "intent:video-intent-1",
+  version_id: "media-pending-video-1",
+  media_id: "video-1",
+  title: "待转录培训视频",
+  original_filename: "training-pending.mp4",
+  task_type: "video_transcript",
+  task_type_label: "视频文件",
+  status: "processing",
+  workflow_status: "pending_transcription",
+  transcription_action: "start_transcription",
+  cancelable: true,
+  doc_type: "video",
+  version_number: 0,
+  error_code: null,
+  error_summary: null,
+  failure: null,
+  retryable: false,
+  attempt_count: 1,
+  is_current_head: false,
+  parent_count: null,
+  publication_id: "video:video-1",
+};
+
 const archivedManagedIndexJob = {
   ...managedIndexJobs[0],
   id: "managed-job-archived",
@@ -619,7 +644,7 @@ export async function installAdminRoutes(
   scenario: AdminScenario = "normal",
   workspaceUser: WorkspaceUser = "admin",
   currentUser: () => typeof admin = () => workspaceUsers[workspaceUser],
-  options: { includeChildFolder?: boolean; includeFolderRequest?: boolean; feedbackPatchDelayMs?: number; uploadConflict?: boolean } = {},
+  options: { includeChildFolder?: boolean; includeFolderRequest?: boolean; feedbackPatchDelayMs?: number; uploadConflict?: boolean; includePendingVideoPublication?: boolean } = {},
 ) {
   const activeFeedbackEntries = feedbackEntries.map((entry) => ({ ...entry }));
 
@@ -1080,20 +1105,22 @@ export async function installAdminRoutes(
     }
     if (path === "/api/admin/content/publication-jobs") {
       const includesArchived = url.searchParams.get("include_archived") === "true";
-      const sourceJobs = scenario === "empty" ? [] : includesArchived ? [...managedIndexJobs, publishedManagedIndexJob, archivedManagedIndexJob] : [...managedIndexJobs, publishedManagedIndexJob];
+      const pendingVideo = options.includePendingVideoPublication ? [pendingVideoPublicationJob] : [];
+      const sourceJobs = scenario === "empty" ? [] : includesArchived ? [...managedIndexJobs, publishedManagedIndexJob, archivedManagedIndexJob] : [...managedIndexJobs, publishedManagedIndexJob, ...pendingVideo];
       const jobs = sourceJobs.map((job) => ({
         ...job,
-        task_type: "document",
-        task_type_label: "普通资料",
+        task_type: job.task_type ?? "document",
+        task_type_label: job.task_type_label ?? "普通资料",
         status: job.status === "done" ? "published" : job.status,
-        media_id: null,
+        media_id: job.media_id ?? null,
         retryable: job.failure?.retryable ?? false,
+        cancelable: job.cancelable ?? false,
       }));
       return json(route, {
         jobs,
         total: jobs.length,
         status_counts: jobs.length
-          ? { processing: 0, published: includesArchived ? 2 : 1, failed: 1 }
+          ? { processing: pendingVideo.length, published: includesArchived ? 2 : 1, failed: 1 }
           : {},
       });
     }

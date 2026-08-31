@@ -1030,6 +1030,10 @@ export const api = {
     jsonFetch<UnifiedPublicationJob>(`/api/admin/content/publication-jobs/${encodeURIComponent(jobId)}/retry`, {
       method: "POST", body: JSON.stringify({ task_type: taskType }),
     }),
+  cancelPublicationJob: (jobId: string, taskType: "video_transcript") =>
+    jsonFetch<UnifiedPublicationJob>(`/api/admin/content/publication-jobs/${encodeURIComponent(jobId)}/cancel`, {
+      method: "POST", body: JSON.stringify({ task_type: taskType }),
+    }),
 
   // admin: media
   uploadMediaVideo: async (

@@ -73,6 +73,54 @@ def test_create_is_idempotent_and_rejects_another_active_request(tmp_path):
         )
 
 
+def test_cancel_only_allows_pre_publication_intents(tmp_path):
+    conn = _database(tmp_path)
+    store = MediaPublicationIntentStore(conn)
+    intent = store.create(
+        media_id="media-1",
+        requested_by=1,
+        request_idempotency_key="request-1",
+        now=10,
+    )
+
+    cancelled = store.cancel(intent.id, now=20)
+    assert cancelled.status == "cancelled"
+    assert cancelled.completed_at == 20
+    # cancel() leaves the transaction open: the caller owns commit/rollback.
+    assert conn.in_transaction
+    conn.commit()
+    assert store.load(intent.id).status == "cancelled"
+
+    # A cancelled intent no longer blocks a fresh publish intent.
+    fresh = store.create(
+        media_id="media-1",
+        requested_by=1,
+        request_idempotency_key="request-2",
+        now=30,
+    )
+    assert fresh.status == "pending_transcription"
+
+
+def test_rejects_cancel_of_publishing_intent(tmp_path):
+    conn = _database(tmp_path)
+    store = MediaPublicationIntentStore(conn)
+    intent = store.create(
+        media_id="media-1",
+        requested_by=1,
+        request_idempotency_key="request-1",
+        now=10,
+    )
+    intent = store.mark_publishing(
+        intent.id,
+        transcript_version_id="version-1",
+        publication_index_job_id="index-1",
+        now=20,
+    )
+    assert intent.status == "publishing"
+    with pytest.raises(MediaPublicationIntentConflict, match="intent_not_cancellable"):
+        store.cancel(intent.id, now=30)
+
+
 def test_publication_transition_links_real_version_and_index_job(tmp_path):
     conn = _database(tmp_path)
     store = MediaPublicationIntentStore(conn)

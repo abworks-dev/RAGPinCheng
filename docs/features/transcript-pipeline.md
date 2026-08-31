@@ -37,6 +37,7 @@ Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审�
 - 旧会话和未关联转录正常降级（无播放按钮，不报错）；
 - 资料管理的文件选择、拖放和文件夹上传对系统管理员接受 MP4；混合批次复用目录、同名冲突、上传进度与任务明细流程，上传时不要求转录方案；普通账号不会获得 MP4 入口，后端也返回 403；
 - 新视频上传成功后创建 `media_assets` 和 `content_items(content_kind=media_transcript)` 目录壳，资料库状态为 `pending_publication`，不会创建转录或索引任务；首次发布只创建 `media_publication_requests` 意图，管理员随后在转录任务页选择方案才创建 `transcription_jobs`，视频与后续转录稿始终通过 `media_id` 绑定；
+- 发布任务列表（`/admin/content?view=index` 的“发布任务”）对处于 `pending_transcription`（待转录）或 `ready_to_publish`（转录稿就绪待发布）的发布意图提供“取消发布”：`POST /api/admin/content/publication-jobs/{job_id}/cancel` 要求管理员 + CSRF，并在同一 SQLite 事务内将意图置为 `cancelled`、取消该视频进行中的转录任务（`pending`/`running` → `cancelled`）、把媒体重置回 `uploaded` 并写入 `content.publication_cancelled` 审计事件；取消后资料列表恢复“待发布”，可从资料列表重新发布，已在 `publishing`/`published` 的意图返回 409 拒绝取消；
 - “转录任务”位于 `/admin/content?view=transcription`，复用原媒体工作台但隐藏旧上传向导；旧 `/admin/media` 保留为带查询参数的兼容重定向；
 - 旧式人工 MP4+Markdown API 保持兼容；统一上传入口先创建待转录媒体目录壳，只有管理员在资料列表选择方案后才创建自动转录任务，experimental Profile 强制审核策略不由前端放宽；
 - 媒体列表分别展示媒体、转录、审核、发布和索引状态，并保留快捷筛选与转写版本工作台；资料库视频状态投影为“待转录、转录中、转录失败、转录稿待审核、审核通过、发布中、发布失败、已发布”，播放和下载在正式 head 产生前禁用。

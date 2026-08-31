@@ -1192,6 +1192,7 @@ class UnifiedPublicationJobDTO(BaseModel):
         "open_transcription_job",
         "open_transcript_workbench",
     ] | None = None
+    cancelable: bool = False
 
 
 class UnifiedPublicationJobListResponse(BaseModel):
@@ -1203,6 +1204,11 @@ class UnifiedPublicationJobListResponse(BaseModel):
 class UnifiedPublicationJobRetryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     task_type: Literal["document", "video_transcript"]
+
+
+class UnifiedPublicationJobCancelRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    task_type: Literal["video_transcript"]
 
 
 class ContentPermissionUserDTO(BaseModel):

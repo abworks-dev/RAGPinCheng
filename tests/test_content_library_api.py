@@ -538,6 +538,174 @@ def test_video_publish_creates_intent_without_index_job(content_api):
     assert listing.json()["jobs"][0]["media_id"] == media_id
     assert listing.json()["jobs"][0]["workflow_status"] == "pending_transcription"
     assert listing.json()["jobs"][0]["transcription_action"] == "start_transcription"
+    assert listing.json()["jobs"][0]["cancelable"] is True
+
+
+def test_cancel_pending_intent_restores_media_and_is_republishable(content_api):
+    client, sessions, _queued, db_path = content_api
+    media_id = "123e4567-e89b-42d3-a456-426614174270"
+    conn = connect(db_path)
+    item_id, version_id = _insert_catalogued_media(
+        conn, media_id=media_id, title="待取消视频", filename="cancel.mp4", now=100,
+    )
+    conn.close()
+    created = client.post(
+        f"/api/admin/content/items/{item_id}/publish",
+        json={
+            "expected_version_id": version_id,
+            "request_idempotency_key": "123e4567-e89b-42d3-a456-426614174271",
+        },
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert created.status_code == 202
+    intent_id = created.json()["id"]
+
+    cancelled = client.post(
+        f"/api/admin/content/publication-jobs/intent:{intent_id}/cancel",
+        json={"task_type": "video_transcript"},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert cancelled.status_code == 202, cancelled.text
+    assert cancelled.json()["workflow_status"] == "cancelled"
+    assert cancelled.json()["cancelable"] is False
+
+    conn = connect(db_path)
+    intent = conn.execute(
+        "SELECT status,completed_at FROM media_publication_requests WHERE id=?", (intent_id,)
+    ).fetchone()
+    assert intent["status"] == "cancelled"
+    assert intent["completed_at"] is not None
+    media = conn.execute(
+        "SELECT status FROM media_assets WHERE media_id=?", (media_id,)
+    ).fetchone()
+    assert media["status"] == "uploaded"
+    audit = conn.execute(
+        "SELECT event_type,metadata_json FROM content_audit_events WHERE event_type='content.publication_cancelled'"
+    ).fetchone()
+    assert audit is not None
+    conn.close()
+
+    listing = client.get(
+        "/api/admin/content/publication-jobs?task_type=video_transcript",
+        **_auth(sessions, "admin"),
+    )
+    assert listing.json()["jobs"] == []
+
+    republished = client.post(
+        f"/api/admin/content/items/{item_id}/publish",
+        json={
+            "expected_version_id": version_id,
+            "request_idempotency_key": "123e4567-e89b-42d3-a456-426614174272",
+        },
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert republished.status_code == 202, republished.text
+    assert republished.json()["status"] == "pending_transcription"
+
+
+def test_cancel_intent_also_cancels_active_transcription_job(content_api):
+    client, sessions, _queued, db_path = content_api
+    media_id = "123e4567-e89b-42d3-a456-426614174273"
+    conn = connect(db_path)
+    item_id, version_id = _insert_catalogued_media(
+        conn, media_id=media_id, title="转录中视频", filename="running.mp4",
+        now=100, job_status="running",
+    )
+    conn.close()
+    created = client.post(
+        f"/api/admin/content/items/{item_id}/publish",
+        json={
+            "expected_version_id": version_id,
+            "request_idempotency_key": "123e4567-e89b-42d3-a456-426614174274",
+        },
+        **_auth(sessions, "admin", csrf=True),
+    )
+    intent_id = created.json()["id"]
+
+    cancelled = client.post(
+        f"/api/admin/content/publication-jobs/{intent_id}/cancel",
+        json={"task_type": "video_transcript"},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert cancelled.status_code == 202, cancelled.text
+
+    conn = connect(db_path)
+    job = conn.execute(
+        "SELECT status FROM transcription_jobs WHERE media_id=?", (media_id,)
+    ).fetchone()
+    assert job["status"] == "cancelled"
+    media = conn.execute(
+        "SELECT status FROM media_assets WHERE media_id=?", (media_id,)
+    ).fetchone()
+    assert media["status"] == "uploaded"
+    conn.close()
+
+
+def test_cancel_rejects_intent_already_in_formal_publication(content_api):
+    client, sessions, _queued, db_path = content_api
+    media_id = "123e4567-e89b-42d3-a456-426614174275"
+    conn = connect(db_path)
+    item_id, version_id = _insert_catalogued_media(
+        conn, media_id=media_id, title="发布中视频", filename="publishing.mp4", now=100,
+    )
+    conn.close()
+    created = client.post(
+        f"/api/admin/content/items/{item_id}/publish",
+        json={
+            "expected_version_id": version_id,
+            "request_idempotency_key": "123e4567-e89b-42d3-a456-426614174276",
+        },
+        **_auth(sessions, "admin", csrf=True),
+    )
+    intent_id = created.json()["id"]
+    conn = connect(db_path)
+    conn.execute(
+        """UPDATE media_publication_requests
+           SET status='publishing',transcript_version_id='version-1',publication_index_job_id='index-1',updated_at=?
+           WHERE id=?""",
+        (200, intent_id),
+    )
+    conn.commit()
+    conn.close()
+
+    blocked = client.post(
+        f"/api/admin/content/publication-jobs/{intent_id}/cancel",
+        json={"task_type": "video_transcript"},
+        **_auth(sessions, "admin", csrf=True),
+    )
+    assert blocked.status_code == 409, blocked.text
+
+
+def test_cancel_publication_requires_admin_and_csrf(content_api):
+    client, sessions, _queued, db_path = content_api
+    media_id = "123e4567-e89b-42d3-a456-426614174277"
+    conn = connect(db_path)
+    item_id, version_id = _insert_catalogued_media(
+        conn, media_id=media_id, title="权限视频", filename="auth.mp4", now=100,
+    )
+    conn.close()
+    created = client.post(
+        f"/api/admin/content/items/{item_id}/publish",
+        json={
+            "expected_version_id": version_id,
+            "request_idempotency_key": "123e4567-e89b-42d3-a456-426614174278",
+        },
+        **_auth(sessions, "admin", csrf=True),
+    )
+    intent_id = created.json()["id"]
+    url = f"/api/admin/content/publication-jobs/{intent_id}/cancel"
+    body = {"task_type": "video_transcript"}
+
+    no_csrf = client.post(url, json=body, **_auth(sessions, "admin"))
+    assert no_csrf.status_code == 403
+    not_admin = client.post(url, json=body, **_auth(sessions, "publisher", csrf=True))
+    assert not_admin.status_code == 403
+    wrong_type = client.post(
+        url, json={"task_type": "document"}, **_auth(sessions, "admin", csrf=True)
+    )
+    # The schema restricts task_type to video_transcript, so the invalid
+    # literal is rejected during request validation.
+    assert wrong_type.status_code == 422
 
 
 def test_video_publish_requires_publish_permission_and_csrf(content_api):
