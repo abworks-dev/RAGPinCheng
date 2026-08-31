@@ -998,7 +998,7 @@ function UploadTasksPanel({
     );
 
   return (
-    <section className="space-y-4" aria-labelledby="upload-tasks-title">
+    <section className="space-y-5" aria-labelledby="upload-tasks-title">
       <div
         className="grid grid-cols-2 gap-3 lg:grid-cols-5"
         aria-label="上传任务状态概览"
