@@ -135,6 +135,7 @@ from .content_store import (
     next_category_sort_order,
 )
 from .db import get_db
+from .external_media import materialize_shared_folder_mirrors_from_entries
 from .routes_media import safe_join
 from .media_upload_conflicts import find_media_upload_conflicts, normalize_media_title
 from .media_storage import normalize_external_relative_path
@@ -833,7 +834,31 @@ def get_categories(
     _user: CurrentUser = Depends(require_content_permission("category.view")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> list[ManagedCategoryDTO]:
-    return [_category_dto(conn, row) for row in list_categories(conn, include_inactive=include_inactive)]
+    # Shared sources' mirror rows are derived from the recorded remote entries
+    # (no filesystem walk).  A shared root is only listed with its
+    # external_source_id set, so an already-scanned share shows its folder tree
+    # immediately — the authoritative filesystem scan still runs on schedule or
+    # through the explicit sync action.
+    rows = list_categories(conn, include_inactive=include_inactive)
+    now = int(time.time())
+    touched = False
+    for row in rows:
+        if (
+            row["category_kind"] == "shared_folder"
+            and row["external_source_id"] is not None
+            and row["external_relative_path"] is None
+        ):
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            materialize_shared_folder_mirrors_from_entries(
+                conn, str(row["external_source_id"]), now=now
+            )
+            touched = True
+    if touched:
+        if conn.in_transaction:
+            conn.commit()
+        rows = list_categories(conn, include_inactive=include_inactive)
+    return [_category_dto(conn, row) for row in rows]
 
 
 @router.post("/categories", response_model=ManagedCategoryDTO)

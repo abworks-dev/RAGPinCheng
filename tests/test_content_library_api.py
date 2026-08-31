@@ -4756,6 +4756,67 @@ def test_category_key_is_server_generated_and_used_categories_cannot_be_disabled
     assert "重新归类" in disabled.json()["detail"]
 
 
+def test_categories_endpoint_materializes_shared_mirrors_from_entries(content_api):
+    client, sessions, _queued, db_path = content_api
+    from api.content_store import create_category
+    from api.db import connect as db_connect
+
+    conn = db_connect(db_path)
+    now = int(time.time())
+    scheme = conn.execute(
+        "SELECT id FROM transcription_schemes WHERE enabled=1 AND archived=0 ORDER BY sort_order LIMIT 1"
+    ).fetchone()
+    root = create_category(
+        conn, category_key=None, parent_id=None,
+        display_code="88", display_name="共享培训API", sort_order=880, actor_user_id=1,
+    )
+    source_id = "source-api-mirror"
+    conn.execute(
+        """INSERT INTO external_media_sources(
+               id,name,root_alias,relative_path,target_category_id,default_scheme_id,
+               created_at,updated_at,created_by
+           ) VALUES (?,?,?,?,?,?,?,?,1)""",
+        (source_id, "共享培训API源", "share", "", root["id"], scheme["id"], now, now),
+    )
+    conn.execute(
+        "UPDATE category_nodes SET category_kind='shared_folder', external_source_id=?, version=version+1 WHERE id=?",
+        (source_id, root["id"]),
+    )
+    # Entries recorded by an earlier scan; no filesystem walk happens here.
+    for rel, filename in (
+        ("一级课程/导论.mp4", "导论.mp4"),
+        ("一级课程/进阶/深入.mp4", "深入.mp4"),
+        ("根视频.mp4", "根视频.mp4"),
+    ):
+        media_id = f"media-api-{rel}"
+        conn.execute(
+            """INSERT INTO media_assets(
+                   media_id,title,original_filename,storage_rel_path,mime_type,file_size,sha256,
+                   transcript_source_path,transcript_origin,status,created_by,created_at,updated_at,
+                   target_category_id,normalized_title,normalized_original_filename,storage_kind
+               ) VALUES (?,?,?,?,'video/mp4',1,NULL,NULL,'generated','uploaded',1,?,?,?,NULL,NULL,'external')""",
+            (media_id, filename, filename, f"external/{source_id}/{rel}", now, now, root["id"]),
+        )
+        conn.execute(
+            """INSERT INTO external_media_entries(
+                   id,source_id,media_id,relative_path,parent_relative_path,filename,file_size,
+                   modified_ns,fingerprint,availability,discovered_at,last_seen_at,updated_at
+               ) VALUES (?,?,?,?,?,?,1,1,?,'available',?,?,?)""",
+            (f"entry-api-{rel}", source_id, media_id, rel, "", filename, f"fp-{rel}", now, now, now),
+        )
+    conn.commit()
+    conn.close()
+
+    rows = client.get(
+        "/api/admin/content/categories?include_inactive=true", **_auth(sessions, "admin")
+    ).json()
+    by_path = {row["external_relative_path"]: row for row in rows if row.get("external_relative_path")}
+    assert set(by_path) == {"一级课程", "一级课程/进阶"}
+    assert by_path["一级课程"]["category_kind"] == "shared_folder"
+    assert by_path["一级课程"]["parent_id"] == root["id"]
+    assert by_path["一级课程/进阶"]["parent_id"] == by_path["一级课程"]["id"]
+
+
 def _create_bulk_test_category(client: TestClient, sessions, *, parent_id: str, code: str, name: str):
     response = client.post(
         "/api/admin/content/categories",

@@ -768,6 +768,7 @@ function CategoryTreeNodeView({
     </div>
     {hasChildren && isExpanded && <div role="group" className="ml-5 border-l border-border bg-surface-muted/10 sm:ml-6">
       {children.map((child, childIndex) => <CategoryTreeNodeView key={child.category.id} node={child} level={level + 1} index={childIndex} siblingCount={children.length} selectedId={selectedId} expanded={expanded} visibleNodes={visibleNodes} nodeRefs={nodeRefs} onSelect={onSelect} onToggle={onToggle} />)}
+      {isSharedRoot && children.length === 0 && <div className="px-4 py-3 text-ui-xs text-muted-foreground" role="status">共享目录尚未扫描出子目录。请选中共享文件夹后点击“同步远程目录”，或等待周期扫描。</div>}
     </div>}
   </>;
 }

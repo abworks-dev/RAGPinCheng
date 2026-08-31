@@ -594,6 +594,38 @@ def materialize_shared_folder_mirrors(
         _renumber_mirror_siblings(conn, str(row["parent_id"]), now=now)
 
 
+def materialize_shared_folder_mirrors_from_entries(
+    conn: sqlite3.Connection,
+    source_id: str,
+    *,
+    now: int,
+) -> None:
+    """Mirror a shared source's folder tree purely from its recorded entries.
+
+    The entries table already describes every folder that contained an
+    available video at the last filesystem scan, so the managed category tree
+    can reflect the remote hierarchy without another network share walk.  This
+    keeps an already-configured shared folder visible immediately (e.g. right
+    after an application upgrade), while the filesystem scan inside
+    ``reconcile_source`` remains authoritative for file availability and for
+    folders that contain no video files at all.
+    """
+    rows = conn.execute(
+        """SELECT relative_path FROM external_media_entries
+           WHERE source_id=? AND availability='available'""",
+        (source_id,),
+    ).fetchall()
+    folder_paths: set[str] = set()
+    for row in rows:
+        folder = PurePosixPath(str(row["relative_path"])).parent.as_posix()
+        while folder and folder != ".":
+            folder_paths.add(folder)
+            folder = PurePosixPath(folder).parent.as_posix()
+    materialize_shared_folder_mirrors(
+        conn, source_id, tuple(sorted(folder_paths, key=lambda value: value.casefold())), now=now,
+    )
+
+
 def resolve_shared_category_key(conn: sqlite3.Connection, media_id: str) -> str | None:
     """Resolve the category key a shared video's transcripts should carry.
 
