@@ -164,6 +164,12 @@ def _dir_size(directory: Path) -> int:
 
 
 def qdrant_point_count(media_id: str) -> int | None:
+    """Return 1 when any indexed point carries this media_id, else 0.
+
+    Uses ``scroll`` with ``limit=1`` instead of the approximate ``count``
+    API: the approximate count path can report the collection total instead
+    of a filtered count, which would block cleanup with a false positive.
+    """
     try:
         from qdrant_client import QdrantClient
         from qdrant_client.http import models
@@ -173,18 +179,20 @@ def qdrant_point_count(media_id: str) -> int | None:
         raise LeftoverMediaError(f"qdrant_check_unavailable: {exc}") from exc
     client = QdrantClient(url=QDRANT_URL)
     try:
-        result = client.count(
+        records, _next = client.scroll(
             collection_name=COLLECTION,
-            count_filter=models.Filter(
+            scroll_filter=models.Filter(
                 must=[
                     models.FieldCondition(
                         key="media_id", match=models.MatchValue(value=media_id)
                     )
                 ]
             ),
-            exact=False,
+            limit=1,
+            with_payload=False,
+            with_vectors=False,
         )
-        return int(result.count)
+        return int(len(records) > 0)
     except Exception as exc:  # pragma: no cover - environment dependent
         raise LeftoverMediaError(f"qdrant_check_failed: {exc}") from exc
     finally:
