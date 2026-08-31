@@ -1136,15 +1136,6 @@ function UploadTasksPanel({
               />
               刷新列表
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-control-md"
-              onClick={clearFilters}
-              disabled={!queryInput && !hasFilters}
-            >
-              清除筛选
-            </Button>
             <BatchActionsMenu
               disabled={loading}
               options={[
@@ -1720,7 +1711,7 @@ function ActionsMenu({
         ref={triggerRef}
         size={compact ? "icon" : "sm"}
         variant="outline"
-        className={compact ? "!size-9 max-sm:!size-10" : "max-sm:h-control-md"}
+        className={compact ? "!size-9 max-sm:!size-10" : "h-control-md"}
         disabled={disabled}
         aria-label={triggerLabel}
         title={triggerLabel}
@@ -5761,18 +5752,6 @@ export function AdminManagedContentPage() {
               }}
             />
             <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                className="max-sm:h-control-md"
-                onClick={() => void loadTrash()}
-                disabled={trashLoading}
-              >
-                <RefreshCw
-                  className={trashLoading ? "size-4 animate-spin" : "size-4"}
-                />
-                {trashLoading ? "刷新中…" : "刷新列表"}
-              </Button>
               {(can("trash.policy_manage") || can("trash.purge")) && (
                 <ActionsMenu
                   disabled={Boolean(busyAction)}
@@ -5809,6 +5788,18 @@ export function AdminManagedContentPage() {
                   ]}
                 />
               )}
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-control-md"
+                onClick={() => void loadTrash()}
+                disabled={trashLoading}
+              >
+                <RefreshCw
+                  className={trashLoading ? "size-4 animate-spin" : "size-4"}
+                />
+                {trashLoading ? "刷新中…" : "刷新列表"}
+              </Button>
               {(can("trash.restore") || can("trash.purge")) && (
                 <ActionsMenu
                   disabled={Boolean(busyAction) || trashSelected.length === 0}
@@ -6739,7 +6730,7 @@ export function AdminManagedContentPage() {
             {!sharedFolderMode && can("item.upload") && (
               <Button
                 size="sm"
-                className="max-sm:h-control-md"
+                className="h-control-md"
                 onClick={openUploadDialog}
                 disabled={
                   !enabled ||
@@ -6756,7 +6747,7 @@ export function AdminManagedContentPage() {
             <Button
               size="sm"
               variant="outline"
-              className="max-sm:h-control-md"
+              className="h-control-md"
               onClick={() => void load(true)}
               disabled={loading || refreshing}
             >
