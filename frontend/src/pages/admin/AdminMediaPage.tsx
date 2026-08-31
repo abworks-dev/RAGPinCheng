@@ -809,8 +809,6 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <section className="space-y-6" aria-labelledby="admin-media-title">
-      <h1 id="admin-media-title" className="sr-only">转录任务</h1>
-
       {schemeError && <Alert variant="destructive" role="alert"><AlertTitle>转录方案加载失败</AlertTitle><AlertDescription>{schemeError}</AlertDescription></Alert>}
 
       <Dialog open={uploadDialogOpen} onOpenChange={requestUploadDialogClose}>
@@ -1236,6 +1234,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
         </DialogContent>
       </Dialog>
       <Dialog open={archiveTarget != null} onOpenChange={(open) => { if (!open && !deletingMediaId) setArchiveTarget(null); }}><DialogContent><DialogHeader><DialogTitle>将视频移入回收站？</DialogTitle><DialogDescription>“{archiveTarget?.title}”及其转写资料将从视频列表和知识库检索中隐藏，历史会保留，可从资料管理回收站恢复。</DialogDescription></DialogHeader><label className="flex items-start gap-2 rounded-ui-md border border-destructive/30 bg-destructive/5 p-3 text-ui-sm"><Checkbox checked={archiveAcknowledged} onChange={(event) => setArchiveAcknowledged(event.target.checked)} /><span>我已了解该视频移入回收站后将不再进入知识库检索。</span></label><DialogFooter><Button variant="outline" disabled={deletingMediaId != null} onClick={() => setArchiveTarget(null)}>取消</Button><Button variant="destructive" disabled={!archiveAcknowledged || deletingMediaId != null} onClick={() => archiveTarget && void archiveMedia(archiveTarget)}>{deletingMediaId ? "处理中…" : "确认移入回收站"}</Button></DialogFooter></DialogContent></Dialog>
+      <h1 id="admin-media-title" className="sr-only">转录任务</h1>
     </section>
   );
 }
