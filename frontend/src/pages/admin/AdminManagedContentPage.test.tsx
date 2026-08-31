@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   upload: vi.fn(),
   uploadTasks: vi.fn(),
   uploadTask: vi.fn(),
+  deleteOrphanUploadTask: vi.fn(),
   indexJobs: vi.fn(),
   publicationJobs: vi.fn(),
   createCategory: vi.fn(),
@@ -116,6 +117,7 @@ vi.mock("../../api/client", () => ({
     uploadManagedContent: mocks.upload,
     managedUploadTasks: mocks.uploadTasks,
     managedUploadTask: mocks.uploadTask,
+    deleteOrphanUploadTask: mocks.deleteOrphanUploadTask,
     managedContentIndexJobs: mocks.publicationJobs,
     publicationJobs: mocks.publicationJobs,
     createManagedCategory: mocks.createCategory,
@@ -2318,5 +2320,111 @@ it("uses comfortable selection and type tracks in the managed content table", as
     expect(screen.getAllByRole("status").some((status) => status.textContent?.includes("已选择 21 个"))).toBe(true);
     const selectedRows = screen.getAllByTestId("upload-task-row");
     expect(within(selectedRows[20]).getByRole("checkbox")).toBeChecked();
+  });
+
+  it("batch deletes selected upload tasks by moving generated items to the recycle bin", async () => {
+    mocks.permissions = ORGANIZER_PERMISSIONS;
+    const tasks = [1, 2].map((index) => ({
+      batch_id: `batch-delete-${index}`,
+      upload_mode: "files" as const,
+      status: "completed" as const,
+      target_category_id: "cat-03",
+      target_path: `03 公司内部标准 / 任务 ${index}`,
+      total_files: 1,
+      accepted_files: 1,
+      skipped_files: 0,
+      total_bytes: 10,
+      total_uploaded_bytes: 10,
+      created_by_name: "整理员",
+      created_at: index,
+      updated_at: index,
+      error_summary: null,
+      entries: [
+        { sequence: 1, filename: `doc-${index}.pdf`, relative_path: `资料包/doc-${index}.pdf`, size_bytes: 10, status: "accepted" as const, reason: null, item_id: `item-${index}`, version_id: `version-${index}`, created_at: index },
+      ],
+    }));
+    mocks.uploadTasks.mockResolvedValue({ tasks, total: 2, status_counts: { completed: 2 } });
+    mocks.bulkArchive.mockResolvedValue({ succeeded: 1, failed: 0, results: [], skipped: 0 });
+    window.history.replaceState({}, "", "/admin/content?view=uploads");
+
+    render(<AdminManagedContentPage />);
+    expect(await screen.findByText("03 公司内部标准 / 任务 1")).toBeInTheDocument();
+    const rows = screen.getAllByTestId("upload-task-row");
+    fireEvent.click(within(rows[0]).getByRole("checkbox"));
+    fireEvent.click(within(rows[1]).getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "删除所选任务（2）" }));
+
+    const dialog = screen.getByRole("dialog", { name: "删除所选上传任务" });
+    expect(within(dialog).getByText(/选中的 2 个任务记录/)).toBeInTheDocument();
+    expect(within(dialog).getByText("文件上传 · 03 公司内部标准 / 任务 1")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认移入回收站（2）" }));
+
+    await waitFor(() => expect(mocks.bulkArchive).toHaveBeenCalledTimes(2));
+    expect(mocks.bulkArchive).toHaveBeenCalledWith([{ item_id: "item-1", expected_version_id: "version-1" }]);
+    expect(mocks.bulkArchive).toHaveBeenCalledWith([{ item_id: "item-2", expected_version_id: "version-2" }]);
+    expect(mocks.success).toHaveBeenCalledWith("已将 2 份资料移入回收站，共处理 2 个任务");
+  });
+
+  it("batch delete excludes processing tasks and cleans up orphan records", async () => {
+    mocks.permissions = ORGANIZER_PERMISSIONS;
+    const tasks = [
+      {
+        batch_id: "batch-delete-processing",
+        upload_mode: "files" as const,
+        status: "processing" as const,
+        target_category_id: "cat-03",
+        target_path: "03 公司内部标准 / 处理中",
+        total_files: 1,
+        accepted_files: 0,
+        skipped_files: 0,
+        total_bytes: 10,
+        total_uploaded_bytes: 1,
+        created_by_name: "整理员",
+        created_at: 1,
+        updated_at: 1,
+        error_summary: null,
+        entries: null,
+      },
+      {
+        batch_id: "batch-delete-orphan",
+        upload_mode: "files" as const,
+        status: "failed" as const,
+        target_category_id: "cat-03",
+        target_path: "03 公司内部标准 / 无关联",
+        total_files: 1,
+        accepted_files: 0,
+        skipped_files: 1,
+        total_bytes: 10,
+        total_uploaded_bytes: 0,
+        created_by_name: "整理员",
+        created_at: 2,
+        updated_at: 2,
+        error_summary: "上传中断",
+        entries: null,
+      },
+    ];
+    mocks.uploadTasks.mockResolvedValue({ tasks, total: 2, status_counts: { processing: 1, failed: 1 } });
+    mocks.uploadTask.mockResolvedValue({ ...tasks[1], entries: [] });
+    mocks.deleteOrphanUploadTask.mockResolvedValue(undefined);
+    window.history.replaceState({}, "", "/admin/content?view=uploads");
+
+    render(<AdminManagedContentPage />);
+    expect(await screen.findByText("03 公司内部标准 / 无关联")).toBeInTheDocument();
+    const rows = screen.getAllByTestId("upload-task-row");
+    fireEvent.click(within(rows[0]).getByRole("checkbox"));
+    fireEvent.click(within(rows[1]).getByRole("checkbox"));
+    expect(screen.getAllByRole("status").some((status) => status.textContent?.includes("已选择 2 个"))).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+
+    const deleteItem = screen.getByRole("menuitem", { name: "删除所选任务（1）" });
+    expect(deleteItem).toBeEnabled();
+    fireEvent.click(deleteItem);
+    const dialog = screen.getByRole("dialog", { name: "删除所选上传任务" });
+    expect(within(dialog).getByText(/选中的 1 个任务记录/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认移入回收站（1）" }));
+
+    await waitFor(() => expect(mocks.deleteOrphanUploadTask).toHaveBeenCalledWith("batch-delete-orphan"));
+    expect(mocks.success).toHaveBeenCalledWith("已将 0 份资料移入回收站，清理 1 条无关联记录，共处理 1 个任务");
   });
 });
