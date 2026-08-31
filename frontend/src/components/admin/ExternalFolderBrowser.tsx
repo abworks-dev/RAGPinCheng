@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronLeft, ChevronRight, Film, Folder, FolderOpen } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Film, Folder, FolderOpen } from "lucide-react";
 import { api } from "../../api/client";
 import type { ExternalMediaEntry, ManagedContentItem } from "../../types";
 import { Badge } from "../ui/badge";
@@ -26,6 +26,8 @@ type BrowserProps = {
   renderItemStatus?: (item: ManagedContentItem) => ReactNode;
   renderItemActions?: (item: ManagedContentItem) => ReactNode;
   renderFolderActions?: (entry: ExternalMediaEntry, open: () => void) => ReactNode;
+  parent?: string;
+  onParentChange?: (value: string) => void;
 };
 
 function useExternalEntries(sourceId: string, parent: string) {
@@ -94,11 +96,18 @@ export function ExternalFolderBrowser({
   renderItemStatus,
   renderItemActions,
   renderFolderActions,
+  parent: controlledParent,
+  onParentChange,
 }: BrowserProps) {
-  const [parent, setParent] = useState("");
+  const [localParent, setLocalParent] = useState("");
   const [sort, setSort] = useState<{ key: SharedSortKey; direction: "asc" | "desc" } | null>(null);
+  const parentControlled = controlledParent !== undefined && onParentChange !== undefined;
+  const parent = parentControlled ? controlledParent : localParent;
+  const updateParent = (value: string) => {
+    if (parentControlled) onParentChange!(value);
+    else setLocalParent(value);
+  };
   const { entries, loading, error } = useExternalEntries(sourceId, parent);
-  const parentUp = parent.includes("/") ? parent.slice(0, parent.lastIndexOf("/")) : "";
   const [allManagedItems, setAllManagedItems] = useState<ManagedContentItem[]>(managedItems);
   useEffect(() => {
     let cancelled = false;
@@ -126,7 +135,7 @@ export function ExternalFolderBrowser({
     () => new Map(allManagedItems.filter((item) => item.media_id).map((item) => [item.media_id!, item])),
     [allManagedItems],
   );
-  useEffect(() => { setParent(""); }, [sourceId]);
+  useEffect(() => { updateParent(""); }, [sourceId]);
   const toggleSort = (key: SharedSortKey) =>
     setSort((current) =>
       current?.key === key
@@ -198,13 +207,8 @@ export function ExternalFolderBrowser({
       }
     });
   };
-  const openEntry = (entry: ExternalMediaEntry) => setParent(entry.relative_path);
+  const openEntry = (entry: ExternalMediaEntry) => updateParent(entry.relative_path);
   return <section aria-label={title}>
-    <div className="flex items-center gap-2 border-b border-border bg-surface-muted/40 px-4 py-2 text-ui-xs sm:px-5">
-      <Button size="sm" variant="ghost" disabled={!parent} onClick={() => setParent(parentUp)}><ChevronLeft className="size-4" />上一级</Button>
-      <span className="min-w-0 flex-1 truncate text-muted-foreground" title={parent || "根目录"}>{parent || "根目录"}</span>
-      <Badge variant="secondary">共享</Badge>
-    </div>
     {loading ? <LoadingState className="min-h-48" label="正在读取共享目录…" /> : error ? <p className="p-4 text-ui-sm text-destructive" role="alert">{error}</p> : visibleEntries.length === 0 ? <EmptyState title="当前目录暂无资料" description="共享目录扫描后会在这里显示直属文件夹和文件。" /> : <>
       <div className="hidden overflow-x-auto border-t border-border lg:block"><table className="w-full min-w-[72rem] text-ui-sm">
         <thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr>

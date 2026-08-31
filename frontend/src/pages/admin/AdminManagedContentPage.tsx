@@ -2249,6 +2249,7 @@ export function AdminManagedContentPage() {
   >(null);
   const [transcriptionDialogBusy, setTranscriptionDialogBusy] = useState(false);
   const [currentFolderId, setCurrentFolderId] = useState("");
+  const [sharedRemoteParent, setSharedRemoteParent] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [uploadDefaultPublish, setUploadDefaultPublish] = useState(false);
   const [uploadPublishOverrides, setUploadPublishOverrides] = useState<
@@ -2306,6 +2307,7 @@ export function AdminManagedContentPage() {
     "global",
   );
   const navigateToFolder = useCallback((folderId: string) => {
+    setSharedRemoteParent("");
     setSearchScope(folderId ? "current" : "global");
     setCurrentFolderId(folderId);
   }, []);
@@ -3175,6 +3177,7 @@ export function AdminManagedContentPage() {
   const currentFolder =
     categories.find((category) => category.id === currentFolderId) || null;
   const sharedFolderMode = currentFolder?.category_kind === "shared_folder" && Boolean(currentFolder.external_source_id);
+  const showSharedBrowser = sharedFolderMode && !showGlobalResults;
   const currentFolderDropLabel = currentFolder
     ? `${currentFolder.display_code} ${currentFolder.display_name}`.trim()
     : "当前目录";
@@ -6908,13 +6911,46 @@ export function AdminManagedContentPage() {
                   </button>
                 </span>
               ))}
+              {showSharedBrowser && (
+                <>
+                  {sharedRemoteParent.split("/").filter(Boolean).map((segment, index, all) => {
+                    const target = all.slice(0, index + 1).join("/");
+                    return (
+                      <span key={target} className="flex min-w-0 items-center gap-1">
+                        <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                        <button
+                          type="button"
+                          className="max-w-56 truncate rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          onClick={() => setSharedRemoteParent(target)}
+                        >
+                          {segment}
+                        </button>
+                      </span>
+                    );
+                  })}
+                  <span
+                    className="ml-1 inline-flex shrink-0 items-center rounded-full bg-primary/10 px-2 py-0.5 text-ui-xs font-medium leading-5 text-primary"
+                    title="共享目录"
+                  >
+                    共享
+                  </span>
+                </>
+              )}
             </nav>
             <IconButton
               label="返回上一目录"
               tooltip={currentFolder ? "返回上一目录" : "当前已在根目录"}
               className="size-control-md border border-border bg-background"
               disabled={!currentFolder}
-              onClick={() => navigateToFolder(currentFolder?.parent_id || "")}
+              onClick={() =>
+                showSharedBrowser && sharedRemoteParent
+                  ? setSharedRemoteParent(
+                      sharedRemoteParent.includes("/")
+                        ? sharedRemoteParent.slice(0, sharedRemoteParent.lastIndexOf("/"))
+                        : "",
+                    )
+                  : navigateToFolder(currentFolder?.parent_id || "")
+              }
             >
               <ArrowUp className="size-4" />
             </IconButton>
@@ -6981,6 +7017,8 @@ export function AdminManagedContentPage() {
               renderFolderActions={(entry, open) =>
                 renderSharedFolderActions(entry, open)
               }
+              parent={sharedRemoteParent}
+              onParentChange={setSharedRemoteParent}
             />
           ) : loading ? (
             <LoadingState
