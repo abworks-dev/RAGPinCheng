@@ -1094,7 +1094,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
           : loading ? <Card><LoadingState className="min-h-48" label="正在加载媒体资源…" /></Card>
           : transcriptionTaskAssets.length === 0 ? <EmptyState title="暂无转录任务" description="视频在资料列表发布后，会进入这里等待选择转录方案。" />
           : <>
-            <div className="hidden grid-cols-[3rem_minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] gap-4 border-b border-border bg-surface-muted px-5 py-3 text-ui-xs font-medium text-muted-foreground lg:grid" data-testid="media-record-header">
+            <div className="hidden grid-cols-[3rem_minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] gap-4 border-b border-border bg-surface-muted px-5 py-3 text-ui-sm font-medium text-muted-foreground lg:grid" data-testid="media-record-header">
               <Checkbox aria-label="选择当前页视频" checked={allPageSelected} onChange={() => setSelectedMediaIds(allPageSelected ? [] : pageIds)} /><span>媒体信息</span><span>处理进度</span><span>最近提交</span><span>操作</span>
             </div>
             <ul className="divide-y divide-border" aria-label="视频处理记录">
@@ -1116,7 +1116,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
                 const isStaleExternalCleanup = canFinalizeCleanup;
                 const showDelete = asset.status === "failed" || canDelete || canFinalizeCleanup;
                 const showPublishedActions = canReplace || asset.publication_status === "published";
-                return <li key={asset.media_id} className="p-4 sm:p-5" data-testid="media-record-row">
+                return <li key={asset.media_id} className="p-4 transition-colors duration-normal hover:bg-surface-muted/60 sm:p-5" data-testid="media-record-row">
                   <div className="grid grid-cols-[3rem_minmax(0,1fr)] gap-4 lg:grid-cols-[3rem_minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] lg:items-start">
                     <Checkbox aria-label={`选择“${asset.title}”`} checked={selectedMediaIds.includes(asset.media_id)} onChange={() => setSelectedMediaIds((current) => current.includes(asset.media_id) ? current.filter((id) => id !== asset.media_id) : [...current, asset.media_id])} />
                     <div className="min-w-0">

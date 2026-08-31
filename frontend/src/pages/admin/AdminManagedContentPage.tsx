@@ -1166,7 +1166,7 @@ function UploadTasksPanel({
         ) : (
           <>
             <div
-              className="hidden grid-cols-[3rem_minmax(10rem,1.7fr)_7.5rem_minmax(11rem,1fr)_8rem_6rem_12rem] gap-x-4 border-b border-border bg-surface-muted/40 px-5 py-2.5 text-ui-xs font-medium text-muted-foreground xl:grid"
+              className="hidden grid-cols-[3rem_minmax(10rem,1.7fr)_7.5rem_minmax(11rem,1fr)_8rem_6rem_12rem] gap-x-4 border-b border-border bg-surface-muted px-5 py-3 text-ui-sm font-medium text-muted-foreground xl:grid"
               data-testid="upload-task-header"
             >
               <Checkbox
@@ -1186,7 +1186,7 @@ function UploadTasksPanel({
               {visibleTasks.map((task) => (
                 <li
                   key={task.batch_id}
-                  className="grid grid-cols-[3rem_minmax(0,1fr)] gap-x-4 gap-y-3 px-4 py-4 sm:px-5 xl:grid-cols-[3rem_minmax(10rem,1.7fr)_7.5rem_minmax(11rem,1fr)_8rem_6rem_12rem] xl:items-center"
+                  className="grid grid-cols-[3rem_minmax(0,1fr)] gap-x-4 gap-y-3 px-4 py-4 transition-colors duration-normal hover:bg-surface-muted/60 sm:px-5 xl:grid-cols-[3rem_minmax(10rem,1.7fr)_7.5rem_minmax(11rem,1fr)_8rem_6rem_12rem] xl:items-center"
                   data-testid="upload-task-row"
                 >
                   <Checkbox
@@ -6486,7 +6486,7 @@ export function AdminManagedContentPage() {
         </Card>
       )}
       <Card
-        className="shadow-surface [&_table]:!min-w-[56rem]"
+        className="shadow-surface [&_table]:!min-w-[68rem]"
         aria-labelledby="managed-list-title"
       >
         <div className="grid gap-3 border-b border-border px-4 py-4 xl:grid-cols-[minmax(13rem,1fr)_18rem_auto] xl:items-end min-[1400px]:grid-cols-[minmax(13rem,1fr)_24rem_auto] sm:px-5">
@@ -6793,8 +6793,8 @@ export function AdminManagedContentPage() {
           ) : (
             !error && (
               <>
-                <div className="hidden overflow-x-auto border-t border-border lg:block">
-                  <table className="w-full min-w-[72rem] text-ui-sm">
+                <div className="hidden overflow-x-auto lg:block">
+                  <table className="w-full text-ui-sm">
                     <thead className="border-b border-border bg-surface-muted text-left text-muted-foreground">
                       <tr>
                         <th className="w-12 px-3 py-3">
@@ -6825,9 +6825,7 @@ export function AdminManagedContentPage() {
                             className={
                               key === "docType"
                                 ? "w-16 px-2 py-3 text-center font-medium"
-                                : key === "title"
-                                  ? "px-2 py-3 font-medium"
-                                  : "px-3 py-3 font-medium"
+                                : "px-3 py-3 font-medium"
                             }
                           >
                             <button
@@ -6881,7 +6879,7 @@ export function AdminManagedContentPage() {
                             <td className="w-16 px-2 py-3">
                               <ManagedItemType folder sharedFolder={folder.category_kind === "shared_folder"} compact />
                             </td>
-                            <td className="max-w-xs px-2 py-3">
+                            <td className="max-w-xs px-3 py-3">
                               <button
                                 type="button"
                                 className="block max-w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -6953,7 +6951,7 @@ export function AdminManagedContentPage() {
                                 compact
                               />
                             </td>
-                            <td className="max-w-xs px-2 py-3">
+                            <td className="max-w-xs px-3 py-3">
                               <ManagedItemIdentity
                                 item={item}
                                 showCategoryPath={showGlobalResults}
@@ -6977,7 +6975,7 @@ export function AdminManagedContentPage() {
                     </tbody>
                   </table>
                 </div>
-                <ul className="divide-y divide-border border-t border-border lg:hidden">
+                <ul className="divide-y divide-border lg:hidden">
                   {sortedChildFolders.map((folder) => {
                     const folderLabel = `${folder.display_code} ${folder.display_name}`;
                     return (

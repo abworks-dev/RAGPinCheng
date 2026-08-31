@@ -459,14 +459,14 @@ function ManagedJobsTable({
   cancellingJobId: string | null;
 }) {
   return (
-    <div className="overflow-x-auto border-t border-border">
-      <table className="block w-full text-ui-sm lg:table lg:min-w-[56rem]">
+    <div className="overflow-x-auto">
+      <table className="block w-full text-ui-sm lg:table lg:min-w-[68rem]">
         <caption className="sr-only">资料发布任务、类型、更新时间、状态、来源、内容块和操作</caption>
         <thead className="hidden border-b border-border bg-surface-muted text-left text-muted-foreground lg:table-header-group">
           <tr>
-            <th className="w-14 px-3 py-3 text-center font-medium"><span className="flex justify-center"><Checkbox aria-label="全选当前页索引任务" checked={selectableJobs.length > 0 && selectableJobs.every((job) => selectedJobIds.includes(job.id))} onChange={(event) => onTogglePage(event.target.checked)} /></span></th>
+            <th className="w-12 px-3 py-3"><Checkbox aria-label="全选当前页索引任务" checked={selectableJobs.length > 0 && selectableJobs.every((job) => selectedJobIds.includes(job.id))} onChange={(event) => onTogglePage(event.target.checked)} /></th>
             <th className="w-16 px-2 py-3 text-center font-medium">类型</th>
-            <th className="min-w-48 px-2 py-3 font-medium">资料</th>
+            <th className="min-w-48 px-3 py-3 font-medium">资料</th>
             <th className="min-w-24 whitespace-nowrap px-3 py-3 font-medium">更新时间</th>
             <th className="min-w-48 px-3 py-3 font-medium">状态</th>
             <th className="w-24 whitespace-nowrap px-3 py-3 font-medium">来源</th>
@@ -493,9 +493,9 @@ function ManagedJobsTable({
             const retrying = retryingJobId === job.id;
             return (
               <tr key={job.id} className="group grid grid-cols-[2.5rem_5rem_minmax(0,1fr)] gap-x-2 gap-y-3 px-4 py-4 transition-colors duration-normal hover:bg-surface-muted/60 sm:px-5 lg:table-row lg:p-0">
-                <td className="flex items-start justify-center px-1 pt-0 lg:table-cell lg:w-14 lg:px-3 lg:py-3 lg:text-center lg:align-top"><Checkbox aria-label={`选择${job.title || job.original_filename || "任务"}`} checked={selectedJobIds.includes(job.id)} disabled={!(job.is_latest_attempt && !job.is_archived) && !selectedJobIds.includes(job.id)} onChange={() => onToggleJob(job.id)} /></td>
+                <td className="flex items-start justify-center px-1 pt-0 lg:table-cell lg:w-12 lg:px-3 lg:py-3 lg:align-top"><Checkbox aria-label={`选择${job.title || job.original_filename || "任务"}`} checked={selectedJobIds.includes(job.id)} disabled={!(job.is_latest_attempt && !job.is_archived) && !selectedJobIds.includes(job.id)} onChange={() => onToggleJob(job.id)} /></td>
                 <td className="block lg:table-cell lg:px-2 lg:py-3"><ManagedItemType docType={job.doc_type} /></td>
-                <td className="block min-w-0 lg:table-cell lg:px-2 lg:py-3">
+                <td className="block min-w-0 lg:table-cell lg:px-3 lg:py-3">
                   <p className="break-words font-medium text-foreground" title={job.title || job.original_filename || undefined}>
                     {job.title || job.original_filename || "未命名资料"}
                   </p>
