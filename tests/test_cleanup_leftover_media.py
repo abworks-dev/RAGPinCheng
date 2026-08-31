@@ -152,21 +152,49 @@ def _seed_version(
     *,
     transcription_job_id: str | None,
     supersedes_version_id: str | None = None,
+    derived_from_version_id: str | None = None,
 ) -> None:
     now = int(time.time())
     conn.execute(
         """INSERT INTO transcript_versions
            (id,media_id,transcription_job_id,source,profile_id,markdown_storage_kind,
             markdown_rel_path,markdown_sha256,markdown_size_bytes,review_status,
-            publication_status,supersedes_version_id,created_at,updated_at)
+            publication_status,supersedes_version_id,derived_from_version_id,
+            created_at,updated_at)
            VALUES (?,?,?, 'automatic','profile-test','managed_artifact',
-                   ?, 'sha', 10,'awaiting_review','not_published',?,?,?)""",
+                   ?, 'sha', 10,'awaiting_review','not_published',?,?,?,?)""",
         (
             version_id,
             media_id,
             transcription_job_id,
             f"artifacts/{version_id}.md",
             supersedes_version_id,
+            derived_from_version_id,
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+
+
+def _seed_metadata_revision(
+    conn: sqlite3.Connection,
+    media_id: str,
+    transcript_version_id: str,
+    base_version_id: str,
+) -> None:
+    now = int(time.time())
+    conn.execute(
+        """INSERT INTO media_metadata_revisions
+           (id,media_id,transcript_version_id,base_version_id,proposed_title,
+            proposed_original_filename,request_idempotency_key,status,created_at,updated_at)
+           VALUES (?,?,?,?, '提议标题','提议文件名',?,'pending',?,?)""",
+        (
+            f"meta-{transcript_version_id}",
+            media_id,
+            transcript_version_id,
+            base_version_id,
+            f"idem-meta-{transcript_version_id}",
             now,
             now,
         ),
@@ -348,8 +376,13 @@ def test_delete_handles_version_artifacts_and_supersede_chain(fixture: dict) -> 
     _seed_version(
         conn, "v2", "m-fk", transcription_job_id=None, supersedes_version_id="v1"
     )
+    _seed_version(
+        conn, "v3", "m-fk", transcription_job_id=None, derived_from_version_id="v2"
+    )
     _seed_version_artifact(conn, "v1")
     _seed_version_artifact(conn, "v2")
+    _seed_version_artifact(conn, "v3")
+    _seed_metadata_revision(conn, "m-fk", "v1", "v1")
     items = tool.find_candidates(
         conn,
         media_roots=[fixture["media_root"]],
@@ -364,6 +397,9 @@ def test_delete_handles_version_artifacts_and_supersede_chain(fixture: dict) -> 
     assert conn.execute("SELECT 1 FROM transcript_versions WHERE media_id='m-fk'").fetchone() is None
     assert conn.execute(
         "SELECT 1 FROM transcript_version_artifacts"
+    ).fetchone() is None
+    assert conn.execute(
+        "SELECT 1 FROM media_metadata_revisions WHERE media_id='m-fk'"
     ).fetchone() is None
     assert conn.execute("SELECT 1 FROM transcription_jobs WHERE media_id='m-fk'").fetchone() is None
     assert conn.execute(

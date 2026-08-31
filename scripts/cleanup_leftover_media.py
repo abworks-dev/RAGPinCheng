@@ -349,18 +349,14 @@ def _delete_rows_for_media(
     Order matters: every table that references ``content_items``,
     ``transcript_versions`` or ``media_assets`` must be emptied before the
     referenced row goes away.  Transcript versions also reference each other
-    through ``supersedes_version_id``, so the version set is removed in two
-    passes (leaves first).
+    through ``supersedes_version_id`` and ``derived_from_version_id``, so the
+    version set is removed in two passes (leaves first).
     """
     if not media_ids:
         return
     media_placeholders = ",".join("?" for _ in media_ids)
     version_ids = (
         "SELECT id FROM transcript_versions WHERE media_id IN (" + media_placeholders + ")"
-    )
-    versions_of = (
-        "SELECT supersedes_version_id FROM transcript_versions"
-        " WHERE media_id IN (" + media_placeholders + ") AND supersedes_version_id IS NOT NULL"
     )
     # 1) Audit events referencing the items or their transcript versions.
     if item_ids:
@@ -378,7 +374,8 @@ def _delete_rows_for_media(
         media_ids,
     )
     # 3) Managed-content rows that can only exist for real documents (media
-    #    never builds them), deleted defensively via their content_versions.
+    #    never builds them), deleted defensively via their content_versions /
+    #    catalog shells.
     if item_ids:
         item_placeholders = ",".join("?" for _ in item_ids)
         conn.execute(
@@ -408,6 +405,14 @@ def _delete_rows_for_media(
                    OR transcript_version_id IN ({version_ids})""",
             [*item_ids, *media_ids],
         )
+        conn.execute(
+            f"DELETE FROM content_item_heads WHERE item_id IN ({item_placeholders})",
+            item_ids,
+        )
+        conn.execute(
+            f"DELETE FROM content_reclassification_jobs WHERE item_id IN ({item_placeholders})",
+            item_ids,
+        )
     else:
         conn.execute(
             f"DELETE FROM content_versions WHERE transcript_version_id IN ({version_ids})",
@@ -422,27 +427,54 @@ def _delete_rows_for_media(
         f"DELETE FROM media_transcript_heads WHERE media_id IN ({media_placeholders})",
         media_ids,
     )
-    # 5) Replacements reference content_items and media_assets.
+    # 5) Replacements and metadata revisions reference content_items /
+    #    transcript_versions / media_assets.
     conn.execute(
         f"""DELETE FROM media_replacements
             WHERE source_media_id IN ({media_placeholders})
                OR candidate_media_id IN ({media_placeholders})""",
         [*media_ids, *media_ids],
     )
-    # 6) Versions before jobs (transcript_versions.transcription_job_id
-    #    references transcription_jobs).  The version set is removed in two
-    #    passes because versions reference each other through
-    #    supersedes_version_id.
     conn.execute(
-        f"""DELETE FROM transcript_versions
-            WHERE id IN ({version_ids})
-              AND id NOT IN ({versions_of})""",
-        [*media_ids, *media_ids],
-    )
-    conn.execute(
-        f"DELETE FROM transcript_versions WHERE media_id IN ({media_placeholders})",
+        f"DELETE FROM media_metadata_revisions WHERE media_id IN ({media_placeholders})",
         media_ids,
     )
+    # 6) Versions before jobs (transcript_versions.transcription_job_id
+    #    references transcription_jobs).  The version set is removed in an
+    #    iterative leaf-first loop because versions reference each other
+    #    through supersedes_version_id / derived_from_version_id — chains of
+    #    any length collapse one hop at a time; a leftover set that cannot
+    #    shrink means a cycle and fails closed.
+    while True:
+        leaf_ids = [
+            str(row["id"])
+            for row in conn.execute(
+                f"""SELECT id FROM transcript_versions
+                    WHERE media_id IN ({media_placeholders})
+                      AND id NOT IN (
+                        SELECT supersedes_version_id FROM transcript_versions
+                         WHERE media_id IN ({media_placeholders})
+                           AND supersedes_version_id IS NOT NULL
+                        UNION
+                        SELECT derived_from_version_id FROM transcript_versions
+                         WHERE media_id IN ({media_placeholders})
+                           AND derived_from_version_id IS NOT NULL
+                      )""",
+                [*media_ids, *media_ids, *media_ids],
+            ).fetchall()
+        ]
+        if not leaf_ids:
+            remaining = conn.execute(
+                f"SELECT 1 FROM transcript_versions WHERE media_id IN ({media_placeholders}) LIMIT 1",
+                media_ids,
+            ).fetchone()
+            if remaining is not None:
+                raise LeftoverMediaError("transcript_version_reference_cycle")
+            break
+        conn.executemany(
+            "DELETE FROM transcript_versions WHERE id=?",
+            [(leaf_id,) for leaf_id in leaf_ids],
+        )
     # 7) Jobs last among the transcript chain.
     conn.execute(
         f"DELETE FROM transcription_jobs WHERE media_id IN ({media_placeholders})",
@@ -455,10 +487,6 @@ def _delete_rows_for_media(
     )
     conn.execute(
         f"DELETE FROM media_publication_requests WHERE media_id IN ({media_placeholders})",
-        media_ids,
-    )
-    conn.execute(
-        f"DELETE FROM media_metadata_revisions WHERE media_id IN ({media_placeholders})",
         media_ids,
     )
     conn.execute(
