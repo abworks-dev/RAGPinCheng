@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   listTranscriptionJobs: vi.fn(),
   listTranscriptVersions: vi.fn(),
   getTranscriptionJob: vi.fn(),
+  startMediaTranscription: vi.fn(),
   cancelTranscriptionJob: vi.fn(),
   retryTranscription: vi.fn(),
   bulkRetryTranscriptions: vi.fn(),
@@ -163,6 +164,7 @@ describe("AdminMediaPage wizard", () => {
     mocks.listTranscriptionJobs.mockResolvedValue([succeededJob]);
     mocks.listTranscriptVersions.mockResolvedValue([]);
     mocks.getTranscriptionJob.mockResolvedValue(succeededJob);
+    mocks.startMediaTranscription.mockResolvedValue({ ...succeededJob, status: "pending" });
     mocks.cancelTranscriptionJob.mockResolvedValue({ ...succeededJob, status: "cancelled" });
     mocks.retryTranscription.mockResolvedValue({ ...succeededJob, status: "pending" });
     mocks.bulkRetryTranscriptions.mockResolvedValue({ items: [], succeeded: 0, failed: 0 });
@@ -505,8 +507,11 @@ describe("AdminMediaPage wizard", () => {
     mocks.listTranscriptionJobs.mockResolvedValue([running, failed]);
     render(<AdminMediaPage />);
     await screen.findByText("项目交付培训");
-    fireEvent.click(screen.getByRole("button", { name: "取消" }));
-    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    const rows = screen.getAllByTestId("media-record-row");
+    const readyRow = rows.find((row) => within(row).queryByText("项目交付培训"))!;
+    const failedRow = rows.find((row) => within(row).queryByText("失败视频"))!;
+    fireEvent.click(within(readyRow).getByRole("button", { name: "取消" }));
+    fireEvent.click(within(failedRow).getByRole("button", { name: "重试" }));
     await waitFor(() => expect(mocks.cancelTranscriptionJob).toHaveBeenCalledWith("job-succeeded"));
     await waitFor(() => expect(mocks.retryTranscription).toHaveBeenCalledWith("media-failed", expect.any(String)));
   });
@@ -797,8 +802,8 @@ describe("AdminMediaPage wizard", () => {
 
   it("orders task controls and opens the same scheme dialog for row and batch transcription", async () => {
     const pending = [
-      { ...assets[0], media_id: "media-one", title: "待转录一", status: "uploaded", review_status: null, current_version_id: null, publication_request_status: "pending_transcription", transcription_job_id: null, transcription_job_status: null },
-      { ...assets[0], media_id: "media-two", title: "待转录二", status: "uploaded", review_status: null, current_version_id: null, publication_request_status: "pending_transcription", transcription_job_id: null, transcription_job_status: null },
+      { ...assets[0], media_id: "media-one", title: "待转录一", status: "uploaded", review_status: null, current_version_id: null, publication_request_status: "pending_transcription", transcription_job_id: null, transcription_job_status: null, available_actions: ["start_transcription"] },
+      { ...assets[0], media_id: "media-two", title: "待转录二", status: "uploaded", review_status: null, current_version_id: null, publication_request_status: "pending_transcription", transcription_job_id: null, transcription_job_status: null, available_actions: ["start_transcription"] },
     ];
     mocks.listMediaAssets.mockResolvedValue(pending);
     mocks.listTranscriptionJobs.mockResolvedValue([]);
@@ -813,8 +818,9 @@ describe("AdminMediaPage wizard", () => {
     expect(refresh.compareDocumentPosition(batch) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     fireEvent.click(screen.getAllByRole("button", { name: "转录" })[0]);
-    expect(screen.getByRole("dialog", { name: "配置转录方案" })).toHaveTextContent("待转录一");
-    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    const rowDialog = screen.getByRole("dialog", { name: "配置转录方案" });
+    expect(rowDialog).toHaveTextContent("待转录一");
+    fireEvent.click(within(rowDialog).getByRole("button", { name: "取消" }));
 
     fireEvent.click(screen.getByRole("checkbox", { name: "选择当前页视频" }));
     fireEvent.click(batch);
@@ -896,5 +902,141 @@ describe("AdminMediaPage wizard", () => {
     expect(retry).toHaveAttribute("title", "仅可重试失败或已取消且允许恢复的转录任务");
     fireEvent.click(retry);
     expect(mocks.retryTranscription).not.toHaveBeenCalled();
+  });
+
+  it("shows the transcription scheme used after the processing progress", async () => {
+    mocks.listMediaAssets.mockResolvedValue([{
+      ...assets[0],
+      transcription_scheme_id: availableProfile.scheme_id,
+      transcription_scheme_name: "受控中文转录",
+      transcription_scheme_deleted: false,
+    }]);
+    mocks.listTranscriptionJobs.mockResolvedValue([{
+      ...succeededJob,
+      scheme_id: availableProfile.scheme_id,
+      scheme_name: "受控中文转录",
+      scheme_deleted: false,
+    }]);
+    render(<AdminMediaPage embedded />);
+
+    const row = await screen.findByTestId("media-record-row");
+    expect(within(row).getByTestId("media-scheme-line")).toHaveTextContent("转录方案：受控中文转录");
+    expect(within(row).queryByText("原转录配置已删除")).not.toBeInTheDocument();
+  });
+
+  it("marks a removed custom scheme as deleted in the task row", async () => {
+    mocks.listMediaAssets.mockResolvedValue([{
+      ...assets[0],
+      transcription_scheme_id: "scheme-removed",
+      transcription_scheme_name: "自定义强校方案",
+      transcription_scheme_deleted: true,
+    }]);
+    mocks.listTranscriptionJobs.mockResolvedValue([{
+      ...succeededJob,
+      scheme_id: "scheme-removed",
+      scheme_name: "自定义强校方案",
+      scheme_deleted: true,
+    }]);
+    render(<AdminMediaPage embedded />);
+
+    const row = await screen.findByTestId("media-record-row");
+    expect(within(row).getByTestId("media-scheme-line")).toHaveTextContent("转录方案：自定义强校方案");
+    expect(within(row).getByText("原转录配置已删除")).toBeInTheDocument();
+  });
+
+  it("does not show a scheme line for media without a transcription scheme", async () => {
+    mocks.listMediaAssets.mockResolvedValue([{
+      ...assets[0],
+      transcript_origin: null,
+      transcription_job_id: null,
+      transcription_job_status: null,
+      publication_request_status: "pending_transcription",
+    }]);
+    mocks.listTranscriptionJobs.mockResolvedValue([]);
+    render(<AdminMediaPage embedded />);
+
+    const row = await screen.findByTestId("media-record-row");
+    expect(within(row).queryByTestId("media-scheme-line")).not.toBeInTheDocument();
+  });
+
+  it("re-transcribes a completed media and allows the same scheme after a warning", async () => {
+    mocks.listMediaAssets.mockResolvedValue([{
+      ...assets[0],
+      available_actions: ["re_transcribe"],
+      transcription_scheme_id: availableProfile.scheme_id,
+      transcription_scheme_name: "受控中文转录",
+      transcription_scheme_deleted: false,
+    }]);
+    mocks.listTranscriptionJobs.mockResolvedValue([{
+      ...succeededJob,
+      scheme_id: availableProfile.scheme_id,
+      scheme_name: "受控中文转录",
+      scheme_deleted: false,
+    }]);
+    render(<AdminMediaPage embedded />);
+
+    const row = await screen.findByTestId("media-record-row");
+    fireEvent.click(within(row).getByRole("button", { name: "重新转录" }));
+    const dialog = screen.getByRole("dialog", { name: "配置重新转录方案" });
+    expect(dialog).toHaveTextContent("原方案：受控中文转录");
+    const select = within(dialog).getByRole("combobox", { name: "项目交付培训的新转录方案" });
+    expect(select).toHaveValue(availableProfile.scheme_id);
+    expect(within(dialog).getByText(/所选方案与原转录方案一致/)).toBeInTheDocument();
+
+    fireEvent.change(select, { target: { value: secondProfile.scheme_id } });
+    expect(within(dialog).queryByText(/所选方案与原转录方案一致/)).not.toBeInTheDocument();
+
+    fireEvent.change(select, { target: { value: availableProfile.scheme_id } });
+    expect(within(dialog).getByText(/所选方案与原转录方案一致/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: /确认重新转录（1）/ }));
+    await waitFor(() => expect(mocks.startMediaTranscription).toHaveBeenCalledWith(
+      "media-ready",
+      availableProfile.scheme_id,
+      expect.any(String),
+    ));
+  });
+
+  it("re-transcribes only eligible media from the batch menu", async () => {
+    mocks.listMediaAssets.mockResolvedValue([
+      {
+        ...assets[0],
+        available_actions: ["re_transcribe"],
+        transcription_scheme_id: availableProfile.scheme_id,
+        transcription_scheme_name: "受控中文转录",
+        transcription_scheme_deleted: false,
+      },
+      {
+        ...assets[0],
+        media_id: "media-awaiting",
+        title: "待转录视频",
+        status: "uploaded",
+        publication_request_status: "pending_transcription",
+        transcription_job_id: null,
+        transcription_job_status: null,
+        available_actions: ["start_transcription"],
+      },
+    ]);
+    mocks.listTranscriptionJobs.mockResolvedValue([{
+      ...succeededJob,
+      scheme_id: availableProfile.scheme_id,
+      scheme_name: "受控中文转录",
+      scheme_deleted: false,
+    }]);
+    render(<AdminMediaPage embedded />);
+    await screen.findByText("项目交付培训");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择当前页视频" }));
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "重新转录所选（1）" }));
+
+    const dialog = screen.getByRole("dialog", { name: "配置重新转录方案" });
+    expect(dialog).toHaveTextContent("项目交付培训");
+    expect(dialog).not.toHaveTextContent("待转录视频");
+    fireEvent.click(within(dialog).getByRole("button", { name: /确认重新转录（1）/ }));
+    await waitFor(() => expect(mocks.startMediaTranscription).toHaveBeenCalledWith(
+      "media-ready",
+      availableProfile.scheme_id,
+      expect.any(String),
+    ));
   });
 });

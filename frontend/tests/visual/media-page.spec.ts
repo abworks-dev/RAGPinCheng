@@ -18,7 +18,9 @@ test.describe("转录任务", () => {
     await expect(page.getByRole("heading", { name: "转录任务" })).toBeVisible();
     await expect(page.getByText("项目交付培训", { exact: true })).toBeVisible();
     await expect(page.getByText("转录服务当前暂停接收任务，请稍后重试。", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "重试" })).toBeEnabled();
+    const firstRow = page.getByTestId("media-record-row").first();
+    await expect(firstRow.getByRole("button", { name: "重试" })).toBeEnabled();
+    await expect(firstRow.getByRole("button", { name: "重新转录" })).toBeDisabled();
     await expect(page.getByTestId("media-record-row").nth(1).getByRole("button", { name: "清理失败任务" })).toBeEnabled();
     await expectNoBodyOverflow(page);
   });

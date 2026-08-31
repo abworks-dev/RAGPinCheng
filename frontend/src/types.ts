@@ -1137,6 +1137,8 @@ export type TranscriptionJob = {
   attempt_number: number;
   profile_id: string;
   scheme_id?: string | null;
+  scheme_name?: string | null;
+  scheme_deleted?: boolean;
   status: TranscriptionJobStatus;
   stage: string | null;
   processed_ms: number;
@@ -1212,6 +1214,9 @@ export type TranscriptVersion = {
   media_id: string;
   source: "automatic" | "manual" | string;
   profile_id: string | null;
+  scheme_id: string | null;
+  scheme_name?: string | null;
+  scheme_deleted?: boolean;
   provider_key: string | null;
   model_id: string | null;
   model_revision: string | null;
@@ -1281,6 +1286,9 @@ export type MediaAsset = {
   transcription_job_id?: string | null;
   transcription_job_status?: TranscriptionJobStatus | null;
   transcription_stage?: string | null;
+  transcription_scheme_id?: string | null;
+  transcription_scheme_name?: string | null;
+  transcription_scheme_deleted?: boolean;
   current_phase?: "upload" | "transcription" | "review" | "publication" | "index" | "ready" | "failed";
   review_status?: TranscriptReviewStatus | null;
   publication_status?: TranscriptPublicationStatus | null;

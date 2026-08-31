@@ -1300,6 +1300,9 @@ class MediaAssetDTO(BaseModel):
     transcription_job_id: str | None = None
     transcription_job_status: str | None = None
     transcription_stage: str | None = None
+    transcription_scheme_id: str | None = None
+    transcription_scheme_name: str | None = None
+    transcription_scheme_deleted: bool = False
     current_phase: Literal["upload", "transcription", "review", "publication", "index", "ready", "failed"] = "upload"
     review_status: str | None = None
     publication_status: str | None = None
@@ -1667,6 +1670,8 @@ class TranscriptionJobDTO(BaseModel):
     attempt_number: int
     profile_id: str
     scheme_id: str | None = None
+    scheme_name: str | None = None
+    scheme_deleted: bool = False
     status: str
     stage: str | None
     processed_ms: int
@@ -1693,6 +1698,8 @@ class TranscriptVersionDTO(BaseModel):
     source: str
     profile_id: str | None
     scheme_id: str | None = None
+    scheme_name: str | None = None
+    scheme_deleted: bool = False
     provider_key: str | None
     model_id: str | None
     model_revision: str | None

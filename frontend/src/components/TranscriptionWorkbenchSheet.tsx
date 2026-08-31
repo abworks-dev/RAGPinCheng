@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Badge } from "./ui/badge";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "./ui/sheet";
 import { TranscriptionVersionPanel } from "./TranscriptionVersionPanel";
 
@@ -7,6 +8,8 @@ export function TranscriptionWorkbenchSheet({
   title,
   originalFilename,
   mediaId,
+  schemeName,
+  schemeDeleted,
   refreshToken,
   initialAction,
   initialVersionId,
@@ -17,6 +20,8 @@ export function TranscriptionWorkbenchSheet({
   title: string;
   originalFilename: string;
   mediaId: string | null;
+  schemeName?: string | null;
+  schemeDeleted?: boolean;
   refreshToken?: string | null;
   initialAction?: "edit-current" | null;
   initialVersionId?: string | null;
@@ -39,6 +44,12 @@ export function TranscriptionWorkbenchSheet({
           <SheetDescription className="truncate" title={originalFilename}>
             {originalFilename || "查看版本、审核转录并管理发布状态"}
           </SheetDescription>
+          {(schemeName || schemeDeleted) && (
+            <div className="flex flex-wrap items-center gap-1.5 text-ui-xs text-muted-foreground" data-testid="workbench-scheme-line">
+              <span>转录方案：{schemeName ? <span className="font-medium text-foreground">{schemeName}</span> : "原转录配置已删除"}</span>
+              {schemeName && schemeDeleted && <Badge variant="secondary">原转录配置已删除</Badge>}
+            </div>
+          )}
         </SheetHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
           {mediaId && (

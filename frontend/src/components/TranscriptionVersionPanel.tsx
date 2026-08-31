@@ -293,6 +293,7 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-ui-xs text-muted-foreground">
                   <span>审核：{statusLabel(version.review_status)}</span>
                   {version.review_note && <span className="max-w-full truncate" title={version.review_note}>· {version.review_note}</span>}
+                  {(version.scheme_name || version.scheme_deleted) && <div className="flex flex-wrap items-center gap-1.5" data-testid="version-scheme-line"><span>转录方案：{version.scheme_name || "原转录配置已删除"}</span>{version.scheme_name && version.scheme_deleted && <Badge variant="secondary">原转录配置已删除</Badge>}</div>}
                   <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
                     {version.review_status === "awaiting_review" && <>
                       <Button size="sm" className="h-8" disabled={busy} onClick={() => void reviewVersion(version.version_id, true)}>审核通过</Button>

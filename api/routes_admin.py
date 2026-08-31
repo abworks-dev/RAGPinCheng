@@ -163,6 +163,25 @@ def _finalizable_cleanup_media_ids(
     return found
 
 
+def _resolve_scheme_display_map(
+    conn: sqlite3.Connection, scheme_ids: list[str]
+) -> dict[str, tuple[str | None, bool]]:
+    """Resolve scheme display names (including archived/custom schemes) for media DTOs."""
+    unique_ids = sorted({scheme_id for scheme_id in scheme_ids if scheme_id})
+    lookup: dict[str, tuple[str | None, bool]] = {}
+    if unique_ids:
+        placeholders = ",".join("?" for _ in unique_ids)
+        for row in conn.execute(
+            f"SELECT id,name,archived FROM transcription_schemes WHERE id IN ({placeholders})",
+            unique_ids,
+        ).fetchall():
+            lookup[str(row["id"])] = (str(row["name"]), bool(row["archived"]))
+    for scheme_id in unique_ids:
+        if scheme_id not in lookup:
+            lookup[scheme_id] = (None, True)
+    return lookup
+
+
 def _media_action_state(
     *,
     status: str,
@@ -171,6 +190,7 @@ def _media_action_state(
     review_status: str | None,
     publication_status: str | None,
     publication_index_status: str | None,
+    publication_request_status: str | None = None,
     replacement_status: str | None = None,
     storage_kind: str = "managed",
     external_availability: str | None = None,
@@ -189,6 +209,51 @@ def _media_action_state(
         available.append("cancel_transcription")
     else:
         disabled["cancel_transcription"] = "当前没有运行中的转录任务"
+    has_job_record = job_status is not None
+    has_any_transcript = has_transcript_versions or has_transcript_head
+    if (
+        transcription_retry_available
+        and not has_job_record
+        and not has_any_transcript
+        and not has_active_job
+        and status != "failed"
+        and publication_request_status in {"pending_transcription", "ready_to_publish"}
+    ):
+        available.append("start_transcription")
+    else:
+        if status == "failed" and job_status is None:
+            disabled["start_transcription"] = "视频上传失败，请先清理失败记录"
+        elif has_active_job:
+            disabled["start_transcription"] = "已有正在运行的转录任务"
+        elif has_job_record:
+            disabled["start_transcription"] = "该视频已进入转录流程，如需更换方案请使用重新转录"
+        elif has_any_transcript:
+            disabled["start_transcription"] = "该视频为人工转写，未使用转录方案"
+        elif not transcription_retry_available:
+            disabled["start_transcription"] = "自动转录当前不可用"
+        else:
+            disabled["start_transcription"] = "该视频未处于待转录阶段，请先在资料列表发布"
+    if (
+        transcription_retry_available
+        and has_job_record
+        and not has_active_job
+        and not (job_status == "failed" and job_failure_classification == "permanent")
+    ):
+        available.append("re_transcribe")
+    else:
+        if not has_job_record:
+            if has_any_transcript:
+                disabled["re_transcribe"] = "人工转写稿未使用转录方案，不能重新转录"
+            else:
+                disabled["re_transcribe"] = "尚未创建转录任务"
+        elif has_active_job:
+            disabled["re_transcribe"] = "已有正在运行的转录任务，完成后可重新转录"
+        elif job_status == "failed" and job_failure_classification == "permanent":
+            disabled["re_transcribe"] = "该转录任务属于永久失败，不能重新转录"
+        elif not transcription_retry_available:
+            disabled["re_transcribe"] = "自动转录当前不可用"
+        else:
+            disabled["re_transcribe"] = "当前不可重新转录"
     external_reservation_failure = (
         storage_kind == "external"
         and status == "failed"
@@ -222,6 +287,7 @@ def _media_action_state(
         available.append("return_to_review")
     else:
         disabled["publish_transcript"] = "转录稿需审核通过且未处于发布中"
+        disabled["return_to_review"] = "仅审核通过且未发布的转录稿可退回审核"
     archiveable_unpublished = (
         review_status in {"awaiting_review", "review_rejected", "review_approved"}
         and publication_status in {"not_published", "publication_failed"}
@@ -1972,6 +2038,9 @@ def list_media_assets(
                (SELECT j.stage FROM transcription_jobs j
                 WHERE j.media_id=m.media_id
                 ORDER BY j.attempt_number DESC,j.created_at DESC LIMIT 1) AS transcription_stage,
+               (SELECT j.scheme_id FROM transcription_jobs j
+                WHERE j.media_id=m.media_id
+                ORDER BY j.attempt_number DESC,j.created_at DESC LIMIT 1) AS transcription_scheme_id,
                (SELECT j.failure_classification FROM transcription_jobs j
                 WHERE j.media_id=m.media_id
                 ORDER BY j.attempt_number DESC,j.created_at DESC LIMIT 1) AS transcription_failure_classification,
@@ -2048,6 +2117,9 @@ def list_media_assets(
             conn, None, service=retry_service
         ) is not None
     result: list[MediaAssetDTO] = []
+    scheme_lookup = _resolve_scheme_display_map(
+        conn, [str(r["transcription_scheme_id"]) for r in rows if r["transcription_scheme_id"]]
+    )
     for r in rows:
         available_actions, disabled_actions = _media_action_state(
             status=str(r["status"]),
@@ -2056,6 +2128,7 @@ def list_media_assets(
             review_status=r["review_status"],
             publication_status=r["publication_status"],
             publication_index_status=r["publication_index_status"],
+            publication_request_status=r["publication_request_status"],
             replacement_status=r["replacement_status"],
             storage_kind=str(r["storage_kind"]),
             external_availability=r["external_availability"],
@@ -2085,6 +2158,15 @@ def list_media_assets(
             transcription_job_id=r["transcription_job_id"],
             transcription_job_status=r["transcription_job_status"],
             transcription_stage=r["transcription_stage"],
+            transcription_scheme_id=r["transcription_scheme_id"],
+            transcription_scheme_name=(
+                scheme_lookup.get(str(r["transcription_scheme_id"]), (None, False))[0]
+                if r["transcription_scheme_id"] else None
+            ),
+            transcription_scheme_deleted=(
+                bool(scheme_lookup.get(str(r["transcription_scheme_id"]), (None, False))[1])
+                if r["transcription_scheme_id"] else False
+            ),
             current_phase=_media_current_phase(
                 status=str(r["status"]),
                 job_status=r["transcription_job_status"],

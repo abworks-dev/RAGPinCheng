@@ -29,4 +29,43 @@ describe("TranscriptionWorkbenchSheet", () => {
     expect(onClose).not.toHaveBeenCalled();
     confirm.mockRestore();
   });
+
+  it("shows the transcription scheme in the workbench header", () => {
+    const onClose = vi.fn();
+    render(
+      <TranscriptionWorkbenchSheet
+        open
+        title="校对测试"
+        originalFilename="fixture.mp4"
+        mediaId="media-1"
+        schemeName="WhisperX 均衡分段"
+        schemeDeleted={false}
+        onClose={onClose}
+      />,
+    );
+
+    expect(screen.getByTestId("workbench-scheme-line")).toHaveTextContent(
+      "转录方案：WhisperX 均衡分段",
+    );
+    expect(screen.queryByText("原转录配置已删除")).not.toBeInTheDocument();
+  });
+
+  it("marks a removed transcription scheme as deleted in the workbench header", () => {
+    render(
+      <TranscriptionWorkbenchSheet
+        open
+        title="校对测试"
+        originalFilename="fixture.mp4"
+        mediaId="media-1"
+        schemeName="自定义方案"
+        schemeDeleted
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("workbench-scheme-line")).toHaveTextContent(
+      "转录方案：自定义方案",
+    );
+    expect(screen.getByText("原转录配置已删除")).toBeInTheDocument();
+  });
 });

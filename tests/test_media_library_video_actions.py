@@ -120,6 +120,91 @@ def test_media_action_projection_matches_mutation_preconditions():
     assert failed_replacement_disabled["delete_failed"] == "视频替换任务正在处理，不能清理"
 
 
+def test_media_transcription_action_projection_for_start_and_re_transcribe():
+    fresh, fresh_disabled = _media_action_state(
+        status="uploaded",
+        job_status=None,
+        review_status=None,
+        publication_status=None,
+        publication_index_status=None,
+        publication_request_status="pending_transcription",
+    )
+    assert "start_transcription" in fresh
+    assert "re_transcribe" not in fresh
+    assert "re_transcribe" in fresh_disabled
+    assert fresh_disabled["re_transcribe"] == "尚未创建转录任务"
+
+    running, running_disabled = _media_action_state(
+        status="transcribing",
+        job_status="running",
+        review_status=None,
+        publication_status=None,
+        publication_index_status=None,
+        publication_request_status="ready_to_publish",
+        has_active_job=True,
+    )
+    assert "re_transcribe" not in running
+    assert "start_transcription" not in running
+    assert running_disabled["re_transcribe"] == "已有正在运行的转录任务，完成后可重新转录"
+    assert running_disabled["start_transcription"] == "已有正在运行的转录任务"
+
+    completed, completed_disabled = _media_action_state(
+        status="transcript_ready",
+        job_status="succeeded",
+        review_status="awaiting_review",
+        publication_status="not_published",
+        publication_index_status=None,
+        publication_request_status="ready_to_publish",
+    )
+    assert "re_transcribe" in completed
+    assert "start_transcription" not in completed
+    assert completed_disabled["start_transcription"] == "该视频已进入转录流程，如需更换方案请使用重新转录"
+
+    cancelled, _ = _media_action_state(
+        status="uploaded",
+        job_status="cancelled",
+        review_status=None,
+        publication_status=None,
+        publication_index_status=None,
+    )
+    assert "re_transcribe" in cancelled
+
+    permanent, permanent_disabled = _media_action_state(
+        status="failed",
+        job_status="failed",
+        job_failure_classification="permanent",
+        review_status=None,
+        publication_status=None,
+        publication_index_status=None,
+    )
+    assert "re_transcribe" not in permanent
+    assert permanent_disabled["re_transcribe"] == "该转录任务属于永久失败，不能重新转录"
+
+    no_request, no_request_disabled = _media_action_state(
+        status="uploaded",
+        job_status=None,
+        review_status=None,
+        publication_status=None,
+        publication_index_status=None,
+    )
+    assert "start_transcription" not in no_request
+    assert no_request_disabled["start_transcription"] == "该视频未处于待转录阶段，请先在资料列表发布"
+
+    manual, manual_disabled = _media_action_state(
+        status="transcript_ready",
+        job_status=None,
+        review_status="awaiting_review",
+        publication_status="not_published",
+        publication_index_status=None,
+        has_transcript_versions=True,
+        has_transcript_head=True,
+    )
+    assert "re_transcribe" not in manual
+    assert "start_transcription" not in manual
+    assert manual_disabled["re_transcribe"] == "人工转写稿未使用转录方案，不能重新转录"
+    assert manual_disabled["start_transcription"] == "该视频为人工转写，未使用转录方案"
+
+
 @pytest.mark.parametrize(
     ("expected", "values"),
     [

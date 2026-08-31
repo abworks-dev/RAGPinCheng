@@ -768,7 +768,7 @@ test.describe("转录任务", () => {
     await expect(page.getByRole("button", { name: "失败 2" })).toBeVisible();
     await expect(page.getByRole("button", { name: "刷新媒体资源" })).toBeVisible();
     await expect(page.getByText("转录服务当前暂停接收任务，请稍后重试。")).toBeVisible();
-    await expect(page.getByRole("button", { name: "重试" })).toBeVisible();
+    await expect(page.getByTestId("media-record-row").first().getByRole("button", { name: "重试" })).toBeVisible();
     const readyMediaRow = page.getByTestId("media-record-row").filter({ hasText: "项目交付培训" });
     const workbenchTrigger = readyMediaRow.getByRole("button", { name: "进入转写工作台" });
     await expect(workbenchTrigger).toBeVisible();
@@ -795,7 +795,7 @@ test.describe("转录任务", () => {
       rowX.forEach((x, index) => expect(Math.abs(x - headerX[index])).toBeLessThanOrEqual(1));
     }
     if (page.viewportSize()!.width === 390) {
-      const retry = page.getByRole("button", { name: "重试" });
+      const retry = page.getByTestId("media-record-row").first().getByRole("button", { name: "重试" });
       await retry.scrollIntoViewIfNeeded();
       await expectInViewport(retry);
       await expectTouchTarget(retry);

@@ -182,6 +182,16 @@
 - 依赖：schema 11 迁移、转录 artifact 存储、Phase 5 审核/候选索引/正式 head 流程。
 - 方案链接：`docs/features/transcript-pipeline.md`
 
+### 转录任务页转录方案展示与重新转录
+
+- 状态：待用户验收
+- 目标：转录任务页与转写工作台展示每条媒体所用转录方案（自定义方案被归档时提示“原转录配置已删除”）；提供单条与批量“重新转录”（弹窗选择方案，所选与原方案一致时提示但仍可继续）；行操作按钮全部常显，不可用时禁用并由 `disabled_actions` 悬浮提示。
+- 下一步：
+  - [ ] 生产验收：已转录/进行中任务的方案行与已删除方案标记、重新转录弹窗与同方案提示、批量重新转录、禁用按钮 tooltip，以及桌面与 390px 移动端布局。
+- 完成标准：方案展示只出现在已选择方案进入转录/转录完成的记录；已归档方案显示删除标记；重新转录新稿不会覆盖当前正式 head，须重新审核发布；用户确认各状态与 viewport 可用。
+- 依赖：`_media_action_state` 新增 `start_transcription`/`re_transcribe` 动作键；媒体/任务/版本 DTO 返回 `scheme_name`/`scheme_deleted`；复用既有 `start` 转录接口。
+- 方案链接：`docs/features/transcript-pipeline.md`、`docs/features/managed-content-library.md`
+
 ---
 
 ## 最近完成摘要
