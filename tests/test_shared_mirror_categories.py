@@ -17,6 +17,7 @@ from api.content_store import (
 from api.db import connect, init_db
 from api.external_media import (
     materialize_shared_folder_mirrors,
+    materialize_shared_folder_mirrors_from_entries,
     reconcile_source,
     resolve_shared_category_key,
 )
@@ -229,6 +230,35 @@ def test_mirror_guards_block_structure_mutations_but_allow_numbering(tmp_path: P
             actor_user_id=1,
         )
         assert any(str(row["id"]) == a_id and str(row["display_code"]) == "02" for row in reordered)
+    finally:
+        conn.close()
+
+
+def test_mirrors_restore_from_entries_without_rescan(tmp_path: Path) -> None:
+    conn, source_id, root_id = _shared_environment(
+        tmp_path,
+        share_layout={"A/lesson1.mp4": b"v1", "A/B/lesson2.mp4": b"v2"},
+    )
+    try:
+        reconcile_source(conn, source_id, trigger_type="manual", roots={"share": tmp_path / "share"}, now=10)
+        # Simulate a pre-upgrade database: mirror rows are absent while the
+        # recorded entries from earlier scans remain.
+        for level in range(10, 1, -1):
+            conn.execute(
+                "DELETE FROM category_nodes WHERE level=? AND external_relative_path IS NOT NULL",
+                (level,),
+            )
+        conn.commit()
+        assert _mirror_rows(conn, source_id) == []
+
+        materialize_shared_folder_mirrors_from_entries(conn, source_id, now=200)
+
+        by_path = {str(r["external_relative_path"]): r for r in _mirror_rows(conn, source_id)}
+        assert set(by_path) == {"A", "A/B"}
+        assert by_path["A"]["parent_id"] == root_id
+        assert by_path["A/B"]["parent_id"] == by_path["A"]["id"]
+        assert by_path["A"]["display_code"] == "01"
+        assert by_path["A/B"]["display_code"] == "01"
     finally:
         conn.close()
 
