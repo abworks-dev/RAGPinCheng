@@ -602,17 +602,17 @@ def materialize_shared_folder_mirrors_from_entries(
 ) -> None:
     """Mirror a shared source's folder tree purely from its recorded entries.
 
-    The entries table already describes every folder that contained an
-    available video at the last filesystem scan, so the managed category tree
-    can reflect the remote hierarchy without another network share walk.  This
-    keeps an already-configured shared folder visible immediately (e.g. right
-    after an application upgrade), while the filesystem scan inside
-    ``reconcile_source`` remains authoritative for file availability and for
-    folders that contain no video files at all.
+    The entries table already describes every folder that contained a video at
+    the last filesystem scan, so the managed category tree can reflect the
+    remote hierarchy without another network share walk.  Every recorded entry
+    -- regardless of current availability -- stands for a folder that existed
+    in the remote structure, so deep folders never vanish because their files
+    are currently missing or superseded.  The filesystem scan inside
+    ``reconcile_source`` remains the only authority for genuinely deleting a
+    folder (it passes the walk's directory list directly).
     """
     rows = conn.execute(
-        """SELECT relative_path FROM external_media_entries
-           WHERE source_id=? AND availability='available'""",
+        "SELECT relative_path FROM external_media_entries WHERE source_id=?",
         (source_id,),
     ).fetchall()
     folder_paths: set[str] = set()

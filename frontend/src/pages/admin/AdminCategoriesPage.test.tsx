@@ -328,8 +328,8 @@ describe("AdminCategoriesPage", () => {
     expect(await screen.findByTestId("category-tree-item-cat-mirror-2")).toBeInTheDocument();
     const rootRow = screen.getByTestId("category-tree-item-cat-shared");
     const mirrorRow = screen.getByTestId("category-tree-item-cat-mirror-1");
-    expect(rootRow).toHaveTextContent("共享文件夹");
-    expect(mirrorRow).toHaveTextContent("共享子目录");
+    expect(rootRow).toHaveTextContent("共享");
+    expect(mirrorRow).toHaveTextContent("共享");
     expect(mirrorRow).toHaveTextContent("一级课程");
     // 与普通子目录一致：编号、启用状态和问答/筛选徽标
     expect(within(mirrorRow).getByText("01 一级课程")).toBeInTheDocument();
@@ -388,6 +388,54 @@ describe("AdminCategoriesPage", () => {
     // 调整镜像编号复用常规编号流程
     fireEvent.click(screen.getByRole("button", { name: "调整编号" }));
     expect(screen.getByRole("dialog", { name: "调整分类编号" })).toBeInTheDocument();
+  });
+
+  it("expands nested shared mirrors level by level", async () => {
+    const shared = {
+      ...category,
+      id: "cat-shared",
+      category_key: "shared_training",
+      display_code: "02",
+      display_name: "共享培训",
+      category_kind: "shared_folder" as const,
+      external_source_id: "source-1",
+      full_path: "02 共享培训",
+    };
+    const mirror1 = {
+      ...child,
+      id: "cat-mirror-1",
+      category_key: "shared_mirror_1",
+      parent_id: "cat-shared",
+      display_code: "01",
+      display_name: "一级课程",
+      category_kind: "shared_folder" as const,
+      external_relative_path: "一级课程",
+      full_path: "02 共享培训 / 01 一级课程",
+      level: 2,
+      item_count: 0,
+    };
+    const mirror2 = {
+      ...child,
+      id: "cat-mirror-2",
+      category_key: "shared_mirror_2",
+      parent_id: "cat-mirror-1",
+      display_code: "01",
+      display_name: "进阶班",
+      category_kind: "shared_folder" as const,
+      external_relative_path: "一级课程/进阶班",
+      full_path: "02 共享培训 / 01 一级课程 / 01 进阶班",
+      level: 3,
+      item_count: 0,
+    };
+    mocks.categories.mockResolvedValueOnce([shared, mirror1, mirror2]);
+
+    render(<AdminCategoriesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "展开共享培训" }));
+    const firstMirror = await screen.findByTestId("category-tree-item-cat-mirror-1");
+    expect(firstMirror).toBeInTheDocument();
+    expect(screen.queryByTestId("category-tree-item-cat-mirror-2")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "展开一级课程" }));
+    expect(await screen.findByTestId("category-tree-item-cat-mirror-2")).toHaveTextContent("进阶班");
   });
 
   it("syncs the shared root remote structure", async () => {

@@ -705,7 +705,6 @@ function CategoryTreeNodeView({
   const isExpanded = expanded.has(category.id);
   const isSharedFolder = category.category_kind === "shared_folder";
   const isSharedRoot = isSharedFolder && Boolean(category.external_source_id);
-  const isSharedMirror = isSharedFolder && Boolean(category.external_relative_path);
   const hasChildren = children.length > 0 || isSharedRoot;
   const visibleIndex = visibleNodes.findIndex((item) => item.category.id === category.id);
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -757,7 +756,7 @@ function CategoryTreeNodeView({
       </span>
       <span className="flex min-w-0 flex-1 items-center gap-2">
         <span className={`inline-flex w-11 shrink-0 items-center gap-1 text-ui-xs font-medium ${category.is_active ? "text-success" : "text-muted-foreground"}`}><span className={`size-2 rounded-full ${category.is_active ? "bg-success" : "bg-muted-foreground/60"}`} aria-hidden="true" />{category.is_active ? "启用" : "停用"}</span>
-        <span className={`min-w-0 flex-1 break-words tabular-nums ${level === 1 ? "font-semibold" : "font-medium"}`}>{category.display_code} {category.display_name}{isSharedFolder && <span className="ml-2 text-ui-xs font-normal text-primary">{isSharedMirror ? "共享子目录" : "共享文件夹"}</span>}</span>
+        <span className={`min-w-0 flex-1 break-words tabular-nums ${level === 1 ? "font-semibold" : "font-medium"}`}>{category.display_code} {category.display_name}{isSharedFolder && <Badge variant="secondary" className="ml-1.5 align-middle">共享</Badge>}</span>
         <span className="hidden w-[3.75rem] shrink-0 text-right text-ui-xs tabular-nums text-muted-foreground sm:block">{category.item_count} 份{hasChildren ? ` · ${children.length} 项` : ""}</span>
         <span className="hidden w-[7.25rem] shrink-0 flex-wrap items-center justify-end gap-x-1 gap-y-0 sm:inline-flex" aria-label="问答与筛选状态">
           <Badge aria-label={category.chat_search_effective === false ? "企业知识问答关闭" : "企业知识问答开启"} variant={category.chat_search_effective === false ? "secondary" : "success"} className={category.chat_search_effective === false ? "line-through" : undefined}>问答</Badge>
@@ -821,7 +820,7 @@ function CategoryDetail({
   const statusHelpId = `category-status-help-${category.id}`;
   const parent = categories.find((item) => item.id === category.parent_id);
   return <div className="flex h-full flex-col">
-    <div className="border-b border-border px-5 py-4 sm:px-6"><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold">{category.display_code} {category.display_name}</h3>{isSharedFolder && <Badge variant="secondary">{isSharedMirror ? "共享子目录" : "共享文件夹"}</Badge>}<Badge variant={category.is_active ? "success" : "secondary"}>{category.is_active ? "启用" : "停用"}</Badge>{isDirty && draft.is_active !== category.is_active && <Badge variant="warning">待保存：{draft.is_active ? "启用" : "停用"}</Badge>}</div><p className="mt-1 break-words text-ui-xs text-muted-foreground">{category.full_path}</p></div>
+    <div className="border-b border-border px-5 py-4 sm:px-6"><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold">{category.display_code} {category.display_name}</h3>{isSharedFolder && <Badge variant="secondary">共享</Badge>}<Badge variant={category.is_active ? "success" : "secondary"}>{category.is_active ? "启用" : "停用"}</Badge>{isDirty && draft.is_active !== category.is_active && <Badge variant="warning">待保存：{draft.is_active ? "启用" : "停用"}</Badge>}</div><p className="mt-1 break-words text-ui-xs text-muted-foreground">{category.full_path}</p></div>
     <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
       {error && <Alert variant="destructive" role="alert"><AlertTitle>保存失败</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
       <section aria-labelledby={`category-level-${category.id}`} className="space-y-3">
