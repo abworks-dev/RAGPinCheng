@@ -1,0 +1,316 @@
+name: Cleanup Leftover Production Media
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_cleanup:
+        description: Select ARCHIVE_LEFT_OVER_MEDIA or DELETE_LEFT_OVER_MEDIA to clean up the approved leftover media records
+        required: true
+        default: CANCEL
+        type: choice
+        options:
+          - CANCEL
+          - ARCHIVE_LEFT_OVER_MEDIA
+          - DELETE_LEFT_OVER_MEDIA
+      expected_commit:
+        description: Full master commit containing the cleanup tooling
+        required: true
+        type: string
+      inventory_manifest_sha256:
+        description: Manifest SHA-256 frozen by the inspection workflow
+        required: true
+        type: string
+      expected_count:
+        description: Leftover record count frozen by the inspection workflow
+        required: true
+        type: string
+      actor_user_id:
+        description: Active admin user id recorded in content audit events
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-leftover-media-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: ${{ inputs.confirm_cleanup != 'CANCEL' }}
+    environment: production-asr
+    runs-on: [self-hosted, linux, ubuntu, production, app]
+    timeout-minutes: 60
+    env:
+      REPO_PATH: ${{ vars.PRODUCTION_APP_REPO_PATH }}
+      DATA_PATH: ${{ vars.PRODUCTION_APP_DATA_PATH }}
+      BACKUP_ROOT: ${{ vars.PRODUCTION_APP_BACKUP_DIRECTORY }}
+      CONTENT_ROOT: ${{ vars.PRODUCTION_CONTENT_ROOT }}
+      COMPOSE_OVERRIDE: ${{ vars.PRODUCTION_APP_COMPOSE_OVERRIDE }}
+      COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
+      CONFIRM_CLEANUP: ${{ inputs.confirm_cleanup }}
+      EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+      EXPECTED_MANIFEST_SHA256: ${{ inputs.inventory_manifest_sha256 }}
+      EXPECTED_COUNT: ${{ inputs.expected_count }}
+      ACTOR_USER_ID: ${{ inputs.actor_user_id }}
+    steps:
+      - name: Back up, clean up approved leftover media, and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v flock >/dev/null 2>&1 || {
+            echo "ERROR: flock is required for host-level operation exclusion"
+            exit 1
+          }
+
+          [ "${GITHUB_REF}" = "refs/heads/master" ]
+          [[ "${EXPECTED_COMMIT}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${EXPECTED_MANIFEST_SHA256}" =~ ^[0-9a-f]{64}$ ]]
+          [[ "${EXPECTED_COUNT}" =~ ^[0-9]+$ ]]
+          [[ "${ACTOR_USER_ID}" =~ ^[1-9][0-9]*$ ]]
+          case "${CONFIRM_CLEANUP}" in
+            ARCHIVE_LEFT_OVER_MEDIA|DELETE_LEFT_OVER_MEDIA) ;;
+            *) echo "ERROR: cleanup was not confirmed"; exit 1 ;;
+          esac
+          [ "${REPO_PATH}" = "/data/workspace/projects/ragpincheng" ]
+          [ "${DATA_PATH}" = "/data/services/docker/data/ragpincheng/prod/app" ]
+          [ "${BACKUP_ROOT}" = "/data/backup/databases/ragpincheng" ]
+          [ "${CONTENT_ROOT}" = "/data/business/ragpincheng/content" ]
+          [ "${COMPOSE_OVERRIDE}" = "/data/services/docker/compose/ragpincheng/prod/compose.prod.yaml" ]
+          [ "${COMPOSE_ENV_FILE}" = "/data/secrets/ragpincheng/prod.env" ]
+          for path in "${REPO_PATH}" "${DATA_PATH}" "${BACKUP_ROOT}" "${CONTENT_ROOT}"; do
+            [ -d "${path}" ] && [ ! -L "${path}" ] || {
+              echo "ERROR: required path is not a real directory: ${path}"
+              exit 1
+            }
+          done
+          [ -f "${COMPOSE_ENV_FILE}" ] && [ ! -L "${COMPOSE_ENV_FILE}" ]
+          [ "$(git -C "${REPO_PATH}" branch --show-current)" = "master" ]
+          [ -z "$(git -C "${REPO_PATH}" status --porcelain --untracked-files=no)" ]
+          git -C "${REPO_PATH}" fetch --no-tags origin master
+          [ "$(git -C "${REPO_PATH}" rev-parse origin/master)" = "${EXPECTED_COMMIT}" ]
+          [ "$(git -C "${REPO_PATH}" rev-parse HEAD)" = "${EXPECTED_COMMIT}" ]
+          [ -f "${REPO_PATH}/scripts/cleanup_leftover_media.py" ] && [ ! -L "${REPO_PATH}/scripts/cleanup_leftover_media.py" ]
+
+          RUN_ID="leftover-media-${CONFIRM_CLEANUP}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          RUN_ROOT="${BACKUP_ROOT}/${RUN_ID}"
+          REPORT_ROOT="${RUNNER_TEMP}/leftover-media-cleanup-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-summary"
+          [ ! -e "${RUN_ROOT}" ]
+          mkdir -m 700 "${RUN_ROOT}" "${REPORT_ROOT}"
+          COMPOSE=(docker compose -p ragpincheng-prod \
+            -f "${REPO_PATH}/docker/docker-compose.yml" \
+            -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
+
+          exec 9>"${BACKUP_ROOT}/.production-app-deploy.lock"
+          flock -n 9 || {
+            echo "ERROR: an application deployment is active"
+            exit 1
+          }
+          exec 8>"${BACKUP_ROOT}/.leftover-media-cleanup.lock"
+          flock -n 8 || {
+            echo "ERROR: another leftover-media cleanup is active"
+            exit 1
+          }
+
+          printf 'run_id=%s\ncommit=%s\nmode=%s\ninventory_manifest_sha256=%s\nexpected_count=%s\nactor_user_id=%s\n' \
+            "${RUN_ID}" "${EXPECTED_COMMIT}" "${CONFIRM_CLEANUP}" \
+            "${EXPECTED_MANIFEST_SHA256}" "${EXPECTED_COUNT}" "${ACTOR_USER_ID}" \
+            > "${RUN_ROOT}/manifest.txt"
+
+          # 1) Recovery point: consistent SQLite backups with integrity checks.
+          SRC="${DATA_PATH}" DST="${RUN_ROOT}" python3 - <<'PY'
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          source = Path(os.environ["SRC"])
+          destination = Path(os.environ["DST"])
+          for name in ("app.sqlite", "parents.sqlite"):
+              with sqlite3.connect(f"file:{source / name}?mode=ro", uri=True) as current:
+                  if current.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                      raise SystemExit(f"source integrity failed: {name}")
+                  with sqlite3.connect(destination / name) as backup:
+                      current.backup(backup)
+                      if backup.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                          raise SystemExit(f"backup integrity failed: {name}")
+          PY
+          # 2) Qdrant snapshot recovery point.
+          "${COMPOSE[@]}" exec -T backend curl -fsS -X POST \
+            http://qdrant:6333/collections/pincheng_docs/snapshots \
+            > "${RUN_ROOT}/qdrant-snapshot.json"
+          SNAPSHOT_NAME="$(RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          payload = json.loads((Path(os.environ["RUN_ROOT_ENV"]) / "qdrant-snapshot.json").read_text())
+          name = payload.get("result", {}).get("name")
+          if payload.get("status") != "ok" or not name:
+              raise SystemExit("invalid Qdrant snapshot response")
+          print(name)
+          PY
+          )"
+          "${COMPOSE[@]}" exec -T backend curl -fsS --max-time 1800 \
+            "http://qdrant:6333/collections/pincheng_docs/snapshots/${SNAPSHOT_NAME}" \
+            > "${RUN_ROOT}/qdrant.snapshot"
+          [ -s "${RUN_ROOT}/qdrant.snapshot" ]
+          "${COMPOSE[@]}" exec -T backend curl -fsS \
+            http://qdrant:6333/collections/pincheng_docs \
+            > "${RUN_ROOT}/qdrant-before.json"
+
+          # 3) Re-run the read-only inventory and freeze the manifest again.
+          "${COMPOSE[@]}" cp "${REPO_PATH}/scripts/cleanup_leftover_media.py" \
+            backend:/tmp/cleanup_leftover_media.py
+          "${COMPOSE[@]}" exec -T -e PYTHONPATH=/app backend python /tmp/cleanup_leftover_media.py \
+            --database /app/data/app.sqlite \
+            --parents-database /app/data/parents.sqlite \
+            --media-root /app/media \
+            --mode inventory \
+            --with-qdrant \
+            > "${RUN_ROOT}/inventory-recheck.json"
+          MANIFEST_ACTUAL="$(RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          report = json.loads((Path(os.environ["RUN_ROOT_ENV"]) / "inventory-recheck.json").read_text())
+          print(report["manifest_sha256"])
+          PY
+          )"
+          COUNT_ACTUAL="$(RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          report = json.loads((Path(os.environ["RUN_ROOT_ENV"]) / "inventory-recheck.json").read_text())
+          print(report["candidate_count"])
+          PY
+          )"
+          [ "${MANIFEST_ACTUAL}" = "${EXPECTED_MANIFEST_SHA256}" ] || {
+            echo "ERROR: inventory manifest drifted from the approved frozen state"
+            exit 1
+          }
+          [ "${COUNT_ACTUAL}" = "${EXPECTED_COUNT}" ] || {
+            echo "ERROR: inventory count drifted from the approved frozen state"
+            exit 1
+          }
+          MODE="$([ "${CONFIRM_CLEANUP}" = "ARCHIVE_LEFT_OVER_MEDIA" ] && echo archive || echo delete)"
+          CONFIRM_WORD="${CONFIRM_CLEANUP}"
+
+          # 4) Apply the approved cleanup inside the backend container.
+          "${COMPOSE[@]}" exec -T -e PYTHONPATH=/app backend python /tmp/cleanup_leftover_media.py \
+            --database /app/data/app.sqlite \
+            --parents-database /app/data/parents.sqlite \
+            --media-root /app/media \
+            --mode "${MODE}" \
+            --manifest-sha256 "${EXPECTED_MANIFEST_SHA256}" \
+            --expected-count "${EXPECTED_COUNT}" \
+            --actor-user-id "${ACTOR_USER_ID}" \
+            --confirm "${CONFIRM_WORD}" \
+            --apply > "${RUN_ROOT}/apply-result.json"
+
+          # 5) Host-side removal of media directories outside the container
+          #    mount (content-root media + legacy source media), delete mode.
+          if [ "${CONFIRM_CLEANUP}" = "DELETE_LEFT_OVER_MEDIA" ]; then
+            RUN_ROOT_ENV="${RUN_ROOT}" ROOTS_ENV="$(printf '%s\n' "${CONTENT_ROOT}/media" /data/business/ragpincheng/source/media)" python3 - <<'PY'
+            import json
+            import os
+            import shutil
+            from pathlib import Path
+
+            root = Path(os.environ["RUN_ROOT_ENV"])
+            report = json.loads((root / "apply-result.json").read_text(encoding="utf-8"))
+            if report.get("status") != "applied":
+                raise SystemExit("delete apply did not complete")
+            media_ids = report.get("deleted_media_ids") or []
+            roots = [
+                Path(line)
+                for line in os.environ["ROOTS_ENV"].splitlines()
+                if line and Path(line).is_dir()
+            ]
+            removed = []
+            for media_id in media_ids:
+                for base in roots:
+                    candidate = base / media_id
+                    if not candidate.exists():
+                        continue
+                    attributes = getattr(candidate.lstat(), "st_file_attributes", 0)
+                    if candidate.is_symlink() or bool(attributes & 0x400):
+                        raise SystemExit(f"media dir is a reparse point: {candidate}")
+                    total = 0
+                    for entry in candidate.rglob("*"):
+                        if entry.is_file():
+                            try:
+                                total += entry.stat().st_size
+                            except OSError:
+                                pass
+                    shutil.rmtree(candidate)
+                    removed.append({"media_id": media_id, "root": str(base), "bytes": total})
+            (root / "host-media-removal.json").write_text(
+                json.dumps(removed, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            print("HOST_MEDIA_REMOVAL count=%s" % len(removed))
+            PY
+          fi
+
+          # 6) Verify: zero leftovers, SQLite integrity, database health.
+          "${COMPOSE[@]}" exec -T -e PYTHONPATH=/app backend python /tmp/cleanup_leftover_media.py \
+            --database /app/data/app.sqlite \
+            --parents-database /app/data/parents.sqlite \
+            --media-root /app/media \
+            --mode inventory \
+            > "${RUN_ROOT}/inventory-after.json"
+          AFTER_COUNT="$(RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          report = json.loads((Path(os.environ["RUN_ROOT_ENV"]) / "inventory-after.json").read_text())
+          print(report["candidate_count"])
+          PY
+          )"
+          [ "${AFTER_COUNT}" = "0" ] || {
+            echo "ERROR: leftover media records still present after cleanup: ${AFTER_COUNT}"
+            exit 1
+          }
+          DATABASE="${DATA_PATH}/app.sqlite" python3 - <<'PY'
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          path = Path(os.environ["DATABASE"])
+          with sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True) as conn:
+              if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                  raise SystemExit("post-cleanup integrity check failed")
+          PY
+          "${COMPOSE[@]}" exec -T backend curl -fsS http://localhost/api/health > /dev/null
+          RUN_ROOT_ENV="${RUN_ROOT}" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUN_ROOT_ENV"])
+          apply_result = json.loads((root / "apply-result.json").read_text(encoding="utf-8"))
+          after = json.loads((root / "inventory-after.json").read_text(encoding="utf-8"))
+          summary = {
+              "run_id": (root / "manifest.txt").read_text(encoding="utf-8").split("run_id=")[1].splitlines()[0],
+              "mode": os.environ.get("CONFIRM_CLEANUP", ""),
+              "status": "success",
+              "leftover_after": after["candidate_count"],
+              "apply": {k: apply_result[k] for k in sorted(apply_result) if k != "verify"},
+          }
+          (root / "summary.json").write_text(
+              json.dumps(summary, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          cp "${RUN_ROOT}/summary.json" \
+            "${RUN_ROOT}/inventory-recheck.json" "${RUN_ROOT}/inventory-after.json" "${REPORT_ROOT}/"
+          chmod -R go-rwx "${RUN_ROOT}"
+          echo "LEFTOVER_MEDIA_CLEANUP status=success mode=${CONFIRM_CLEANUP} run_id=${RUN_ID} leftover_after=${AFTER_COUNT}"
+
+      - name: Upload redacted cleanup summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: leftover-media-cleanup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/leftover-media-cleanup-${{ github.run_id }}-${{ github.run_attempt }}-summary
+          if-no-files-found: error
+          retention-days: 30
