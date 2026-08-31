@@ -34,7 +34,7 @@
 - `external_media_entries` 保存相对路径、父目录、文件名、大小、修改时间、指纹、可用性和媒体绑定。文件状态为 `available | missing | superseded`。
 - `external_media_scan_runs` 保存手动或周期扫描的新增、变更、缺失和入队计数。
 - 外部条目树不是受管分类树。未发布的视频不会创建 `content_items`；发布后仍由现有媒体正式 head 决定资料库和检索可见性。
-- 共享文件夹在资料列表中复用普通文件夹/视频条目结构，在分类管理中直接内联到共享分类根节点下。子目录按 `relative_path` 按需加载并沿用逐级进入或树形展开交互；文件和目录均显示“共享”及只读状态，远程节点不参与分类编号、移动、重命名、上传或删除。
+- 共享文件夹在资料列表中复用普通文件夹/视频条目结构，在分类管理中把共享分类根节点下的远程子目录物化为受管分类镜像（`category_kind='shared_folder'`、`external_source_id` 为 NULL、`external_relative_path` 记录远程相对目录）。镜像与普通子分类同款样式与交互，可设置启用状态、企业知识问答和对话筛选项，也可调整编号（仅本地显示顺序）；名称跟随远程目录，不能移动、改名或删除，也不能作为父分类。扫描（手动或周期 `reconcile`）新增远端目录（追加同级末尾）、软删除消失目录（并重排同级编号），但不改写既有镜像的问答设置与编号；若同级已存在同名普通分类，则不再创建镜像。共享视频的转录索引按 `external_media_entries.relative_path` 归属到最深已物化镜像的 `category_key`（目录未物化时回退共享根），旧转录点由 `scripts/backfill_shared_transcript_category_keys.py` 一次回填（dry-run 默认，仅补 `category_key`，不重置索引）。远程文件不进入分类树，仍由资料库远程目录浏览展示。
 - 源不可达时只更新源与 scan run 的失败状态，不改写条目可用性；下一次成功扫描才协调文件级变化。
 - 共享媒体在任务创建前失败、仅有 `media_assets.status=failed` 时仍可重试；后端优先解析 `external_media_sources.default_scheme_id`，若其当前运行 Profile 未被应用准入，则按后台方案顺序回退到首个实际可用方案，仅用于本次任务且不改写来源配置。前端不传入或推断方案。
 - ASR 全局关闭、服务凭据缺失或没有任何实际可用方案时，媒体列表不会广告重试能力，并返回面向管理员的禁用原因；直接或批量调用重试接口时，后端分别返回结构化的服务不可用或方案不可用错误，而不是笼统的任务状态冲突。
@@ -47,7 +47,7 @@
 - 浏览器只接收逻辑源名和相对路径，管理工作台视频仍经管理员预览端点鉴权代理并支持 200/206/416；公共媒体端点保持既有受管媒体边界。
 - 外部原视频永不进入上传删除或回收站物理删除。只有不存在活动转录/索引任务、转录版本、正式 head、发布索引历史和活动替换时，失败对象才允许清理；清理只删除本地任务与派生缓存，把媒体重置为 `uploaded` 以便重新入队，并保留 `external_media_entries` 与共享原文件。事务内移动出的缓存先使用 `.cleanup-pending-*`；数据库提交后再转换为 `.cleanup-*`，提交失败则恢复后重新执行完整清理。只有已提交残留由服务端优先投影为独立的 `finalize_failed_cleanup` 幂等收尾动作；即使媒体已重新入队或再次失败，该动作也只删除旧暂存缓存，不修改当前媒体目录、任务或状态，收尾刷新后才重新投影普通失败清理能力。
 - 仅支持 MP4。根挂载的只读属性、SMB 凭据、网络 ACL、容量和可用性监控不由应用管理。
-- migration 27 为添加式，不需要 Qdrant 或 Parent 全量重建。
+- migration 27 为添加式，不需要 Qdrant 或 Parent 全量重建。migration 38 为共享子目录镜像补充 `category_nodes.external_relative_path` 列与索引，同样是添加式；旧转录点的 `category_key` 由回填脚本补齐，无需重置索引。
 
 ## 配置
 
@@ -62,6 +62,7 @@ Compose 只透传这些变量，不自动添加宿主机挂载。生产启用前
 ## 验证
 
 - `tests/test_external_media_sources.py`：新增、幂等重扫、变更、缺失、恢复、源离线、路径逃逸、文件上限、外部身份解析和符号链接跳过。
+- `tests/test_shared_mirror_categories.py`：镜像物化（建树/幂等/追加/消失软删与重排）、镜像守卫（禁移动/改名/改父、禁作父分类、允许调编号）、转录 `category_key` 归属解析、镜像参与知识范围及停用排除。
 - `tests/test_media_library_access.py`、`tests/test_admin_media_preview_route.py`：现有登录、发布可见性与 Range 回归。
 - `tests/test_transcription_media_input.py`、`tests/test_transcription_application.py`：本地音频准备、内容哈希和转录应用回归。
 - `tests/test_content_trash_cleanup.py`：既有回收站清理回归；外部媒体额外由预检阻止永久删除。

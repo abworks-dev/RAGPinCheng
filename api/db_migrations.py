@@ -1338,6 +1338,18 @@ MIGRATIONS = (
             "CREATE INDEX idx_media_publication_requests_status_updated ON media_publication_requests(status,updated_at DESC)",
         ),
     ),
+    Migration(
+        38,
+        "shared_folder_mirror_categories",
+        (
+            "ALTER TABLE category_nodes ADD COLUMN external_relative_path TEXT",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_category_nodes_external_mirror "
+            "ON category_nodes(external_source_id, external_relative_path) "
+            "WHERE external_source_id IS NOT NULL AND external_relative_path IS NOT NULL",
+            "CREATE INDEX IF NOT EXISTS idx_category_nodes_external_mirror_path "
+            "ON category_nodes(external_relative_path) WHERE external_relative_path IS NOT NULL",
+        ),
+    ),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(

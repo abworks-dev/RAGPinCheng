@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   updateNumber: vi.fn(),
   move: vi.fn(),
   externalEntries: vi.fn(),
+  scanSource: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
   role: "admin" as "admin" | "user",
@@ -22,6 +23,7 @@ vi.mock("../../api/client", () => ({
     updateManagedCategoryNumber: mocks.updateNumber,
     moveManagedCategory: mocks.move,
     listExternalMediaEntries: mocks.externalEntries,
+    scanExternalMediaSource: mocks.scanSource,
   },
 }));
 
@@ -71,6 +73,7 @@ describe("AdminCategoriesPage", () => {
     mocks.updateNumber.mockResolvedValue([category, child]);
     mocks.move.mockResolvedValue([category, child]);
     mocks.externalEntries.mockResolvedValue({ source_id: "source-1", parent_relative_path: "", entries: [] });
+    mocks.scanSource.mockResolvedValue({ run_id: "run-1", source_id: "source-1" });
   });
 
   it("sends the selected category version for optimistic concurrency", async () => {
@@ -279,7 +282,7 @@ describe("AdminCategoriesPage", () => {
     expect(screen.queryByRole("heading", { name: "暂无分类" })).not.toBeInTheDocument();
   });
 
-  it("shows only shared folders inside the category tree", async () => {
+  it("renders shared root and mirrors as normal tree rows and expands all levels", async () => {
     const shared = {
       ...category,
       id: "cat-shared",
@@ -290,27 +293,119 @@ describe("AdminCategoriesPage", () => {
       external_source_id: "source-1",
       full_path: "02 共享培训",
     };
-    mocks.categories.mockResolvedValueOnce([shared]);
-    mocks.externalEntries.mockResolvedValueOnce({
-      source_id: "source-1",
-      parent_relative_path: "",
-      entries: [
-        { id: "folder-1", kind: "folder", name: "一级课程", relative_path: "一级课程" },
-        { id: "video-1", kind: "video", name: "导论.mp4", relative_path: "导论.mp4", availability: "available" },
-      ],
-    });
+    const mirrorLevel1 = {
+      ...child,
+      id: "cat-mirror-1",
+      category_key: "shared_mirror_1",
+      parent_id: "cat-shared",
+      display_code: "01",
+      display_name: "一级课程",
+      category_kind: "shared_folder" as const,
+      external_relative_path: "一级课程",
+      full_path: "02 共享培训 / 01 一级课程",
+      level: 2,
+      item_count: 0,
+    };
+    const mirrorLevel2 = {
+      ...child,
+      id: "cat-mirror-2",
+      category_key: "shared_mirror_2",
+      parent_id: "cat-mirror-1",
+      display_code: "01",
+      display_name: "进阶班",
+      category_kind: "shared_folder" as const,
+      external_relative_path: "一级课程/进阶班",
+      full_path: "02 共享培训 / 01 一级课程 / 01 进阶班",
+      level: 3,
+      item_count: 0,
+    };
+    mocks.categories.mockResolvedValueOnce([shared, mirrorLevel1, mirrorLevel2]);
 
     render(<AdminCategoriesPage />);
     expect(await screen.findByRole("button", { name: "全部展开" })).toBeInTheDocument();
-    fireEvent.click(await screen.findByRole("button", { name: "展开共享培训" }));
+    fireEvent.click(screen.getByRole("button", { name: "全部展开" }));
 
-    expect(await screen.findByTestId("shared-tree-item-folder-1")).toHaveTextContent("一级课程");
-    expect(screen.queryByTestId("shared-tree-item-video-1")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("category-tree-item-cat-mirror-2")).toBeInTheDocument();
+    const rootRow = screen.getByTestId("category-tree-item-cat-shared");
+    const mirrorRow = screen.getByTestId("category-tree-item-cat-mirror-1");
+    expect(rootRow).toHaveTextContent("共享文件夹");
+    expect(mirrorRow).toHaveTextContent("共享子目录");
+    expect(mirrorRow).toHaveTextContent("一级课程");
+    // 与普通子目录一致：编号、启用状态和问答/筛选徽标
+    expect(within(mirrorRow).getByText("01 一级课程")).toBeInTheDocument();
+    expect(within(mirrorRow).getByText("启用")).toBeInTheDocument();
+    expect(within(mirrorRow).getByText("问答")).toBeInTheDocument();
+    expect(within(mirrorRow).getByText("筛选")).toBeInTheDocument();
+    // 远程视频不再内联进分类树
     expect(screen.queryByText("导论.mp4")).not.toBeInTheDocument();
-    expect(screen.getAllByText("共享").length).toBeGreaterThanOrEqual(2);
-    expect(screen.queryByRole("region", { name: "共享培训远程目录" })).not.toBeInTheDocument();
-    const root = screen.getByTestId("category-tree-item-cat-shared");
-    fireEvent.keyDown(root, { key: "ArrowRight" });
-    expect(root).toBeInTheDocument();
+    expect(screen.queryByTestId("shared-tree-item-folder-1")).not.toBeInTheDocument();
+  });
+
+  it("exposes scoping settings but hides structural actions for a shared mirror", async () => {
+    const shared = {
+      ...category,
+      id: "cat-shared",
+      category_key: "shared_training",
+      display_code: "02",
+      display_name: "共享培训",
+      category_kind: "shared_folder" as const,
+      external_source_id: "source-1",
+      full_path: "02 共享培训",
+    };
+    const mirror = {
+      ...child,
+      id: "cat-mirror-1",
+      category_key: "shared_mirror_1",
+      parent_id: "cat-shared",
+      display_code: "01",
+      display_name: "一级课程",
+      category_kind: "shared_folder" as const,
+      external_relative_path: "一级课程",
+      full_path: "02 共享培训 / 01 一级课程",
+      level: 2,
+      item_count: 0,
+    };
+    mocks.categories.mockResolvedValueOnce([shared, mirror]);
+
+    render(<AdminCategoriesPage />);
+    fireEvent.click(await screen.findByTestId("category-tree-item-cat-shared"));
+    // 共享根提供远程目录同步
+    expect(screen.getByRole("button", { name: "同步远程目录" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开共享培训" }));
+    fireEvent.click(screen.getByTestId("category-tree-item-cat-mirror-1"));
+    expect(await screen.findByRole("heading", { name: "01 一级课程" })).toBeInTheDocument();
+    // 只读镜像：不提供结构操作，名称只读，编号仍可调整，问答/筛选可配置
+    expect(screen.queryByRole("button", { name: "新增子分类" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "移动至" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "删除文件夹" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("显示名称")).toHaveAttribute("readonly");
+    expect(screen.getByRole("button", { name: "调整编号" })).toBeInTheDocument();
+    expect(screen.getByText("企业知识问答")).toBeInTheDocument();
+    expect(screen.getByLabelText(/纳入企业知识问答/)).toBeEnabled();
+    expect(screen.getByText(/只读镜像/)).toBeInTheDocument();
+
+    // 调整镜像编号复用常规编号流程
+    fireEvent.click(screen.getByRole("button", { name: "调整编号" }));
+    expect(screen.getByRole("dialog", { name: "调整分类编号" })).toBeInTheDocument();
+  });
+
+  it("syncs the shared root remote structure", async () => {
+    const shared = {
+      ...category,
+      id: "cat-shared",
+      category_key: "shared_training",
+      display_code: "02",
+      display_name: "共享培训",
+      category_kind: "shared_folder" as const,
+      external_source_id: "source-1",
+      full_path: "02 共享培训",
+    };
+    mocks.categories.mockResolvedValue([shared]);
+    render(<AdminCategoriesPage />);
+    fireEvent.click(await screen.findByTestId("category-tree-item-cat-shared"));
+    fireEvent.click(screen.getByRole("button", { name: "同步远程目录" }));
+    await waitFor(() => expect(mocks.scanSource).toHaveBeenCalledWith("source-1"));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith("共享培训的远程目录已同步"));
   });
 });

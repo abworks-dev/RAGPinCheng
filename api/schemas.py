@@ -394,6 +394,7 @@ class ManagedCategoryDTO(BaseModel):
     display_name: str
     category_kind: Literal["folder", "shared_folder"] = "folder"
     external_source_id: str | None = None
+    external_relative_path: str | None = None
     sort_order: int
     level: int
     is_active: bool
