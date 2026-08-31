@@ -270,6 +270,31 @@ describe("AdminDocumentsPage", () => {
     })));
   });
 
+  it("keeps all status cards stable while the status filter changes", async () => {
+    mocks.publicationJobs.mockResolvedValue({
+      jobs: [{ ...failedJob, status: "published" }],
+      total: 1,
+      status_counts: { processing: 2, published: 5, failed: 1 },
+    });
+    render(<AdminDocumentsPage />);
+    await screen.findByText(failedJob.title);
+
+    // All four cards reflect their own status counts before any click.
+    expect(screen.getByRole("button", { name: "全部任务 8" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "处理中 2" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "已发布 5" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "发布失败 1" })).toBeInTheDocument();
+
+    // Clicking the published card only changes the list filter; the card
+    // counts come from the backend scope-level status_counts and stay put.
+    fireEvent.click(screen.getByRole("button", { name: "已发布 5" }));
+    await waitFor(() => expect(mocks.publicationJobs).toHaveBeenLastCalledWith(expect.objectContaining({ status: "published" })));
+
+    expect(screen.getByRole("button", { name: "全部任务 8" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "处理中 2" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "发布失败 1" })).toBeInTheDocument();
+  });
+
   it("switches between latest and historical attempts", async () => {
     render(<AdminDocumentsPage />);
     await screen.findByText(failedJob.title);

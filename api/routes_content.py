@@ -3996,19 +3996,14 @@ def list_unified_publication_jobs(
     """
     parts = []
     params: list[object] = []
+    count_parts = []
+    count_params: list[object] = []
     for sql, kind in (
         (document_sql, "document"),
         (video_sql, "video_transcript"),
         (intent_sql, "video_transcript"),
     ):
         if task_type and task_type != kind: continue
-        clauses = []
-        if term: clauses.append("lower(title || ' ' || COALESCE(original_filename,'')) LIKE ?"); params.append(f"%{term}%")
-        if status: clauses.append("unified_status=?"); params.append(status)
-        if category_id: clauses.append("category_id=?"); params.append(category_id)
-        if doc_type: clauses.append("doc_type=?"); params.append(doc_type)
-        if source_origin: clauses.append("source_origin=?"); params.append(source_origin)
-        if not include_archived: clauses.append("is_archived=0")
         if history and kind == "document":
             sql = sql.replace(
                 "WHERE j.id=(SELECT x.id FROM content_index_jobs x WHERE x.version_id=j.version_id ORDER BY x.attempt_number DESC,x.created_at DESC,x.id DESC LIMIT 1)",
@@ -4019,11 +4014,30 @@ def list_unified_publication_jobs(
                 "WHERE j.attempt_number=(SELECT max(x.attempt_number) FROM transcript_publication_index_jobs x WHERE x.transcript_version_id=j.transcript_version_id)",
                 "WHERE 1=1",
             )
+        clauses = []
+        if term: clauses.append("lower(title || ' ' || COALESCE(original_filename,'')) LIKE ?"); params.append(f"%{term}%")
+        if status: clauses.append("unified_status=?"); params.append(status)
+        if category_id: clauses.append("category_id=?"); params.append(category_id)
+        if doc_type: clauses.append("doc_type=?"); params.append(doc_type)
+        if source_origin: clauses.append("source_origin=?"); params.append(source_origin)
+        if not include_archived: clauses.append("is_archived=0")
         parts.append(f"SELECT * FROM ({sql}) q WHERE {' AND '.join(clauses) if clauses else '1=1'}")
+        # Status summary counts reflect the current scope (category, term,
+        # source, history, archived visibility) but must not shrink when the
+        # list itself is filtered to a single status, or clicking one summary
+        # card would zero out the other cards.
+        count_clauses = []
+        if term: count_clauses.append("lower(title || ' ' || COALESCE(original_filename,'')) LIKE ?"); count_params.append(f"%{term}%")
+        if category_id: count_clauses.append("category_id=?"); count_params.append(category_id)
+        if doc_type: count_clauses.append("doc_type=?"); count_params.append(doc_type)
+        if source_origin: count_clauses.append("source_origin=?"); count_params.append(source_origin)
+        if not include_archived: count_clauses.append("is_archived=0")
+        count_parts.append(f"SELECT * FROM ({sql}) q WHERE {' AND '.join(count_clauses) if count_clauses else '1=1'}")
     union = " UNION ALL ".join(parts) or "SELECT * FROM (SELECT NULL AS id) WHERE 1=0"
+    count_union = " UNION ALL ".join(count_parts) or "SELECT * FROM (SELECT NULL AS id) WHERE 1=0"
     rows = conn.execute(f"SELECT * FROM ({union}) all_jobs ORDER BY updated_at DESC,id DESC LIMIT ? OFFSET ?", [*params, limit, offset]).fetchall()
     total = int(conn.execute(f"SELECT count(*) FROM ({union}) all_jobs", params).fetchone()[0])
-    count_rows = conn.execute(f"SELECT unified_status,count(*) FROM ({union}) all_jobs GROUP BY unified_status", params).fetchall()
+    count_rows = conn.execute(f"SELECT unified_status,count(*) FROM ({count_union}) all_jobs GROUP BY unified_status", count_params).fetchall()
     counts = {"processing": 0, "published": 0, "failed": 0}
     for row in count_rows: counts[str(row[0])] = int(row[1])
     jobs = []

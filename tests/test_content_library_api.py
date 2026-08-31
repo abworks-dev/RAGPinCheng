@@ -708,6 +708,106 @@ def test_cancel_publication_requires_admin_and_csrf(content_api):
     assert wrong_type.status_code == 422
 
 
+def test_publication_jobs_status_counts_ignore_status_filter(content_api):
+    """Status summary cards must not shrink when the list is filtered to one
+    status: counts reflect the current scope (category/term/source/archived)
+    across all statuses, so clicking one card keeps the other cards stable."""
+    client, sessions, _queued, db_path = content_api
+    now = int(time.time())
+    conn = connect(db_path)
+    sha256 = "a" * 64
+    conn.execute(
+        "INSERT INTO content_objects(sha256,size_bytes,mime_type,storage_rel_path,created_at) VALUES (?,1,'text/markdown','objects/count',?)",
+        (sha256, now),
+    )
+    item_id = "item-count"
+    conn.execute(
+        "INSERT INTO content_items(id,title,content_kind,category_id,created_at,updated_at) VALUES (?,?,'document','cat-03',?,?)",
+        (item_id, "计数验证资料", now, now),
+    )
+    for version_number, (version_id, lifecycle_status, job_status, publication_status) in enumerate(
+        (
+            ("version-pending", "pending_publication", "pending", "pending"),
+            ("version-published", "published", "done", "published"),
+            ("version-failed", "publication_failed", "failed", "failed"),
+        ),
+        start=1,
+    ):
+        conn.execute(
+            """INSERT INTO content_versions(
+                   id,item_id,version_number,object_sha256,original_filename,doc_type,
+                   source_origin,lifecycle_status,created_at,updated_at,title
+               ) VALUES (?,?,?,?,?,'markdown','web',?,?,?,?)""",
+            (
+                version_id, item_id, version_number, sha256, f"{version_id}.md",
+                lifecycle_status, now, now, f"资料{version_id}",
+            ),
+        )
+        publication_id = f"pub-{version_id}"
+        conn.execute(
+            """INSERT INTO content_publications(
+                   id,version_id,status,publisher_id,created_at,updated_at
+               ) VALUES (?,?,?,?,?,?)""",
+            (publication_id, version_id, publication_status, 1, now, now),
+        )
+        conn.execute(
+            """INSERT INTO content_index_jobs(
+                   id,publication_id,version_id,attempt_number,target_index_id,status,
+                   error_code,created_at,updated_at
+               ) VALUES (?,?,?,1,?,?,?,?,?)""",
+            (
+                f"index-{version_id}", publication_id, version_id,
+                f"target-{version_id}", job_status, None, now, now,
+            ),
+        )
+    conn.execute(
+        """INSERT INTO content_item_heads(item_id,current_version_id,publication_id,updated_at)
+           VALUES (?,?,?,?)""",
+        (item_id, "version-published", "pub-version-published", now),
+    )
+    conn.commit()
+    conn.close()
+
+    listing = client.get(
+        "/api/admin/content/publication-jobs", **_auth(sessions, "admin")
+    ).json()
+    assert listing["status_counts"] == {"processing": 1, "published": 1, "failed": 1}
+    assert listing["total"] == 3
+
+    processing = client.get(
+        "/api/admin/content/publication-jobs?status=processing", **_auth(sessions, "admin")
+    ).json()
+    assert processing["total"] == 1
+    assert processing["status_counts"] == {"processing": 1, "published": 1, "failed": 1}
+
+    published = client.get(
+        "/api/admin/content/publication-jobs?status=published", **_auth(sessions, "admin")
+    ).json()
+    assert published["total"] == 1
+    assert published["status_counts"] == {"processing": 1, "published": 1, "failed": 1}
+
+    failed = client.get(
+        "/api/admin/content/publication-jobs?status=failed", **_auth(sessions, "admin")
+    ).json()
+    assert failed["total"] == 1
+    assert failed["status_counts"] == {"processing": 1, "published": 1, "failed": 1}
+
+    # Scope filters (category) still narrow the counts.
+    scoped = client.get(
+        "/api/admin/content/publication-jobs?category_id=cat-03&status=failed",
+        **_auth(sessions, "admin"),
+    ).json()
+    assert scoped["total"] == 1
+    assert scoped["status_counts"] == {"processing": 1, "published": 1, "failed": 1}
+
+    outside = client.get(
+        "/api/admin/content/publication-jobs?category_id=cat-other&status=failed",
+        **_auth(sessions, "admin"),
+    ).json()
+    assert outside["total"] == 0
+    assert outside["status_counts"] == {"processing": 0, "published": 0, "failed": 0}
+
+
 def test_video_publish_requires_publish_permission_and_csrf(content_api):
     client, sessions, _queued, db_path = content_api
     media_id = "123e4567-e89b-42d3-a456-426614174262"
