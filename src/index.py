@@ -123,7 +123,7 @@ def _ensure_payload_indexes(client: QdrantClient) -> None:
         )
     except Exception:
         pass
-    for field_name in ("category_key", "content_version_id"):
+    for field_name in ("category_key", "content_version_id", "media_id"):
         try:
             client.create_payload_index(
                 collection_name=COLLECTION,

@@ -46,7 +46,7 @@ export function CategoryTreePicker({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const nodeRefs = useRef(new Map<string, HTMLDivElement>());
   const rootRef = useRef<HTMLDivElement>(null);
-  const activeCategories = useMemo(() => categories.filter((category) => category.is_active), [categories]);
+  const activeCategories = useMemo(() => categories.filter((category) => category.is_active && !(category.category_kind === "shared_folder" && Boolean(category.external_relative_path))), [categories]);
   const tree = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
     return filterCategoryTree(

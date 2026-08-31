@@ -595,6 +595,7 @@ def _category_dto(conn: sqlite3.Connection, row: sqlite3.Row) -> ManagedCategory
         display_name=row["display_name"],
         category_kind=str(row["category_kind"] or "folder") if "category_kind" in row.keys() else "folder",
         external_source_id=row["external_source_id"] if "external_source_id" in row.keys() else None,
+        external_relative_path=row["external_relative_path"] if "external_relative_path" in row.keys() else None,
         sort_order=row["sort_order"],
         level=row["level"],
         is_active=bool(row["is_active"]),
@@ -722,6 +723,12 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=404, detail="目标父分类不存在") from exc
     if message == "parent_category_inactive":
         raise HTTPException(status_code=409, detail="不能移动到已停用的分类中") from exc
+    if message == "shared_folder_mirror_move_blocked":
+        raise HTTPException(status_code=409, detail="共享子目录是远程目录的只读镜像，不能移动") from exc
+    if message == "shared_folder_mirror_rename_blocked":
+        raise HTTPException(status_code=409, detail="共享子目录名称跟随远程目录，不能单独改名") from exc
+    if message == "shared_folder_mirror_parent_forbidden":
+        raise HTTPException(status_code=409, detail="不能使用共享子目录作为父分类") from exc
     if message == "active_child_category_exists":
         raise HTTPException(status_code=409, detail="该分类仍有启用的子分类，请先停用子分类") from exc
     if message == "content_too_large":

@@ -42,6 +42,7 @@ from src.transcription.types import ContractValidationError, TranscriptionJobSta
 from .auth import CurrentUser, require_admin, require_csrf_admin
 from .content_store import _category_path
 from .db import connect
+from .external_media import resolve_shared_category_key
 from .schemas import (
     CreateMediaMetadataRevisionRequest,
     CreateTranscriptRevisionRequest,
@@ -797,6 +798,7 @@ def _build_publication_service(conn) -> TranscriptionPublicationApplicationServi
         profiles=profiles,
         docs_root=DOCS_DIR,
         media_title=media_title,
+        resolve_category_key=lambda media_id: resolve_shared_category_key(conn, media_id),
     )
 
 

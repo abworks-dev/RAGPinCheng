@@ -55,6 +55,14 @@ const sharedCategory = {
   external_source_id: "source-shared", full_path: "05 共享培训资料", item_count: 0,
 };
 
+const sharedMirrorCategory = {
+  ...categories[0], id: "cat-shared-course", category_key: "shared_training_course",
+  parent_id: "cat-shared", display_code: "01", display_name: "一级课程", sort_order: 10,
+  category_kind: "shared_folder", external_source_id: null, external_relative_path: "一级课程",
+  level: 2, is_active: true, chat_search_enabled: true, chat_filter_selectable: false,
+  full_path: "05 共享培训资料 / 01 一级课程", item_count: 0,
+};
+
 const knowledgeScopes = categories
   .filter((category) => category.is_active && category.chat_search_enabled && category.chat_filter_selectable)
   .map((category) => ({
@@ -997,7 +1005,7 @@ export async function installAdminRoutes(
       return json(route, { enabled: scenario !== "disabled", max_upload_bytes: 10_000_000, supported_extensions: [".pdf", ".md", ".docx", ".xlsx", ".pptx"] });
     }
     if (request.method() === "GET" && path === "/api/admin/content/categories") {
-      return json(route, scenario === "empty" ? [] : scenario === "shared_library" ? [...categories, sharedCategory] : options.includeChildFolder ? [...categories, managedChildFolder] : categories);
+      return json(route, scenario === "empty" ? [] : scenario === "shared_library" ? [...categories, sharedCategory, sharedMirrorCategory] : options.includeChildFolder ? [...categories, managedChildFolder] : categories);
     }
     if (request.method() === "POST" && path === "/api/admin/content/bulk-operations/preflight") {
       const payload = request.postDataJSON() as { operation: string };
