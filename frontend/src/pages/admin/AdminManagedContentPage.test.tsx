@@ -344,6 +344,7 @@ describe("AdminManagedContentPage", () => {
 
   it("renders shared entries with the managed library row structure and navigation", async () => {
     mocks.permissions = PUBLISHER_PERMISSIONS;
+    mocks.role = "admin";
     const sharedCategory = {
       ...category,
       id: "cat-shared",
@@ -438,11 +439,14 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getAllByRole("checkbox", { name: "选择导论" })[0]).toBeEnabled();
     expect(screen.getAllByRole("button", { name: "播放“导论”" })[0]).toBeEnabled();
     expect(screen.getAllByRole("button", { name: "查看“导论”的详细信息" })[0]).toBeEnabled();
-    expect(screen.getAllByRole("button", { name: "重命名“导论”" })[0]).toBeDisabled();
-    expect(screen.getAllByRole("button", { name: "更新“导论”" })[0]).toBeDisabled();
-    expect(screen.getAllByRole("button", { name: "调整“导论”的归档目录" })[0]).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "重命名“导论”" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "更新“导论”" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "调整“导论”的归档目录" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "删除“导论”" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "更多“导论”的操作" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "编辑“导论”的转录稿" })[0]).toBeEnabled();
+    expect(screen.getAllByRole("button", { name: "进入“导论”的转录任务" })[0]).toBeEnabled();
     expect(screen.getAllByRole("button", { name: "下载“导论”" })[0]).toBeEnabled();
-    expect(screen.getAllByRole("button", { name: "删除“导论”" })[0]).toBeDisabled();
     expect(screen.getAllByRole("button", { name: "发布“导论”" })[0]).toBeEnabled();
     const overview = screen.getByRole("region", { name: "资料状态概览" });
     expect(within(overview).getByText("待发布").parentElement?.parentElement).toHaveTextContent("2");
@@ -469,7 +473,7 @@ describe("AdminManagedContentPage", () => {
     await waitFor(() => expect(screen.queryByTestId("shared-library-row-video-1")).not.toBeInTheDocument());
     expect(screen.getByTestId("shared-library-row-video-2")).toBeInTheDocument();
 
-    fireEvent.click(within(sharedFolderRow).getByRole("button", { name: "打开文件夹“一级课程”" }));
+    fireEvent.click(sharedFolderRow);
     await waitFor(() => expect(mocks.externalEntries).toHaveBeenLastCalledWith("source-1", "一级课程"));
   });
 
