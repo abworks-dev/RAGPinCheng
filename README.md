@@ -136,7 +136,7 @@ about the current checkout or production state.
 - [Managed content production runbook](docs/migrations/managed-content-production-runbook.md)
 - [Office conversion operations](docs/operations/OFFICE_CONVERSION.md)
 - [User acceptance guide](docs/USER_ACCEPTANCE.md)
-- [Development rules and architecture invariants](CLAUDE.md)
+- [Development rules and architecture invariants](AGENTS.md)
 - [Active product work](TODO.md)
 
 ## Security

@@ -106,4 +106,4 @@ api.main._sweeper_loop（每小时）
 
 ## 相关决策
 
-- 暂无独立 ADR；现有约束见根目录 `CLAUDE.md`。
+- 暂无独立 ADR；现有约束见根目录 `AGENTS.md`。

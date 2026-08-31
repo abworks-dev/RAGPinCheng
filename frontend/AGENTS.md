@@ -1,9 +1,6 @@
----
-paths:
-  - "frontend/**/*"
----
+# Frontend Rules (领域规则)
 
-# Frontend Rules
+本文件在 DSH 进入 `frontend/` 目录时自动加载。涉及前端改动时与根 `AGENTS.md` 同时适用。
 
 - API调用集中在`frontend/src/api/`，保持`credentials: include`和CSRF注入。
 - 后端`SourceDTO`与SSE事件变化必须同步`types.ts`、stream reader和相关组件。

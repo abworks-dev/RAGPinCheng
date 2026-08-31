@@ -24,13 +24,16 @@ def classify(paths: list[str]) -> dict[str, bool]:
     for raw in normalized:
         path = PurePosixPath(raw)
         name = path.name
-        known = raw.startswith((".github/", ".claude/", "docs/", "frontend/", "api/", "src/", "scripts/", "services/", "gpu_service/", "asr_service/", "tests/", "docker/")) or name in {
-            ".dockerignore", ".env.example", ".gitignore", "AGENTS.md", "CLAUDE.md", "README.md", "TODO.md",
+        known = raw.startswith((".github/", "docs/", "frontend/", "api/", "src/", "scripts/", "services/", "gpu_service/", "asr_service/", "tests/", "docker/")) or name in {
+            ".dockerignore", ".env.example", ".gitignore", "AGENTS.md", "README.md", "TODO.md",
             "package.json", "package-lock.json", "requirements.txt", "requirements-prod.txt", "requirements-ci.txt",
         }
         all_known = all_known and known
-        if raw.startswith((".github/", ".claude/")) or name in {"AGENTS.md", "CLAUDE.md"}:
+        if raw.startswith(".github/"):
             result["collaboration"] = True
+        if name == "AGENTS.md" or raw.endswith("/AGENTS.md"):
+            result["collaboration"] = True
+            continue
         if raw.startswith(("api/", "src/", "scripts/", "services/", "gpu_service/", "asr_service/", "tests/")) or name in {"requirements.txt", "requirements-prod.txt", "requirements-ci.txt"}:
             result["python"] = True
         if raw.startswith("frontend/") or name in {"package.json", "package-lock.json"}:

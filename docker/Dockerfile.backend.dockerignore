@@ -15,7 +15,6 @@ __pycache__
 # Local dev artifacts
 .env
 .env.example
-.claude/
 
 # Frontend: we ship the SOURCE so the node stage can build it inside the
 # image. Exclude local build artifacts and node_modules to keep the context
@@ -36,7 +35,7 @@ app.py
 # Repo docs / scratch
 README.md
 README_zh.md
-CLAUDE.md
+AGENTS.md
 TODO
 *.html
 eval_run.log

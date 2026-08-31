@@ -106,7 +106,7 @@ python scripts/run_eval_retrieval.py --strict-staleness
 - [受管资料生产迁移 Runbook](docs/migrations/managed-content-production-runbook.md)
 - [Office 转换运维说明](docs/operations/OFFICE_CONVERSION.md)
 - [用户验收指南](docs/USER_ACCEPTANCE.md)
-- [开发规则与架构不变量](CLAUDE.md)
+- [开发规则与架构不变量](AGENTS.md)
 - [当前产品待办](TODO.md)
 
 ## 安全边界

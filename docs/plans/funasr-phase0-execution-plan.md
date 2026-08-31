@@ -55,7 +55,7 @@
 ### 1.2 不修改项（黑名单）
 
 - 不修改 `gpu_service/app.py`、`models.py`、`config.py`、`requirements.txt`、`.env`、`schemas.py`、测试。
-- 不修改 `src/`、`api/`、`frontend/`、`prompts/`、`docker/`、`requirements*.txt`、根 `CLAUDE.md` / `AGENTS.md` / `TODO.md`（除本计划相关注释）。
+- 不修改 `src/`、`api/`、`frontend/`、`prompts/`、`docker/`、`requirements*.txt`、根 `AGENTS.md` / `TODO.md`（除本计划相关注释）。
 - 不修改 `data/*.sqlite*`、Qdrant volume、`media/`、`docs/`、`data/parsed/`。
 - 不动 NSSM / 计划任务 / Windows 防火墙 / 启动项。
 - 不重启 `gpu_service`；不发送其重启信号；不动其 `gunicorn` / `uvicorn` worker。

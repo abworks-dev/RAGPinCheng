@@ -90,6 +90,5 @@ ChatSession
 
 ## 相关决策
 
-- 暂无独立 ADR；查询拆分的 Phase A 评测方案见 plan 文件
-  `${LOCAL_USER_HOME}/.claude/plans/lexical-wobbling-fairy.md`（本仓库外）。
+- 暂无独立 ADR；查询拆分的 Phase A 评测方案见对应功能计划文档（本仓库外历史会话缓存，不视为权威来源）。
 

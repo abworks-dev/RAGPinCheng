@@ -1,12 +1,6 @@
----
-paths:
-  - "tests/**/*"
-  - "scripts/tests/**/*"
-  - ".github/workflows/**/*.yml"
-  - ".github/workflows/**/*.yaml"
----
+# Testing and CI Rules (领域规则)
 
-# Testing and CI Rules
+本文件在 DSH 进入 `tests/`、`scripts/tests/`、`.github/workflows/` 等测试相关目录时自动加载。涉及测试/CI 改动时与根 `AGENTS.md` 同时适用。
 
 - 修复失败前先定位具体文件、实际值和环境差异，不得只为让 CI 通过而更新期望值、跳过测试或缩小测试范围。
 - 文本源码的跨平台内容哈希必须先统一为 LF，或直接基于 Git blob；禁止将受 `core.autocrlf` 影响的工作树原始字节哈希直接固化为跨平台 CI 基线。
