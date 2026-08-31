@@ -420,6 +420,9 @@ describe("AdminManagedContentPage", () => {
     );
     expect(screen.getAllByText("共享").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByTestId("shared-library-row-video-1")).toHaveTextContent("待发布");
+    const addressBar = screen.getByTestId("managed-folder-address");
+    expect(within(addressBar).getByText("共享")).toHaveClass("rounded-full");
+    expect(within(addressBar).queryByRole("button", { name: "一级课程" })).not.toBeInTheDocument();
     const sharedFolderRow = screen.getByTestId("shared-library-row-folder-1");
     expect(within(sharedFolderRow).getByRole("button", { name: "打开文件夹“一级课程”" })).toBeEnabled();
     expect(within(sharedFolderRow).getByRole("button", { name: "查看文件夹“一级课程”的详细信息" })).toBeDisabled();
@@ -475,6 +478,10 @@ describe("AdminManagedContentPage", () => {
 
     fireEvent.click(sharedFolderRow);
     await waitFor(() => expect(mocks.externalEntries).toHaveBeenLastCalledWith("source-1", "一级课程"));
+    expect(within(addressBar).getByRole("button", { name: "一级课程" })).toBeInTheDocument();
+    fireEvent.click(within(addressBar).getByRole("button", { name: "返回上一目录" }));
+    await waitFor(() => expect(mocks.externalEntries).toHaveBeenLastCalledWith("source-1", ""));
+    expect(within(addressBar).queryByRole("button", { name: "一级课程" })).not.toBeInTheDocument();
   });
 
   it("shows library-wide status counts at the root while keeping the file list empty", async () => {
