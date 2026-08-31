@@ -47,7 +47,12 @@ from src.transcription.types import (
     TranscriptionJobStatus,
     validate_uuid,
 )
-from src.transcription.workflow import TranscriptionPersistenceWorkflow, build_pending_job
+from src.transcription.workflow import (
+    TranscriptionPersistenceWorkflow,
+    build_pending_job,
+    build_pending_preparation_job,
+    compute_execution_identity,
+)
 
 from .db import connect
 from .transcription_artifacts import LocalTranscriptionArtifactStore
@@ -167,28 +172,25 @@ class TranscriptionApplicationService:
                 )
             else:
                 profile = self.resolve_profile(profile_id, operation)
-            prepared = self.preparer.prepare(media_id)
-            execution = TranscriptionExecutionConfig.create(
-                profile, prepared.input_ref, language="zh-CN", timeout_ms=self.job_timeout_ms,
-            )
-            snapshot = ProfileSnapshot.create(profile, execution)
-            provider_config = execution.provider_config
+            provider_config = profile.provider_config
             if type(provider_config) not in (
                 RemoteAsrServiceConfig, FasterWhisperRemoteConfig,
                 Qwen3AsrRemoteConfig, WhisperXRemoteConfig,
             ):
                 raise ContractValidationError("unsupported_application_profile", "profile_id")
-            record = build_pending_job(
+            record = build_pending_preparation_job(
                 job_id=str(uuid.uuid4()),
+                media_id=media_id,
                 request_idempotency_key=request_idempotency_key,
                 attempt_number=store.next_attempt_number(media_id),
-                input_ref=prepared.input_ref,
-                execution=execution,
-                snapshot=snapshot,
-                created_at=int(self.clock()),
-                created_by=created_by,
+                profile_id=profile.profile_id,
+                provider_key=profile.provider_key,
                 model_id=provider_config.model_id,
                 model_revision=provider_config.model_revision,
+                profile_definition_version=profile.profile_definition_version,
+                config_hash=profile.config_hash,
+                created_at=int(self.clock()),
+                created_by=created_by,
                 scheme_snapshot=scheme_snapshot,
             )
             created = store.create_job(record)
@@ -219,20 +221,48 @@ class TranscriptionApplicationService:
                 TranscriptionJobStatus.succeeded,
             ):
                 raise ContractValidationError("retry_requires_terminal_job", "previous_job_id")
-            prepared = self.preparer.prepare(previous.media_id)
-            record = build_pending_job(
-                job_id=str(uuid.uuid4()),
-                request_idempotency_key=request_idempotency_key,
-                attempt_number=store.next_attempt_number(previous.media_id),
-                input_ref=prepared.input_ref,
-                execution=previous.execution_config,
-                snapshot=previous.profile_snapshot,
-                created_at=int(self.clock()),
-                created_by=created_by,
-                model_id=previous.model_id,
-                model_revision=previous.model_revision,
-                scheme_snapshot=previous.scheme_snapshot,
-            )
+            if (
+                previous.execution_config is None
+                or previous.profile_snapshot is None
+                or previous.audio_sha256 is None
+            ):
+                # The previous attempt failed while preparing audio, so the
+                # new attempt starts over from the preparing_audio phase.
+                profile_id = previous.profile_id
+                profile = self.resolve_profile(profile_id, ProfileOperation.retry)
+                if previous.scheme_snapshot is not None:
+                    profile = _apply_scheme_parameters(profile, previous.scheme_snapshot.parameters)
+                provider_config = profile.provider_config
+                record = build_pending_preparation_job(
+                    job_id=str(uuid.uuid4()),
+                    media_id=previous.media_id,
+                    request_idempotency_key=request_idempotency_key,
+                    attempt_number=store.next_attempt_number(previous.media_id),
+                    profile_id=profile.profile_id,
+                    provider_key=profile.provider_key,
+                    model_id=provider_config.model_id,
+                    model_revision=provider_config.model_revision,
+                    profile_definition_version=profile.profile_definition_version,
+                    config_hash=profile.config_hash,
+                    created_at=int(self.clock()),
+                    created_by=created_by,
+                    scheme_snapshot=previous.scheme_snapshot,
+                )
+            else:
+                prepared = self.preparer.prepare(previous.media_id)
+                record = build_pending_job(
+                    job_id=str(uuid.uuid4()),
+                    request_idempotency_key=request_idempotency_key,
+                    attempt_number=store.next_attempt_number(previous.media_id),
+                    input_ref=prepared.input_ref,
+                    execution=previous.execution_config,
+                    snapshot=previous.profile_snapshot,
+                    created_at=int(self.clock()),
+                    created_by=created_by,
+                    model_id=previous.model_id,
+                    model_revision=previous.model_revision,
+                    scheme_snapshot=previous.scheme_snapshot,
+                )
             created = store.create_job(record)
             if (
                 created.media_id != previous.media_id
@@ -255,6 +285,43 @@ class TranscriptionApplicationService:
             if job.status is not TranscriptionJobStatus.pending:
                 return job
             prepared = self.preparer.prepare(job.media_id)
+            if job.stage is TranscriptionJobStage.preparing_audio:
+                if (
+                    job.execution_config is not None
+                    or job.profile_snapshot is not None
+                    or job.result_version_id is not None
+                ):
+                    raise ContractValidationError("invalid_preparing_job", "job.stage")
+                profile_id = job.profile_id
+                try:
+                    profile = self.resolve_profile(profile_id, ProfileOperation.new_attempt)
+                except ContractValidationError:
+                    raise
+                if job.scheme_snapshot is not None:
+                    profile = _apply_scheme_parameters(profile, job.scheme_snapshot.parameters)
+                execution = TranscriptionExecutionConfig.create(
+                    profile, prepared.input_ref, language="zh-CN", timeout_ms=self.job_timeout_ms,
+                )
+                snapshot = ProfileSnapshot.create(profile, execution)
+                execution_identity = compute_execution_identity(
+                    input_ref=prepared.input_ref,
+                    execution=execution,
+                    snapshot=snapshot,
+                    model_id=job.model_id,
+                    model_revision=job.model_revision,
+                )
+                job = store.finalize_job_input(
+                    job.id,
+                    input_ref=prepared.input_ref,
+                    execution=execution,
+                    snapshot=snapshot,
+                    execution_identity=execution_identity,
+                    model_id=job.model_id,
+                    model_revision=job.model_revision,
+                    expected_updated_at=job.updated_at,
+                    now=self._next_now(job, self.clock),
+                )
+            job = store.load_job(job_id)
             if prepared.input_ref.to_json_dict() != {
                 "media_id": job.media_id,
                 "input_kind": job.input_kind,

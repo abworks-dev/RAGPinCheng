@@ -25,7 +25,7 @@ from src.transcription.profile_catalog import (
     WHISPERX_NATURAL_PROFILE_ID,
     WHISPERX_PROFILE_ID,
 )
-from src.transcription.types import TimeUnit, TranscriptionJobStatus
+from src.transcription.types import TimeUnit, TranscriptionJobStage, TranscriptionJobStatus
 
 MEDIA_ID = "11111111-1111-4111-8111-111111111111"
 REQUEST_ID = "22222222-2222-4222-8222-222222222222"
@@ -83,10 +83,10 @@ class FakeFactory:
 
     def create(self, ports):
         self.created_ports.append(ports)
-        return FakeRemoteProvider(ports)
+        return FakeRemoteProvider(ports, provider_key=self.provider_key)
 
 
-def make_service(tmp_path, admitted_profile_ids=None):
+def make_service(tmp_path, admitted_profile_ids=None, provider_keys=("funasr-sensevoice",)):
     db_path = tmp_path / "app.sqlite"
     init_db(db_path, backup_dir=tmp_path / "backups")
     conn = connect(db_path)
@@ -113,7 +113,7 @@ def make_service(tmp_path, admitted_profile_ids=None):
             expected_api_version="asr-service/1",
             admitted_profile_ids=admitted_profile_ids,
         ),
-        ProviderRegistry((FakeFactory(),)),
+        ProviderRegistry(tuple(sorted(FakeFactory(provider_key=key) for key in provider_keys))),
         FfmpegMediaAudioPreparer(media_root, "fake-ffmpeg", 10, AudioRunner()),
         LocalTranscriptionArtifactStore((tmp_path / "artifacts").resolve()),
         60_000,
@@ -200,7 +200,10 @@ def test_scheme_snapshot_is_persisted_and_retry_ignores_later_scheme_changes(tmp
     assert job.profile_id == FUNASR_SENSEVOICE_PROFILE_ID
     assert job.scheme_id == custom["id"]
     assert job.scheme_snapshot.version == 1
-    assert job.execution_config.segmentation_config.max_segment_chars == 180
+    assert job.stage is TranscriptionJobStage.preparing_audio
+    assert job.scheme_snapshot.parameters["max_chars"] == 180
+    assert job.scheme_snapshot.parameters["max_duration_ms"] == 20_000
+    assert job.scheme_snapshot.parameters["merge_gap_ms"] == 600
 
     conn = factory()
     try:
@@ -225,9 +228,12 @@ def test_scheme_snapshot_is_persisted_and_retry_ignores_later_scheme_changes(tmp
         created_by=1,
     )
     assert retry.scheme_snapshot == job.scheme_snapshot
-    assert retry.execution_config == job.execution_config
+    assert retry.stage is TranscriptionJobStage.preparing_audio
 
     result = service.run_job(retry.id)
+    assert result.status is TranscriptionJobStatus.succeeded
+    assert result.execution_config is not None
+    assert result.execution_config.segmentation_config.max_segment_chars == 180
     conn = factory()
     try:
         version = conn.execute(
@@ -251,7 +257,9 @@ def test_scheme_snapshot_is_persisted_and_retry_ignores_later_scheme_changes(tmp
 def test_whisperx_system_schemes_use_one_admitted_runtime_profile(
     tmp_path, scheme_id, preset, max_duration_ms
 ):
-    service, _factory = make_service(tmp_path, (WHISPERX_BALANCED_PROFILE_ID,))
+    service, _factory = make_service(
+        tmp_path, (WHISPERX_BALANCED_PROFILE_ID,), provider_keys=("whisperx",)
+    )
 
     job = service.create_pending_job(
         media_id=MEDIA_ID,
@@ -264,12 +272,20 @@ def test_whisperx_system_schemes_use_one_admitted_runtime_profile(
     assert job.profile_id == WHISPERX_BALANCED_PROFILE_ID
     assert job.scheme_id == scheme_id
     assert job.scheme_snapshot.scheme_id == scheme_id
-    assert job.execution_config.segmentation_config.preset == preset
-    assert job.execution_config.segmentation_config.max_segment_duration_ms == max_duration_ms
+    assert job.stage is TranscriptionJobStage.preparing_audio
+    assert job.scheme_snapshot.parameters["segmentation_preset"] == preset
+    assert job.scheme_snapshot.parameters["max_duration_ms"] == max_duration_ms
+    result = service.run_job(job.id)
+    assert result.status is TranscriptionJobStatus.succeeded
+    assert result.execution_config is not None
+    assert result.execution_config.segmentation_config.preset == preset
+    assert result.execution_config.segmentation_config.max_segment_duration_ms == max_duration_ms
 
 
 def test_custom_whisperx_scheme_uses_fixed_runtime_and_frozen_parameters(tmp_path):
-    service, factory = make_service(tmp_path, (WHISPERX_BALANCED_PROFILE_ID,))
+    service, factory = make_service(
+        tmp_path, (WHISPERX_BALANCED_PROFILE_ID,), provider_keys=("whisperx",)
+    )
     conn = factory()
     try:
         custom = create_scheme(
@@ -300,7 +316,11 @@ def test_custom_whisperx_scheme_uses_fixed_runtime_and_frozen_parameters(tmp_pat
     assert job.profile_id == WHISPERX_BALANCED_PROFILE_ID
     assert job.scheme_id == custom["id"]
     assert job.scheme_snapshot.parameters["max_duration_ms"] == 22_000
-    assert job.execution_config.segmentation_config.max_segment_chars == 260
+    assert job.stage is TranscriptionJobStage.preparing_audio
+    result = service.run_job(job.id)
+    assert result.status is TranscriptionJobStatus.succeeded
+    assert result.execution_config is not None
+    assert result.execution_config.segmentation_config.max_segment_chars == 260
 
 def test_cancelled_job_is_terminal_and_worker_does_not_revive_it(tmp_path):
     service, factory = make_service(tmp_path)

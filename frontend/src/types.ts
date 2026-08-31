@@ -1140,7 +1140,7 @@ export type TranscriptionJob = {
   status: TranscriptionJobStatus;
   stage: string | null;
   processed_ms: number;
-  total_ms: number;
+  total_ms: number | null;
   failure_error_code: string | null;
   error_summary: string | null;
   failure: TranscriptionFailure | null;

@@ -1670,7 +1670,7 @@ class TranscriptionJobDTO(BaseModel):
     status: str
     stage: str | None
     processed_ms: int
-    total_ms: int
+    total_ms: int | None = None
     failure_error_code: str | None
     error_summary: str | None
     failure: "TranscriptionFailureDTO | None" = None

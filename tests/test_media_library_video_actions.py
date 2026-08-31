@@ -223,7 +223,15 @@ def _replacement_candidate(conn, store, workflow, profile, base):
     )
     store.create_job(job)
     running = job
-    for now, stage in enumerate(TranscriptionJobStage, start=53):
+    for now, stage in enumerate(
+        (
+            TranscriptionJobStage.validating_input,
+            TranscriptionJobStage.transcribing,
+            TranscriptionJobStage.normalizing,
+            TranscriptionJobStage.formatting,
+        ),
+        start=53,
+    ):
         running = store.mark_running(
             job.id, stage, expected_updated_at=running.updated_at, now=now
         )

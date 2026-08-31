@@ -76,6 +76,7 @@ const publicationMeta: Record<string, { label: string; variant: StatusVariant }>
 };
 
 const stageLabels: Record<string, string> = {
+  preparing_audio: "准备音轨",
   validating_input: "校验输入",
   transcribing: "转录中",
   normalizing: "规范化",
@@ -115,17 +116,18 @@ function JobSummary({ job }: { job: TranscriptionJob }) {
   if (job.status === "failed") return <p className="mt-1 text-ui-xs text-destructive">{job.failure?.message || job.error_summary || job.failure_error_code || "转录失败"}</p>;
   if (job.status === "cancelled") return <p className="mt-1 text-ui-xs text-muted-foreground">任务已取消，可重新转录。</p>;
   const stage = job.stage ? stageLabels[job.stage] || job.stage : "排队中";
-  if (job.status === "pending") return <p className="mt-1 text-ui-xs text-muted-foreground">{stage} · 等待服务调度</p>;
+  if (job.status === "pending") return <p className="mt-1 text-ui-xs text-muted-foreground">{stage}{job.stage === "preparing_audio" ? "" : " · 等待服务调度"}</p>;
 
   const elapsedMs = Math.max(0, Date.now() - (job.started_at ?? job.created_at) * 1000);
-  const hasCheckpoint = job.total_ms > 0 && job.processed_ms > 0 && job.processed_ms < job.total_ms;
-  const progress = hasCheckpoint ? Math.min(100, Math.round((job.processed_ms / job.total_ms) * 100)) : null;
+  const totalMs = job.total_ms;
+  const hasCheckpoint = totalMs != null && totalMs > 0 && job.processed_ms > 0 && job.processed_ms < totalMs;
+  const progress = hasCheckpoint ? Math.min(100, Math.round((job.processed_ms / totalMs) * 100)) : null;
   const isTranscribing = job.stage === "transcribing";
-  const durationDetail = job.total_ms > 0
-    ? `视频时长 ${formatDuration(job.total_ms)}`
+  const durationDetail = totalMs != null && totalMs > 0
+    ? `视频时长 ${formatDuration(totalMs)}`
     : "正在读取视频时长";
-  const detail = hasCheckpoint
-    ? `${formatDuration(job.processed_ms)} / ${formatDuration(job.total_ms)}`
+  const detail = hasCheckpoint && totalMs != null
+    ? `${formatDuration(job.processed_ms)} / ${formatDuration(totalMs)}`
     : isTranscribing
       ? `模型整段处理中 · ${durationDetail} · 已耗时 ${formatDuration(elapsedMs)}`
       : "正在完成结果处理";
