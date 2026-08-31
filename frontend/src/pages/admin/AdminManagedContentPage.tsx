@@ -748,6 +748,7 @@ function UploadTasksPanel({
   const [detail, setDetail] = useState<ManagedUploadTask | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [deleteTask, setDeleteTask] = useState<ManagedUploadTask | null>(null);
+  const [deleteTasks, setDeleteTasks] = useState<ManagedUploadTask[] | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [transcriptionTask, setTranscriptionTask] = useState<ManagedUploadTask | null>(null);
   const [schemeId, setSchemeId] = useState("");
@@ -841,6 +842,48 @@ function UploadTasksPanel({
     } catch (caught) { toast.error(caught instanceof Error ? caught.message : "删除任务及资料失败"); }
     finally { setDeleteBusy(false); }
   };
+  const deleteUploadTasks = async () => {
+    if (!deleteTasks || deleteTasks.length === 0 || deleteBusy) return;
+    setDeleteBusy(true);
+    const failures: { label: string; reason: string }[] = [];
+    let archivedCount = 0;
+    let cleanedCount = 0;
+    try {
+      for (const task of deleteTasks) {
+        try {
+          const full = task.entries ? task : await adminContentApi.uploadTask(task.batch_id);
+          const items = (full.entries || []).filter((entry) => entry.item_id && entry.version_id).map((entry) => ({ item_id: entry.item_id!, expected_version_id: entry.version_id! }));
+          if (!items.length) {
+            await adminContentApi.deleteOrphanUploadTask(task.batch_id);
+            cleanedCount += 1;
+            continue;
+          }
+          const result = await adminContentApi.bulkArchive(items);
+          if (result.failed) throw new Error(`有 ${result.failed} 份资料未能移入回收站`);
+          archivedCount += result.succeeded;
+        } catch (taskError) {
+          failures.push({
+            label: task.upload_mode === "folder" ? "文件夹上传" : "文件上传",
+            reason: taskError instanceof Error ? taskError.message : "删除失败",
+          });
+        }
+      }
+      const handledCount = deleteTasks.length - failures.length;
+      if (failures.length === 0) {
+        toast.success(`已将 ${archivedCount} 份资料移入回收站${cleanedCount ? `，清理 ${cleanedCount} 条无关联记录` : ""}，共处理 ${handledCount} 个任务`);
+      } else if (handledCount > 0) {
+        toast.error(`已处理 ${handledCount} 个任务，${failures.length} 个失败：${failures.map((failure) => `${failure.label}（${failure.reason}）`).join("；")}`);
+      } else {
+        toast.error(`删除失败：${failures.map((failure) => `${failure.label}（${failure.reason}）`).join("；")}`);
+      }
+      setDeleteTasks(null);
+      setSelected([]);
+      await loadTasks(true);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "批量删除任务失败");
+      setDeleteTasks(null);
+    } finally { setDeleteBusy(false); }
+  };
   const openBatchTranscription = async (task: ManagedUploadTask) => {
     setTranscriptionTask(task);
     setSchemeId("");
@@ -881,6 +924,9 @@ function UploadTasksPanel({
     selectableTasks.every((task) => selected.includes(task.batch_id));
   const selectedTasks = visibleTasks.filter((task) =>
     selected.includes(task.batch_id),
+  );
+  const deletableSelectedTasks = selectedTasks.filter(
+    (task) => canDelete && task.status !== "processing",
   );
   const changePage = (nextPage: number) => {
     setSelected([]);
@@ -1110,6 +1156,17 @@ function UploadTasksPanel({
                   disabledReason: "至少选择 2 个上传任务",
                   onSelect: exportSelected,
                 },
+                ...(canDelete
+                  ? [{
+                      key: "delete_upload_tasks",
+                      label: `删除所选任务（${deletableSelectedTasks.length}）`,
+                      icon: <Trash2 className="size-4" />,
+                      destructive: true,
+                      disabled: deletableSelectedTasks.length === 0,
+                      disabledReason: selected.length === 0 ? "请先选择上传任务" : deletableSelectedTasks.length === 0 ? "所选任务均不可删除（进行中任务不能删除）" : undefined,
+                      onSelect: () => setDeleteTasks(deletableSelectedTasks),
+                    }]
+                  : []),
               ]}
             />
           </div>
@@ -1187,7 +1244,7 @@ function UploadTasksPanel({
               {visibleTasks.map((task) => (
                 <li
                   key={task.batch_id}
-                  className="grid grid-cols-[3rem_minmax(0,1fr)] gap-x-4 gap-y-3 px-4 py-4 transition-colors duration-normal hover:bg-surface-muted/60 sm:px-5 xl:grid-cols-[3rem_minmax(10rem,1.7fr)_7.5rem_minmax(11rem,1fr)_8rem_6rem_12rem] xl:items-center"
+                  className="grid grid-cols-[3rem_minmax(0,1fr)] gap-x-4 gap-y-3 px-4 py-4 transition-colors duration-normal hover:bg-surface-muted/60 sm:px-5 xl:grid-cols-[3rem_minmax(10rem,1.7fr)_7.5rem_minmax(11rem,1fr)_8rem_6rem_12rem] xl:items-center xl:py-3"
                   data-testid="upload-task-row"
                 >
                   <Checkbox
@@ -1336,6 +1393,20 @@ function UploadTasksPanel({
           <DialogHeader><DialogTitle>删除任务及资料</DialogTitle><DialogDescription id="upload-delete-description">任务记录和已生成资料将一起移入回收站，不会立即永久删除。</DialogDescription></DialogHeader>
           <div className="max-h-64 overflow-y-auto rounded-ui-md border border-border p-3 text-ui-sm">{(deleteTask?.entries || []).filter((entry) => entry.item_id).map((entry) => <div key={entry.sequence} className="flex items-center justify-between gap-3 border-b border-border py-2 last:border-0"><span className="min-w-0 break-all">{entry.relative_path || entry.filename}</span><span className="shrink-0 text-ui-xs text-muted-foreground">移入回收站</span></div>)}</div>
           <DialogFooter><Button variant="outline" disabled={deleteBusy} onClick={() => setDeleteTask(null)}>取消</Button><Button variant="destructive" disabled={deleteBusy} onClick={() => void deleteUploadTask()}><Trash2 className="size-4" />{deleteBusy ? "处理中…" : "确认移入回收站"}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(deleteTasks)} onOpenChange={(open) => { if (!open && !deleteBusy) setDeleteTasks(null); }}>
+        <DialogContent aria-describedby="upload-batch-delete-description">
+          <DialogHeader><DialogTitle>删除所选上传任务</DialogTitle><DialogDescription id="upload-batch-delete-description">选中的 {deleteTasks?.length ?? 0} 个任务记录和已生成资料将一起移入回收站，不会立即永久删除。进行中的任务已排除在外。</DialogDescription></DialogHeader>
+          <ul className="max-h-64 divide-y divide-border overflow-y-auto rounded-ui-md border border-border text-ui-sm">
+            {(deleteTasks || []).map((task) => (
+              <li key={task.batch_id} className="flex items-center justify-between gap-3 px-3 py-2">
+                <span className="min-w-0 break-all">{task.upload_mode === "folder" ? "文件夹上传" : "文件上传"} · {task.target_path}</span>
+                <span className="shrink-0 text-ui-xs text-muted-foreground">{task.total_files} 个文件</span>
+              </li>
+            ))}
+          </ul>
+          <DialogFooter><Button variant="outline" disabled={deleteBusy} onClick={() => setDeleteTasks(null)}>取消</Button><Button variant="destructive" disabled={deleteBusy} onClick={() => void deleteUploadTasks()}><Trash2 className="size-4" />{deleteBusy ? "处理中…" : `确认移入回收站（${deleteTasks?.length ?? 0}）`}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
       <Dialog open={Boolean(transcriptionTask)} onOpenChange={(open) => { if (!open && !transcriptionBusy) setTranscriptionTask(null); }}>
