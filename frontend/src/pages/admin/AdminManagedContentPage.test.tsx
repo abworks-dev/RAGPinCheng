@@ -749,6 +749,16 @@ describe("AdminManagedContentPage", () => {
     expect(await screen.findByTestId(`managed-folder-row-${folder.id}`)).toBeInTheDocument();
   });
 
+it("uses comfortable selection and type tracks in the managed content table", async () => {
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+
+    const table = screen.getByRole("table");
+    expect(within(table).getByRole("columnheader", { name: "选择当前页资料" })).toHaveClass("w-12", "px-3");
+    expect(within(table).getByRole("columnheader", { name: /类型/ })).toHaveClass("w-16", "px-2");
+    expect(within(table).getAllByRole("row")[1].firstElementChild).toHaveClass("w-12", "px-3");
+  });
+
   it("shows a folder-only root instead of the empty state", async () => {
     mocks.categories.mockResolvedValue([category, projectCategory]);
     mocks.items.mockResolvedValue({ items: [], total: 0, status_counts: {} });

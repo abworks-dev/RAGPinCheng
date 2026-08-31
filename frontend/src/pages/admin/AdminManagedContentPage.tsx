@@ -1166,7 +1166,7 @@ function UploadTasksPanel({
         ) : (
           <>
             <div
-              className="hidden grid-cols-[2rem_minmax(10rem,1.7fr)_7.5rem_minmax(11rem,1fr)_8rem_6rem_12rem] gap-x-4 border-b border-border bg-surface-muted/40 px-5 py-2.5 text-ui-xs font-medium text-muted-foreground xl:grid"
+              className="hidden grid-cols-[3rem_minmax(10rem,1.7fr)_7.5rem_minmax(11rem,1fr)_8rem_6rem_12rem] gap-x-4 border-b border-border bg-surface-muted px-5 py-3 text-ui-sm font-medium text-muted-foreground xl:grid"
               data-testid="upload-task-header"
             >
               <Checkbox
@@ -1186,7 +1186,7 @@ function UploadTasksPanel({
               {visibleTasks.map((task) => (
                 <li
                   key={task.batch_id}
-                  className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-3 px-4 py-4 sm:px-5 xl:grid-cols-[2rem_minmax(10rem,1.7fr)_7.5rem_minmax(11rem,1fr)_8rem_6rem_12rem] xl:items-center xl:gap-x-4"
+                  className="grid grid-cols-[3rem_minmax(0,1fr)] gap-x-4 gap-y-3 px-4 py-4 transition-colors duration-normal hover:bg-surface-muted/60 sm:px-5 xl:grid-cols-[3rem_minmax(10rem,1.7fr)_7.5rem_minmax(11rem,1fr)_8rem_6rem_12rem] xl:items-center"
                   data-testid="upload-task-row"
                 >
                   <Checkbox
@@ -5769,20 +5769,22 @@ export function AdminManagedContentPage() {
                     >
                       <div className="flex items-start gap-3">
                         {(can("trash.restore") || can("trash.purge")) && (
-                          <Checkbox
-                            className="mt-0.5"
-                            aria-label={`选择恢复“${item.title}”`}
-                            checked={checked}
-                            onChange={() =>
-                              setTrashSelected((current) =>
-                                current.includes(item.item_id)
-                                  ? current.filter(
-                                      (id) => id !== item.item_id,
-                                    )
-                                    : [...current, item.item_id],
-                              )
-                            }
-                          />
+                          <span className="flex w-12 shrink-0 items-start">
+                            <Checkbox
+                              className="mt-0.5"
+                              aria-label={`选择恢复“${item.title}”`}
+                              checked={checked}
+                              onChange={() =>
+                                setTrashSelected((current) =>
+                                  current.includes(item.item_id)
+                                    ? current.filter(
+                                        (id) => id !== item.item_id,
+                                      )
+                                      : [...current, item.item_id],
+                                )
+                              }
+                            />
+                          </span>
                         )}
                         <div className="min-w-0 flex-1">
                           <p className="break-words font-medium">
@@ -6484,7 +6486,7 @@ export function AdminManagedContentPage() {
         </Card>
       )}
       <Card
-        className="shadow-surface [&_table]:!min-w-[56rem]"
+        className="shadow-surface [&_table]:!min-w-[68rem]"
         aria-labelledby="managed-list-title"
       >
         <div className="grid gap-3 border-b border-border px-4 py-4 xl:grid-cols-[minmax(13rem,1fr)_18rem_auto] xl:items-end min-[1400px]:grid-cols-[minmax(13rem,1fr)_24rem_auto] sm:px-5">
@@ -6791,11 +6793,11 @@ export function AdminManagedContentPage() {
           ) : (
             !error && (
               <>
-                <div className="hidden overflow-x-auto border-t border-border lg:block">
-                  <table className="w-full min-w-[72rem] text-ui-sm">
+                <div className="hidden overflow-x-auto lg:block">
+                  <table className="w-full text-ui-sm">
                     <thead className="border-b border-border bg-surface-muted text-left text-muted-foreground">
                       <tr>
-                        <th className="w-8 px-1.5 py-3">
+                        <th className="w-12 px-3 py-3">
                           <Checkbox
                             aria-label="选择当前页资料"
                             checked={allSelected}
@@ -6822,10 +6824,8 @@ export function AdminManagedContentPage() {
                             }
                             className={
                               key === "docType"
-                                ? "w-16 px-1 py-3 text-center font-medium"
-                                : key === "title"
-                                  ? "px-1.5 py-3 font-medium"
-                                  : "px-3 py-3 font-medium"
+                                ? "w-16 px-2 py-3 text-center font-medium"
+                                : "px-3 py-3 font-medium"
                             }
                           >
                             <button
@@ -6865,7 +6865,7 @@ export function AdminManagedContentPage() {
                               void moveItemTo(draggedItem, folder.id);
                             }}
                           >
-                            <td className="px-1.5 py-3">
+                            <td className="w-12 px-3 py-3">
                               <Checkbox
                                 aria-label={`选择文件夹${folderLabel}`}
                                 checked={selectedFolders.includes(folder.id)}
@@ -6876,10 +6876,10 @@ export function AdminManagedContentPage() {
                                 }
                               />
                             </td>
-                            <td className="px-1 py-3">
+                            <td className="w-16 px-2 py-3">
                               <ManagedItemType folder sharedFolder={folder.category_kind === "shared_folder"} compact />
                             </td>
-                            <td className="max-w-xs px-1.5 py-3">
+                            <td className="max-w-xs px-3 py-3">
                               <button
                                 type="button"
                                 className="block max-w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -6924,7 +6924,7 @@ export function AdminManagedContentPage() {
                             onDragEnd={() => setDraggedItem(null)}
                             className={`transition-colors duration-normal hover:bg-surface-muted/60 ${draggable ? "cursor-grab" : ""}`}
                           >
-                            <td className="px-1.5 py-3">
+                            <td className="w-12 px-3 py-3">
                               <Checkbox
                                 aria-label={`选择${item.title}`}
                                 checked={selected.includes(item.version_id)}
@@ -6945,13 +6945,13 @@ export function AdminManagedContentPage() {
                                 }
                               />
                             </td>
-                            <td className="px-1 py-3">
+                            <td className="w-16 px-2 py-3">
                               <ManagedItemType
                                 docType={item.doc_type}
                                 compact
                               />
                             </td>
-                            <td className="max-w-xs px-1.5 py-3">
+                            <td className="max-w-xs px-3 py-3">
                               <ManagedItemIdentity
                                 item={item}
                                 showCategoryPath={showGlobalResults}
@@ -6975,7 +6975,7 @@ export function AdminManagedContentPage() {
                     </tbody>
                   </table>
                 </div>
-                <ul className="divide-y divide-border border-t border-border lg:hidden">
+                <ul className="divide-y divide-border lg:hidden">
                   {sortedChildFolders.map((folder) => {
                     const folderLabel = `${folder.display_code} ${folder.display_name}`;
                     return (
@@ -6985,13 +6985,15 @@ export function AdminManagedContentPage() {
                         className={`min-h-16 space-y-2 px-4 py-3 sm:px-5 ${selectedFolders.includes(folder.id) ? "bg-primary/5" : ""}`}
                       >
                         <div className="flex items-start gap-3">
-                          <Checkbox
-                            className="mt-1"
-                            aria-label={`选择文件夹${folderLabel}`}
-                            checked={selectedFolders.includes(folder.id)}
-                            disabled={false}
-                            onChange={() => toggleFolderSelection(folder.id)}
-                          />
+                          <span className="flex w-12 shrink-0 items-start">
+                            <Checkbox
+                              className="mt-1"
+                              aria-label={`选择文件夹${folderLabel}`}
+                              checked={selectedFolders.includes(folder.id)}
+                              disabled={false}
+                              onChange={() => toggleFolderSelection(folder.id)}
+                            />
+                          </span>
                           <button
                             type="button"
                             className="flex min-w-0 flex-1 items-center gap-3 rounded-ui-md text-left transition-colors hover:bg-surface-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -7022,28 +7024,30 @@ export function AdminManagedContentPage() {
                         key={item.item_id}
                         className="space-y-3 px-4 py-4 sm:px-5"
                       >
-                        <div className="flex items-start gap-2">
-                          <Checkbox
-                            className="mt-0.5"
-                            aria-label={`选择${item.title}`}
-                            checked={selected.includes(item.version_id)}
-                            disabled={!rowSelectable}
-                            title={
-                              !rowSelectable
-                                ? "当前状态不可加入批量操作"
-                                : undefined
-                            }
-                            onChange={() =>
-                              setSelected((current) =>
-                                current.includes(item.version_id)
-                                  ? current.filter(
-                                      (id) => id !== item.version_id,
-                                    )
-                                  : [...current, item.version_id],
-                              )
-                            }
-                          />
-                          <ManagedItemType docType={item.doc_type} />
+                        <div className="flex items-start gap-3">
+                          <span className="flex w-12 shrink-0 items-start">
+                            <Checkbox
+                              className="mt-0.5"
+                              aria-label={`选择${item.title}`}
+                              checked={selected.includes(item.version_id)}
+                              disabled={!rowSelectable}
+                              title={
+                                !rowSelectable
+                                  ? "当前状态不可加入批量操作"
+                                  : undefined
+                              }
+                              onChange={() =>
+                                setSelected((current) =>
+                                  current.includes(item.version_id)
+                                    ? current.filter(
+                                        (id) => id !== item.version_id,
+                                      )
+                                    : [...current, item.version_id],
+                                )
+                              }
+                            />
+                          </span>
+                          <ManagedItemType docType={item.doc_type} compact />
                           <div className="min-w-0 flex-1">
                             <ManagedItemIdentity
                               item={item}

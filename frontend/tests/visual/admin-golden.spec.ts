@@ -22,7 +22,7 @@ for (const [navigationLabel, heading, slug] of [["资料管理", "资料管理",
       await mobileNavigation.click();
     }
     await page.getByRole("link", { name: navigationLabel === "索引任务" ? "资料管理" : navigationLabel, exact: true }).click();
-    if (navigationLabel === "索引任务") await page.getByRole("tab", { name: "索引任务", exact: true }).click();
+    if (navigationLabel === "索引任务") await page.getByRole("tab", { name: "发布任务", exact: true }).click();
     await expect(page.getByRole("heading", { name: heading })).toBeVisible();
     const viewport = page.viewportSize()!;
     if (heading === "资料管理") {
@@ -231,7 +231,7 @@ test("索引任务区域 accepted golden", async ({ page }) => {
     await page.getByRole("button", { name: "展开管理功能" }).click();
   }
   await page.getByRole("link", { name: "资料管理", exact: true }).click();
-  await page.getByRole("tab", { name: "索引任务", exact: true }).click();
+  await page.getByRole("tab", { name: "发布任务", exact: true }).click();
   const managedActivity = page.locator('section[aria-labelledby="managed-index-view-title"]');
   await expect(page.getByText("文档解析服务请求失败。", { exact: true })).toBeVisible();
   const viewport = page.viewportSize()!;
