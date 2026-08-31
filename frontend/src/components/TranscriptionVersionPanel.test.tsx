@@ -84,6 +84,38 @@ describe("TranscriptionVersionPanel", () => {
     );
   });
 
+  it("shows the transcription scheme used by each version", async () => {
+    const withScheme = {
+      ...awaitingVersion,
+      scheme_id: "whisperx-balanced-v2",
+      scheme_name: "WhisperX 均衡分段",
+      scheme_deleted: false,
+    };
+    mocks.listTranscriptVersions.mockResolvedValue([withScheme]);
+    render(<TranscriptionVersionPanel mediaId="media-1" embedded />);
+
+    expect(await screen.findByTestId("version-scheme-line")).toHaveTextContent(
+      "转录方案：WhisperX 均衡分段",
+    );
+    expect(screen.queryByText("原转录配置已删除")).not.toBeInTheDocument();
+  });
+
+  it("marks a removed custom scheme as deleted on the version", async () => {
+    const withRemovedScheme = {
+      ...awaitingVersion,
+      scheme_id: "custom-removed",
+      scheme_name: "自定义强校方案",
+      scheme_deleted: true,
+    };
+    mocks.listTranscriptVersions.mockResolvedValue([withRemovedScheme]);
+    render(<TranscriptionVersionPanel mediaId="media-1" embedded />);
+
+    expect(await screen.findByTestId("version-scheme-line")).toHaveTextContent(
+      "转录方案：自定义强校方案",
+    );
+    expect(screen.getByText("原转录配置已删除")).toBeInTheDocument();
+  });
+
   it("keeps multiple versions in a compact navigator and opens one workspace", async () => {
     const second = { ...revisedVersion, version_id: "33333333-3333-4333-8333-333333333333" };
     const third = { ...approvedVersion, version_id: "44444444-4444-4444-8444-444444444444" };

@@ -208,13 +208,61 @@ def _failure_dto(code: str | None) -> TranscriptionFailureDTO | None:
     return TranscriptionFailureDTO(code=code, message=message, retryable=retryable)
 
 
-def _job_dto(job) -> TranscriptionJobDTO:
+def _scheme_display(conn: sqlite3.Connection, scheme_id: str | None) -> tuple[str | None, bool]:
+    """Resolve a scheme's display name and whether it was later removed (archived or missing)."""
+    if not scheme_id:
+        return None, False
+    row = conn.execute(
+        "SELECT name, archived FROM transcription_schemes WHERE id=?", (scheme_id,)
+    ).fetchone()
+    if row is None:
+        return None, True
+    return str(row["name"]), bool(row["archived"])
+
+
+def _scheme_display_lookup(
+    conn: sqlite3.Connection, scheme_ids: list[str | None]
+) -> dict[str, tuple[str | None, bool]]:
+    unique_ids = sorted({str(scheme_id) for scheme_id in scheme_ids if scheme_id})
+    lookup: dict[str, tuple[str | None, bool]] = {}
+    if unique_ids:
+        placeholders = ",".join("?" for _ in unique_ids)
+        for row in conn.execute(
+            f"SELECT id,name,archived FROM transcription_schemes WHERE id IN ({placeholders})",
+            unique_ids,
+        ).fetchall():
+            lookup[str(row["id"])] = (str(row["name"]), bool(row["archived"]))
+    for scheme_id in unique_ids:
+        if scheme_id not in lookup:
+            lookup[scheme_id] = (None, True)
+    return lookup
+
+
+def _job_dto(
+    job,
+    scheme_lookup: dict[str, tuple[str | None, bool]] | None = None,
+) -> TranscriptionJobDTO:
+    scheme_name: str | None = None
+    scheme_deleted = False
+    if job.scheme_id:
+        if scheme_lookup is not None:
+            scheme_name, scheme_deleted = scheme_lookup.get(
+                job.scheme_id, (None, True)
+            )
+        else:
+            conn = connect()
+            try:
+                scheme_name, scheme_deleted = _scheme_display(conn, job.scheme_id)
+            finally:
+                conn.close()
     return TranscriptionJobDTO(
         job_id=job.id,
         media_id=job.media_id,
         attempt_number=job.attempt_number,
         profile_id=job.profile_id,
         scheme_id=job.scheme_id,
+        scheme_name=scheme_name,
+        scheme_deleted=scheme_deleted,
         status=job.status.value,
         stage=None if job.stage is None else job.stage.value,
         processed_ms=job.processed_ms,
@@ -288,7 +336,8 @@ def list_jobs(
             )
         except ContractValidationError:
             raise HTTPException(status_code=400, detail="转录任务查询参数不合法")
-        return [_job_dto(job) for job in jobs]
+        scheme_lookup = _scheme_display_lookup(conn, [item.scheme_id for item in jobs])
+        return [_job_dto(item, scheme_lookup) for item in jobs]
     finally:
         conn.close()
 
@@ -426,7 +475,7 @@ def start_media_transcription(
         if existing is not None:
             if existing["media_id"] != media_id or existing["scheme_id"] != body.scheme_id:
                 raise HTTPException(status_code=409, detail="本次提交与原请求不一致")
-            return _job_dto(SQLiteTranscriptionStore(conn).load_job(existing["id"]))
+            return _job_dto(SQLiteTranscriptionStore(conn).load_job(existing["id"]), _scheme_display_lookup(conn, [existing["scheme_id"]]))
         active = conn.execute(
             "SELECT id FROM transcription_jobs WHERE media_id=? AND status IN ('pending','running')",
             (media_id,),
@@ -517,7 +566,8 @@ def get_job(
     conn = connect()
     try:
         try:
-            return _job_dto(SQLiteTranscriptionStore(conn).load_job(job_id))
+            job = SQLiteTranscriptionStore(conn).load_job(job_id)
+            return _job_dto(job, _scheme_display_lookup(conn, [job.scheme_id]))
         except (KeyError, ContractValidationError):
             raise HTTPException(status_code=404, detail="转录任务不存在")
     finally:
@@ -547,7 +597,7 @@ def cancel_job(
                 (int(time.time()), cancelled.media_id, cancelled.media_id),
             )
             conn.commit()
-            return _job_dto(cancelled)
+            return _job_dto(cancelled, _scheme_display_lookup(conn, [cancelled.scheme_id]))
         except KeyError:
             raise HTTPException(status_code=404, detail="转录任务不存在")
         except (ContractValidationError, StoreConflictError):
@@ -607,7 +657,7 @@ def _retry_media_job(
                         "retryable": False,
                     },
                 )
-            return _job_dto(SQLiteTranscriptionStore(conn).load_job(existing["id"]))
+            return _job_dto(SQLiteTranscriptionStore(conn).load_job(existing["id"]), _scheme_display_lookup(conn, [existing["scheme_id"]]))
         active = conn.execute(
             """SELECT j.id FROM transcription_jobs j
                JOIN media_assets m ON m.media_id=j.media_id
@@ -838,13 +888,32 @@ def recover_publications_on_boot() -> tuple[str, ...]:
         conn.close()
 
 
-def _version_dto(version, current_version_id: str | None = None) -> TranscriptVersionDTO:
+def _version_dto(
+    version,
+    current_version_id: str | None = None,
+    scheme_lookup: dict[str, tuple[str | None, bool]] | None = None,
+) -> TranscriptVersionDTO:
+    scheme_name: str | None = None
+    scheme_deleted = False
+    if version.scheme_id:
+        if scheme_lookup is not None:
+            scheme_name, scheme_deleted = scheme_lookup.get(
+                version.scheme_id, (None, True)
+            )
+        else:
+            conn = connect()
+            try:
+                scheme_name, scheme_deleted = _scheme_display(conn, version.scheme_id)
+            finally:
+                conn.close()
     return TranscriptVersionDTO(
         version_id=version.id,
         media_id=version.media_id,
         source=version.source.value,
         profile_id=version.profile_id,
         scheme_id=version.scheme_id,
+        scheme_name=scheme_name,
+        scheme_deleted=scheme_deleted,
         provider_key=version.provider_key,
         model_id=version.model_id,
         model_revision=version.model_revision,
@@ -937,7 +1006,7 @@ def create_media_metadata_revision(
             request_idempotency_key=body.request_idempotency_key,
             now=int(time.time()),
         )
-        return _version_dto(version, store.current_head(media_id))
+        return _version_dto(version, store.current_head(media_id), _scheme_display_lookup(conn, [version.scheme_id]))
     except KeyError:
         raise HTTPException(status_code=404, detail="视频或正式转录版本不存在")
     except StoreConflictError as exc:
@@ -966,7 +1035,7 @@ def list_transcript_versions(media_id: str, _admin: CurrentUser = Depends(requir
         service = _build_publication_service(conn)
         versions = service.list_versions(media_id)
         current = service.store.current_head(media_id)
-        return [_version_dto(version, current) for version in versions]
+        return [_version_dto(version, current, _scheme_display_lookup(conn, [version.scheme_id for version in versions])) for version in versions]
     except ContractValidationError:
         raise HTTPException(status_code=400, detail="媒体标识不合法")
     finally:
@@ -1060,7 +1129,7 @@ def create_transcript_revision(
             edited_by=admin.id,
             request_idempotency_key=body.request_idempotency_key,
         )
-        return _version_dto(version, service.store.current_head(version.media_id))
+        return _version_dto(version, service.store.current_head(version.media_id), _scheme_display_lookup(conn, [version.scheme_id]))
     except KeyError:
         raise HTTPException(status_code=404, detail="基础转录版本不存在")
     except StoreConflictError as exc:
@@ -1098,7 +1167,7 @@ def review_transcript_version(
             reviewed_by=admin.id,
             review_note=body.review_note,
         )
-        return _version_dto(version, service.store.current_head(version.media_id))
+        return _version_dto(version, service.store.current_head(version.media_id), _scheme_display_lookup(conn, [version.scheme_id]))
     except KeyError:
         raise HTTPException(status_code=404, detail="转录版本不存在")
     except (ContractValidationError, StoreConflictError):
@@ -1113,7 +1182,7 @@ def return_version_to_review(version_id: str, _admin: CurrentUser = Depends(requ
     try:
         service = _build_publication_service(conn)
         version = service.return_to_review(version_id)
-        return _version_dto(version, service.store.current_head(version.media_id))
+        return _version_dto(version, service.store.current_head(version.media_id), _scheme_display_lookup(conn, [version.scheme_id]))
     except KeyError:
         raise HTTPException(status_code=404, detail="转录版本不存在")
     except (ContractValidationError, StoreConflictError):
@@ -1137,7 +1206,7 @@ def publish_transcript_version(
         if not result["reused"] and job is not None:
             enqueue_publication(str(job["id"]))
         return PublishTranscriptVersionResponse(
-            version=_version_dto(version, service.store.current_head(version.media_id)),
+            version=_version_dto(version, service.store.current_head(version.media_id), _scheme_display_lookup(conn, [version.scheme_id])),
             job=_publication_job_dto(job),
             reused=bool(result["reused"]),
         )
