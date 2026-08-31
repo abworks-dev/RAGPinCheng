@@ -72,6 +72,7 @@ class QdrantTranscriptPublicationIndexAdapter(PublicationIndexPort):
     artifacts: LocalTranscriptionArtifactStore
     media_title: Callable[[str], str]
     clock: Callable[[], int] = lambda: int(time.time())
+    resolve_category_key: Callable[[str], str | None] | None = None
 
     def _advance(self, index_job_id: str, target: PublicationIndexStatus) -> None:
         current = PublicationIndexStatus(str(self.store.load_publication_job(index_job_id)["status"]))
@@ -99,6 +100,7 @@ class QdrantTranscriptPublicationIndexAdapter(PublicationIndexPort):
                 version.id,
                 self.media_title(version.media_id),
             ).strip() or version.media_id
+            category_key = self.resolve_category_key(version.media_id) if self.resolve_category_key else None
             synthetic_source = DOCS_DIR / "教学视频" / "_media" / f"{version.media_id}.md"
             with tempfile.TemporaryDirectory(prefix="transcript-candidate-") as temp_dir:
                 markdown_path = Path(temp_dir) / "transcript.md"
@@ -112,6 +114,7 @@ class QdrantTranscriptPublicationIndexAdapter(PublicationIndexPort):
                     media_id=version.media_id,
                     transcript_version_id=version.id,
                     publication_target_id=request.target_index_id,
+                    category_key=category_key,
                 )
                 index_transcript_candidate(
                     doc,
@@ -137,6 +140,7 @@ class TranscriptionPublicationApplicationService:
     docs_root: Path
     media_title: Callable[[str], str]
     now: Callable[[], int] = lambda: int(time.time())
+    resolve_category_key: Callable[[str], str | None] | None = None
 
     def _current_profile(self, profile_id: str):
         resolved = resolve_profile(self.profiles, profile_id, ProfileOperation.publish_existing)
@@ -260,7 +264,8 @@ class TranscriptionPublicationApplicationService:
             )
             return _receipt_from_job(self.store.load_publication_job(index_job_id))
         adapter = QdrantTranscriptPublicationIndexAdapter(
-            self.store, self.artifacts, self.media_title, self.now
+            self.store, self.artifacts, self.media_title, self.now,
+            resolve_category_key=self.resolve_category_key,
         )
         workflow = TranscriptionPersistenceWorkflow(self.store, self.artifacts, adapter)
         try:

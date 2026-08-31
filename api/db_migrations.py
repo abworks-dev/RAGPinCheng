@@ -1338,6 +1338,23 @@ MIGRATIONS = (
             "CREATE INDEX idx_media_publication_requests_status_updated ON media_publication_requests(status,updated_at DESC)",
         ),
     ),
+    Migration(
+        38,
+        "shared_folder_mirror_categories",
+        (
+            "ALTER TABLE category_nodes ADD COLUMN external_relative_path TEXT",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_category_nodes_external_mirror "
+            "ON category_nodes(external_source_id, external_relative_path) "
+            "WHERE external_source_id IS NOT NULL AND external_relative_path IS NOT NULL",
+            "CREATE INDEX IF NOT EXISTS idx_category_nodes_external_mirror_path "
+            "ON category_nodes(external_relative_path) WHERE external_relative_path IS NOT NULL",
+        ),
+    ),
+    Migration(
+        39,
+        "transcription_jobs_postponed_audio_preparation",
+        ("RELAX_TRANSCRIPTION_JOBS_AUDIO_FOR_PREPARATION",),
+    ),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -1506,6 +1523,30 @@ def split_sql_statements(script: str) -> tuple[str, ...]:
     return tuple(statements)
 
 
+_POSTPONED_AUDIO_COLUMN_PATTERNS = (
+    (r"execution_identity TEXT NOT NULL", "execution_identity TEXT"),
+    (r"profile_snapshot_json TEXT NOT NULL", "profile_snapshot_json TEXT"),
+    (r"execution_config_json TEXT NOT NULL", "execution_config_json TEXT"),
+    (r"execution_fingerprint TEXT NOT NULL", "execution_fingerprint TEXT"),
+    (r"audio_sha256 TEXT NOT NULL", "audio_sha256 TEXT"),
+    (r"input_kind TEXT NOT NULL", "input_kind TEXT"),
+    (r"input_size_bytes INTEGER NOT NULL", "input_size_bytes INTEGER"),
+    (r"total_ms INTEGER NOT NULL", "total_ms INTEGER"),
+)
+
+
+def replace_transcription_jobs_columns(sql: str) -> str:
+    """Relax transcription_jobs input/execution columns to allow NULL.
+
+    A pending job is now created before the worker prepares the audio, so the
+    audio fingerprint, execution identity and execution config columns must be
+    nullable until `finalize_job_input` writes them.
+    """
+    for pattern, replacement in _POSTPONED_AUDIO_COLUMN_PATTERNS:
+        sql = re.sub(pattern, replacement, sql)
+    return sql
+
+
 def execute_migration_statement(conn: sqlite3.Connection, statement: str) -> None:
     if statement == "REPLACE_DOCUMENT_REVIEW_STATUSES":
         row = conn.execute(
@@ -1617,6 +1658,34 @@ def execute_migration_statement(conn: sqlite3.Connection, statement: str) -> Non
             )
         finally:
             conn.execute("PRAGMA writable_schema=RESET")
+        return
+    if statement == "RELAX_TRANSCRIPTION_JOBS_AUDIO_FOR_PREPARATION":
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='transcription_jobs'"
+        ).fetchone()
+        if row is None or not row[0]:
+            raise RuntimeError("migration_schema_mismatch")
+        sql = str(row[0])
+        old_stage = "stage TEXT CHECK (stage IS NULL OR stage IN ('validating_input','transcribing','normalizing','formatting'))"
+        new_stage = "stage TEXT CHECK (stage IS NULL OR stage IN ('validating_input','transcribing','normalizing','formatting','preparing_audio'))"
+        relaxed = (
+            replace_transcription_jobs_columns(sql)
+            .replace(old_stage, new_stage)
+        )
+        if new_stage not in relaxed:
+            raise RuntimeError("migration_schema_mismatch")
+        if relaxed == sql:
+            return
+        conn.execute("PRAGMA writable_schema=ON")
+        try:
+            conn.execute(
+                "UPDATE sqlite_master SET sql=? WHERE type='table' AND name='transcription_jobs'",
+                (relaxed,),
+            )
+        finally:
+            conn.execute("PRAGMA writable_schema=RESET")
+        schema_version = int(conn.execute("PRAGMA schema_version").fetchone()[0])
+        conn.execute(f"PRAGMA schema_version={schema_version + 1}")
         return
     match = re.fullmatch(
         r"ALTER TABLE ([A-Za-z_][A-Za-z0-9_]*) ADD COLUMN ([A-Za-z_][A-Za-z0-9_]*) .+",

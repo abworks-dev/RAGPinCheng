@@ -155,15 +155,34 @@ def _register_replacement_if_published(
     )
 
 
-def discover_video_files(root: Path, *, max_files: int = EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE) -> tuple[ScannedFile, ...]:
+@dataclass(frozen=True, slots=True)
+class ShareScan:
+    directories: tuple[str, ...]
+    files: tuple[ScannedFile, ...]
+
+
+def scan_share(root: Path, *, max_files: int = EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE) -> ShareScan:
+    """Walk a shared directory once, returning every visited directory
+    (relative POSIX path) and every discoverable MP4 file.
+
+    Directory paths feed shared-folder mirror materialization so that folders
+    containing only subfolders (or no MP4 at all) still appear in the managed
+    category tree mirror.
+    """
     if max_files < 1:
         raise ValueError("max_files_must_be_positive")
     if not root.is_dir():
         raise ExternalMediaError("external_source_unavailable")
+    dirs: set[str] = set()
     found: list[ScannedFile] = []
     pending = [root]
     while pending:
         directory = pending.pop()
+        if directory != root:
+            try:
+                dirs.add(directory.relative_to(root).as_posix())
+            except ValueError as exc:
+                raise ExternalMediaError("external_path_escape") from exc
         try:
             children = sorted(os.scandir(directory), key=lambda item: item.name.casefold())
         except OSError as exc:
@@ -201,7 +220,11 @@ def discover_video_files(root: Path, *, max_files: int = EXTERNAL_MEDIA_MAX_FILE
             )
             if len(found) > max_files:
                 raise ExternalMediaError("external_source_file_limit_exceeded")
-    return tuple(sorted(found, key=lambda item: item.relative_path.casefold()))
+    return ShareScan(directories=tuple(sorted(dirs, key=lambda value: value.casefold())), files=tuple(sorted(found, key=lambda item: item.relative_path.casefold())))
+
+
+def discover_video_files(root: Path, *, max_files: int = EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE) -> tuple[ScannedFile, ...]:
+    return scan_share(root, max_files=max_files).files
 
 
 def source_root(source: sqlite3.Row, roots: Mapping[str, Path] = EXTERNAL_MEDIA_ROOTS) -> Path:
@@ -241,7 +264,7 @@ def reconcile_source(
     )
     conn.commit()
     try:
-        discovered = discover_video_files(source_root(source, roots), max_files=max_files)
+        scanned = scan_share(source_root(source, roots), max_files=max_files)
     except ExternalMediaError as exc:
         finished = max(int(time.time()), timestamp)
         conn.execute(
@@ -266,7 +289,7 @@ def reconcile_source(
     added_entry_ids: list[str] = []
     try:
         conn.execute("BEGIN IMMEDIATE")
-        for item in discovered:
+        for item in scanned.files:
             seen_paths.add(item.relative_path)
             existing = current_by_path.get(item.relative_path)
             if existing is not None and existing["fingerprint"] == item.fingerprint:
@@ -362,7 +385,7 @@ def reconcile_source(
                 (timestamp, timestamp, row["id"]),
             )
         newly_missing_count = len(missing_rows)
-        available_count = len(discovered)
+        available_count = len(scanned.files)
         total_count = conn.execute(
             "SELECT COUNT(*) FROM external_media_entries WHERE source_id=?",
             (source_id,),
@@ -371,6 +394,7 @@ def reconcile_source(
             "SELECT COUNT(*) FROM external_media_entries WHERE source_id=? AND availability='missing'",
             (source_id,),
         ).fetchone()[0]
+        materialize_shared_folder_mirrors(conn, source_id, scanned.directories, now=timestamp)
         conn.execute(
             """UPDATE external_media_sources SET status='available',total_files=?,available_files=?,missing_files=?,
                       last_successful_scan_at=?,last_error_code=NULL,updated_at=?,version=version+1 WHERE id=?""",
@@ -379,7 +403,7 @@ def reconcile_source(
         conn.execute(
             """UPDATE external_media_scan_runs SET status='succeeded',discovered_count=?,added_count=?,
                       changed_count=?,missing_count=?,finished_at=? WHERE id=?""",
-            (len(discovered), added, changed, newly_missing_count, timestamp, run_id),
+            (len(scanned.files), added, changed, newly_missing_count, timestamp, run_id),
         )
         conn.commit()
     except Exception as exc:
@@ -402,7 +426,7 @@ def reconcile_source(
         except Exception:
             conn.rollback()
         raise ExternalMediaError(error_code) from exc
-    return ScanResult(run_id, source_id, len(discovered), added, changed, missing_count, tuple(added_entry_ids))
+    return ScanResult(run_id, source_id, len(scanned.files), added, changed, missing_count, tuple(added_entry_ids))
 
 
 def due_source_ids(conn: sqlite3.Connection, *, now: int | None = None) -> tuple[str, ...]:
@@ -415,3 +439,220 @@ def due_source_ids(conn: sqlite3.Connection, *, now: int | None = None) -> tuple
         (timestamp,),
     ).fetchall()
     return tuple(str(row["id"]) for row in rows)
+
+
+def _mirror_position_code(position: int, sibling_count: int) -> str:
+    return str(position).zfill(max(2, len(str(sibling_count))))
+
+
+def _mirror_sibling_count(conn: sqlite3.Connection, parent_id: str) -> int:
+    return int(
+        conn.execute(
+            "SELECT count(*) FROM category_nodes WHERE parent_id=? AND deleted_at IS NULL",
+            (parent_id,),
+        ).fetchone()[0]
+    )
+
+
+def _renumber_mirror_siblings(conn: sqlite3.Connection, parent_id: str, *, now: int) -> None:
+    siblings = conn.execute(
+        """SELECT id,display_code,sort_order FROM category_nodes
+           WHERE parent_id=? AND deleted_at IS NULL
+           ORDER BY sort_order,display_code COLLATE NOCASE,id""",
+        (parent_id,),
+    ).fetchall()
+    final_count = len(siblings)
+    for position, row in enumerate(siblings, start=1):
+        code = _mirror_position_code(position, final_count)
+        sort_order = position * 10
+        if str(row["display_code"]) != code or int(row["sort_order"]) != sort_order:
+            conn.execute(
+                """UPDATE category_nodes SET display_code=?,sort_order=?,updated_at=?,version=version+1
+                   WHERE id=?""",
+                (code, sort_order, now, row["id"]),
+            )
+
+
+def _load_shared_root(conn: sqlite3.Connection, source_id: str) -> sqlite3.Row | None:
+    return conn.execute(
+        """SELECT id,category_key,level,is_active,created_by FROM category_nodes
+           WHERE external_source_id=? AND deleted_at IS NULL""",
+        (source_id,),
+    ).fetchone()
+
+
+def _mirror_node_by_path(
+    conn: sqlite3.Connection, root_id: str, relative_path: str
+) -> sqlite3.Row | None:
+    if not relative_path:
+        return None
+    return conn.execute(
+        """WITH RECURSIVE sub(id) AS (
+               SELECT id FROM category_nodes WHERE id=?
+               UNION ALL
+               SELECT c.id FROM category_nodes c JOIN sub s ON c.parent_id=s.id
+           )
+           SELECT id,parent_id,level,category_key,display_name
+           FROM category_nodes
+           WHERE id IN (SELECT id FROM sub)
+             AND external_relative_path=? AND deleted_at IS NULL
+           LIMIT 1""",
+        (root_id, relative_path),
+    ).fetchone()
+
+
+def materialize_shared_folder_mirrors(
+    conn: sqlite3.Connection,
+    source_id: str,
+    folder_paths: tuple[str, ...],
+    *,
+    now: int,
+) -> None:
+    """Mirror the remote folder hierarchy of a shared source as managed
+    category nodes under its shared-folder root.
+
+    Rules (all inside the caller's transaction):
+      - Only the shared-folder root carries ``external_source_id``; mirror
+        rows are ``category_kind='shared_folder'`` with
+        ``external_relative_path`` set and ``external_source_id`` NULL.
+      - Existing mirrors are never renamed, renumbered or reconfigured by a
+        later scan: only new remote folders are appended (at the end of their
+        sibling group) and vanished remote folders are soft-deleted (with a
+        gap-fill renumber of the remaining siblings, matching ordinary folder
+        delete semantics).
+      - A sibling that already carries the remote folder name (e.g. a manually
+        created ordinary folder) wins: the mirror is not created for it.
+    """
+    root = _load_shared_root(conn, source_id)
+    if root is None:
+        return
+    existing = conn.execute(
+        """WITH RECURSIVE sub(id) AS (
+               SELECT id FROM category_nodes WHERE id=?
+               UNION ALL
+               SELECT c.id FROM category_nodes c JOIN sub s ON c.parent_id=s.id
+           )
+           SELECT id,parent_id,level,display_code,display_name,sort_order,
+                  external_relative_path,is_active
+           FROM category_nodes WHERE id IN (SELECT id FROM sub)
+             AND external_relative_path IS NOT NULL AND deleted_at IS NULL""",
+        (root["id"],),
+    ).fetchall()
+    by_path = {str(row["external_relative_path"]): row for row in existing}
+
+    ordered = sorted(folder_paths, key=lambda value: (value.count("/"), value.casefold()))
+    for path in ordered:
+        if path in by_path:
+            continue
+        parent_path = PurePosixPath(path).parent.as_posix() if "/" in path else ""
+        parent = by_path.get(parent_path)
+        parent_id = str(root["id"]) if parent is None else str(parent["id"])
+        parent_level = int(root["level"]) if parent is None else int(parent["level"])
+        if _mirror_sibling_count(conn, parent_id) and conn.execute(
+            "SELECT 1 FROM category_nodes WHERE parent_id=? AND display_name=? AND deleted_at IS NULL LIMIT 1",
+            (parent_id, PurePosixPath(path).name),
+        ).fetchone():
+            # A sibling already owns this display name (the admin's choice);
+            # do not create a competing mirror.
+            continue
+        position = _mirror_sibling_count(conn, parent_id) + 1
+        code = _mirror_position_code(position, position if position > 1 else 1)
+        node_id = f"cat_{uuid.uuid4().hex[:12]}"
+        node_level = parent_level + 1
+        conn.execute(
+            """INSERT INTO category_nodes
+               (id,category_key,parent_id,display_code,display_name,sort_order,level,is_active,
+                chat_search_enabled,chat_filter_selectable,category_kind,external_source_id,
+                external_relative_path,created_by,created_at,updated_at,version)
+               VALUES (?,?,?,?,?,?,?,1,1,0,'shared_folder',NULL,?,?,?,?,1)""",
+            (
+                node_id,
+                f"category_{uuid.uuid4().hex[:12]}",
+                parent_id,
+                code,
+                PurePosixPath(path).name,
+                position * 10,
+                node_level,
+                path,
+                root["created_by"],
+                now,
+                now,
+            ),
+        )
+        by_path[path] = {"id": node_id, "parent_id": parent_id, "level": node_level}
+
+    present = set(folder_paths)
+    removed = [row for path, row in by_path.items() if path not in present]
+    # Deeper paths first so sibling renumbering groups are joined in order.
+    removed.sort(key=lambda row: str(row["external_relative_path"]).count("/"), reverse=True)
+    for row in removed:
+        conn.execute(
+            """UPDATE category_nodes SET deleted_at=?,updated_at=?,version=version+1
+               WHERE id=? AND deleted_at IS NULL""",
+            (now, now, row["id"]),
+        )
+        _renumber_mirror_siblings(conn, str(row["parent_id"]), now=now)
+
+
+def materialize_shared_folder_mirrors_from_entries(
+    conn: sqlite3.Connection,
+    source_id: str,
+    *,
+    now: int,
+) -> None:
+    """Mirror a shared source's folder tree purely from its recorded entries.
+
+    The entries table already describes every folder that contained a video at
+    the last filesystem scan, so the managed category tree can reflect the
+    remote hierarchy without another network share walk.  Every recorded entry
+    -- regardless of current availability -- stands for a folder that existed
+    in the remote structure, so deep folders never vanish because their files
+    are currently missing or superseded.  The filesystem scan inside
+    ``reconcile_source`` remains the only authority for genuinely deleting a
+    folder (it passes the walk's directory list directly).
+    """
+    rows = conn.execute(
+        "SELECT relative_path FROM external_media_entries WHERE source_id=?",
+        (source_id,),
+    ).fetchall()
+    folder_paths: set[str] = set()
+    for row in rows:
+        folder = PurePosixPath(str(row["relative_path"])).parent.as_posix()
+        while folder and folder != ".":
+            folder_paths.add(folder)
+            folder = PurePosixPath(folder).parent.as_posix()
+    materialize_shared_folder_mirrors(
+        conn, source_id, tuple(sorted(folder_paths, key=lambda value: value.casefold())), now=now,
+    )
+
+
+def resolve_shared_category_key(conn: sqlite3.Connection, media_id: str) -> str | None:
+    """Resolve the category key a shared video's transcripts should carry.
+
+    Returns the deepest existing mirror node under the video's source root,
+    the shared root's key when the video sits in an unmaterialized folder, or
+    ``None`` when the media does not belong to any shared source or the source
+    has no linked shared-folder root category.
+    """
+    entry = conn.execute(
+        "SELECT source_id,relative_path FROM external_media_entries WHERE media_id=?",
+        (media_id,),
+    ).fetchone()
+    if entry is None:
+        return None
+    root = _load_shared_root(conn, str(entry["source_id"]))
+    if root is None:
+        return None
+    relative = str(entry["relative_path"])
+    folder = PurePosixPath(relative).parent.as_posix() if relative else ""
+    if folder == ".":
+        folder = ""
+    node = _mirror_node_by_path(conn, str(root["id"]), folder)
+    if node is not None:
+        return str(node["category_key"])
+    parts = folder.split("/") if folder else []
+    for depth in range(len(parts) - 1, 0, -1):
+        node = _mirror_node_by_path(conn, str(root["id"]), "/".join(parts[:depth]))
+        if node is not None:
+            return str(node["category_key"])
+    return str(root["category_key"])

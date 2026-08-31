@@ -65,6 +65,7 @@ class TranscriptionJobStage(Enum):
     transcribing = "transcribing"
     normalizing = "normalizing"
     formatting = "formatting"
+    preparing_audio = "preparing_audio"
 
 
 class ReviewStatus(Enum):

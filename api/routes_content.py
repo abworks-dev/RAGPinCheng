@@ -135,6 +135,7 @@ from .content_store import (
     next_category_sort_order,
 )
 from .db import get_db
+from .external_media import materialize_shared_folder_mirrors_from_entries
 from .routes_media import safe_join
 from .media_upload_conflicts import find_media_upload_conflicts, normalize_media_title
 from .media_storage import normalize_external_relative_path
@@ -595,6 +596,7 @@ def _category_dto(conn: sqlite3.Connection, row: sqlite3.Row) -> ManagedCategory
         display_name=row["display_name"],
         category_kind=str(row["category_kind"] or "folder") if "category_kind" in row.keys() else "folder",
         external_source_id=row["external_source_id"] if "external_source_id" in row.keys() else None,
+        external_relative_path=row["external_relative_path"] if "external_relative_path" in row.keys() else None,
         sort_order=row["sort_order"],
         level=row["level"],
         is_active=bool(row["is_active"]),
@@ -722,6 +724,12 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=404, detail="目标父分类不存在") from exc
     if message == "parent_category_inactive":
         raise HTTPException(status_code=409, detail="不能移动到已停用的分类中") from exc
+    if message == "shared_folder_mirror_move_blocked":
+        raise HTTPException(status_code=409, detail="共享子目录是远程目录的只读镜像，不能移动") from exc
+    if message == "shared_folder_mirror_rename_blocked":
+        raise HTTPException(status_code=409, detail="共享子目录名称跟随远程目录，不能单独改名") from exc
+    if message == "shared_folder_mirror_parent_forbidden":
+        raise HTTPException(status_code=409, detail="不能使用共享子目录作为父分类") from exc
     if message == "active_child_category_exists":
         raise HTTPException(status_code=409, detail="该分类仍有启用的子分类，请先停用子分类") from exc
     if message == "content_too_large":
@@ -826,7 +834,31 @@ def get_categories(
     _user: CurrentUser = Depends(require_content_permission("category.view")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> list[ManagedCategoryDTO]:
-    return [_category_dto(conn, row) for row in list_categories(conn, include_inactive=include_inactive)]
+    # Shared sources' mirror rows are derived from the recorded remote entries
+    # (no filesystem walk).  A shared root is only listed with its
+    # external_source_id set, so an already-scanned share shows its folder tree
+    # immediately — the authoritative filesystem scan still runs on schedule or
+    # through the explicit sync action.
+    rows = list_categories(conn, include_inactive=include_inactive)
+    now = int(time.time())
+    touched = False
+    for row in rows:
+        if (
+            row["category_kind"] == "shared_folder"
+            and row["external_source_id"] is not None
+            and row["external_relative_path"] is None
+        ):
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            materialize_shared_folder_mirrors_from_entries(
+                conn, str(row["external_source_id"]), now=now
+            )
+            touched = True
+    if touched:
+        if conn.in_transaction:
+            conn.commit()
+        rows = list_categories(conn, include_inactive=include_inactive)
+    return [_category_dto(conn, row) for row in rows]
 
 
 @router.post("/categories", response_model=ManagedCategoryDTO)

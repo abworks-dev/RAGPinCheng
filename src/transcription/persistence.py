@@ -266,20 +266,20 @@ class TranscriptionJobRecord:
     created_by: int | None
     attempt_number: int
     request_idempotency_key: str
-    execution_identity: str
+    execution_identity: str | None
     profile_id: str
     provider_key: str
     model_id: str | None
     model_revision: str | None
     profile_definition_version: str
     config_hash: str
-    profile_snapshot: ProfileSnapshot
-    execution_config: TranscriptionExecutionConfig
-    execution_fingerprint: str
-    audio_sha256: str
-    input_kind: str
-    input_size_bytes: int
-    total_ms: int
+    profile_snapshot: ProfileSnapshot | None
+    execution_config: TranscriptionExecutionConfig | None
+    execution_fingerprint: str | None
+    audio_sha256: str | None
+    input_kind: str | None
+    input_size_bytes: int | None
+    total_ms: int | None
     processed_ms: int
     status: TranscriptionJobStatus
     stage: TranscriptionJobStage | None
@@ -305,7 +305,6 @@ class TranscriptionJobRecord:
             require_int(self.created_by, "job.created_by", positive=True)
         require_int(self.attempt_number, "job.attempt_number", positive=True)
         validate_uuid(self.request_idempotency_key, "job.request_idempotency_key")
-        validate_sha256(self.execution_identity, "job.execution_identity")
         validate_profile_id(self.profile_id, "job.profile_id")
         if (self.scheme_id is None) != (self.scheme_snapshot is None):
             raise ContractValidationError("incomplete_scheme_identity", "job.scheme")
@@ -319,21 +318,47 @@ class TranscriptionJobRecord:
                 validate_single_line(value, f"job.{field}", maximum=128)
         validate_version(self.profile_definition_version, "job.profile_definition_version")
         validate_sha256(self.config_hash, "job.config_hash")
-        if type(self.profile_snapshot) is not ProfileSnapshot:
-            raise ContractValidationError("invalid_profile_snapshot", "job.profile_snapshot")
-        if type(self.execution_config) is not TranscriptionExecutionConfig:
-            raise ContractValidationError("invalid_execution_config", "job.execution_config")
-        validate_sha256(self.execution_fingerprint, "job.execution_fingerprint")
-        validate_sha256(self.audio_sha256, "job.audio_sha256")
-        validate_provider_key(self.input_kind, "job.input_kind")
-        require_int(self.input_size_bytes, "job.input_size_bytes", positive=True)
-        require_int(self.total_ms, "job.total_ms", positive=True)
-        require_int(self.processed_ms, "job.processed_ms")
-        if self.processed_ms > self.total_ms:
-            raise ContractValidationError("processed_exceeds_total", "job.processed_ms")
         require_exact_enum(self.status, TranscriptionJobStatus, "job.status")
         if self.stage is not None:
             require_exact_enum(self.stage, TranscriptionJobStage, "job.stage")
+        prepared = self.audio_sha256 is not None
+        if prepared:
+            if self.execution_identity is None:
+                raise ContractValidationError("missing_execution_identity", "job.execution_identity")
+            validate_sha256(self.execution_identity, "job.execution_identity")
+            if type(self.profile_snapshot) is not ProfileSnapshot:
+                raise ContractValidationError("invalid_profile_snapshot", "job.profile_snapshot")
+            if type(self.execution_config) is not TranscriptionExecutionConfig:
+                raise ContractValidationError("invalid_execution_config", "job.execution_config")
+            if self.execution_fingerprint is None:
+                raise ContractValidationError("missing_execution_fingerprint", "job.execution_fingerprint")
+            validate_sha256(self.execution_fingerprint, "job.execution_fingerprint")
+            validate_sha256(self.audio_sha256, "job.audio_sha256")
+            if self.input_kind is None:
+                raise ContractValidationError("missing_input_kind", "job.input_kind")
+            validate_provider_key(self.input_kind, "job.input_kind")
+            require_int(self.input_size_bytes, "job.input_size_bytes", positive=True)
+            require_int(self.total_ms, "job.total_ms", positive=True)
+            require_int(self.processed_ms, "job.processed_ms")
+            if self.processed_ms > self.total_ms:
+                raise ContractValidationError("processed_exceeds_total", "job.processed_ms")
+        else:
+            if any(
+                value is not None
+                for value in (
+                    self.execution_identity,
+                    self.execution_fingerprint,
+                    self.execution_config,
+                    self.input_kind,
+                    self.input_size_bytes,
+                    self.total_ms,
+                )
+            ):
+                raise ContractValidationError("unprepared_job_has_input_fields", "job.audio_sha256")
+            if self.profile_snapshot is not None:
+                raise ContractValidationError("unprepared_job_has_snapshot", "job.profile_snapshot")
+            if self.processed_ms != 0:
+                raise ContractValidationError("unprepared_job_processed", "job.processed_ms")
         if self.failure_error_code is not None and self.failure_error_code not in ALL_JOB_FAILURE_CODES:
             raise ContractValidationError("invalid_failure_code", "job.failure_error_code")
         if self.failure_classification is not None:
@@ -360,6 +385,10 @@ class TranscriptionJobRecord:
         self._validate_cross_fields()
 
     def _validate_cross_fields(self) -> None:
+        if self.profile_snapshot is None or self.execution_config is None:
+            if self.audio_sha256 is not None or self.execution_identity is not None:
+                raise ContractValidationError("unprepared_job_has_identity", "job.audio_sha256")
+            return
         if self.profile_id != self.profile_snapshot.profile_id or self.profile_id != self.execution_config.profile_id:
             raise ContractValidationError("job_profile_mismatch", "job.profile_id")
         if self.provider_key != self.profile_snapshot.provider_key or self.provider_key != self.execution_config.provider_key:
@@ -390,7 +419,9 @@ class TranscriptionJobRecord:
         if self.execution_identity != expected_identity:
             raise ContractValidationError("job_execution_identity_mismatch", "job.execution_identity")
         if self.status is TranscriptionJobStatus.pending:
-            if self.stage is not None or self.started_at is not None or self.finished_at is not None:
+            if self.stage not in (None, TranscriptionJobStage.preparing_audio):
+                raise ContractValidationError("invalid_pending_job", "job")
+            if self.started_at is not None or self.finished_at is not None:
                 raise ContractValidationError("invalid_pending_job", "job")
         elif self.status is TranscriptionJobStatus.running:
             if self.stage is None or self.started_at is None or self.finished_at is not None:

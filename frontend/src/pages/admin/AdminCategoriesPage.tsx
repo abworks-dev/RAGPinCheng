@@ -6,6 +6,7 @@ import {
   ChevronsUp,
   Folder,
   FolderOpen,
+  FolderSync,
   FolderTree,
   ListOrdered,
   Move,
@@ -22,7 +23,6 @@ import { adminMediaApi } from "../../api/admin/media";
 import { CategoryDeleteDialog } from "../../components/admin/CategoryDeleteDialog";
 import { CategoryTreePicker } from "../../components/admin/CategoryTreePicker";
 import { ExternalMediaSourcesPanel } from "../../components/admin/ExternalMediaSourcesPanel";
-import { ExternalCategoryTree } from "../../components/admin/ExternalFolderBrowser";
 import { useAuth } from "../../context/AuthContext";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
@@ -112,6 +112,7 @@ export function AdminCategoriesPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [sharedOpen, setSharedOpen] = useState(false);
   const [sharedSaving, setSharedSaving] = useState(false);
+  const [syncingShared, setSyncingShared] = useState(false);
   const [sharedError, setSharedError] = useState<string | null>(null);
   const [sharedRoots, setSharedRoots] = useState<ExternalMediaRoot[]>([]);
   const [sharedSchemes, setSharedSchemes] = useState<TranscriptionSchemeOption[]>([]);
@@ -205,7 +206,8 @@ export function AdminCategoriesPage() {
     visit(movingCategory.id);
     return categories.filter((category) => category.id !== movingCategory.id
       && !descendants.has(category.id)
-      && category.is_active);
+      && category.is_active
+      && !(category.category_kind === "shared_folder" && category.external_relative_path));
   }, [categories, movingCategory]);
   const createParentId = createDraft.parent_id || null;
   const createSiblings = useMemo(
@@ -298,6 +300,21 @@ export function AdminCategoriesPage() {
       await load(true); setSelectedId(created.id); setSharedOpen(false); toast.success("共享文件夹已创建");
     } catch (cause) { setSharedError(cause instanceof Error ? cause.message : "共享文件夹创建失败"); }
     finally { setSharedSaving(false); }
+  };
+
+  const syncSharedSource = async () => {
+    const category = selectedCategory;
+    if (!category || category.category_kind !== "shared_folder" || !category.external_source_id) return;
+    setSyncingShared(true);
+    try {
+      await adminMediaApi.scanExternalSource(category.external_source_id);
+      await load(true);
+      toast.success(`${category.display_name}的远程目录已同步`);
+    } catch (scanError) {
+      toast.error(scanError instanceof Error ? scanError.message : "同步远程目录失败");
+    } finally {
+      setSyncingShared(false);
+    }
   };
 
   const confirmDiscard = () => {
@@ -556,7 +573,7 @@ export function AdminCategoriesPage() {
                 </div>
               </div>
               <div className="hidden min-h-0 min-w-0 overflow-hidden lg:block">
-                <CategoryDetail category={selectedCategory} draft={draft} categories={categories} saving={saving} moving={moving || numberSaving} error={saveError} hasActiveChild={selectedCategory ? activeChildIds.has(selectedCategory.id) : false} canDelete={Boolean(selectedCategory?.parent_id) || isAdmin} onChange={setDraft} onSave={() => void saveSelected()} onCancel={cancelEdit} onAddChild={() => selectedCategory && requestCreate(selectedCategory.id)} onMove={openMoveDialog} onAdjustNumber={openNumberDialog} onDelete={() => selectedCategory && setDeleteTarget(selectedCategory)} />
+                <CategoryDetail category={selectedCategory} draft={draft} categories={categories} saving={saving} moving={moving || numberSaving} error={saveError} hasActiveChild={selectedCategory ? activeChildIds.has(selectedCategory.id) : false} canDelete={Boolean(selectedCategory?.parent_id) || isAdmin} syncingShared={syncingShared} onChange={setDraft} onSave={() => void saveSelected()} onCancel={cancelEdit} onAddChild={() => selectedCategory && requestCreate(selectedCategory.id)} onMove={openMoveDialog} onAdjustNumber={openNumberDialog} onDelete={() => selectedCategory && setDeleteTarget(selectedCategory)} onSyncShared={() => void syncSharedSource()} />
               </div>
             </div>
           )}
@@ -597,7 +614,7 @@ export function AdminCategoriesPage() {
       <Sheet open={editorOpen} onOpenChange={handleEditorOpenChange}>
         <SheetContent className="max-w-xl overflow-y-auto lg:hidden">
           <SheetHeader><SheetTitle>{selectedCategory?.display_name || "编辑分类"}</SheetTitle><SheetDescription>{selectedCategory?.full_path || "维护分类信息"}</SheetDescription></SheetHeader>
-          <div className="p-6"><CategoryDetail category={selectedCategory} draft={draft} categories={categories} saving={saving} moving={moving || numberSaving} error={saveError} hasActiveChild={selectedCategory ? activeChildIds.has(selectedCategory.id) : false} canDelete={Boolean(selectedCategory?.parent_id) || isAdmin} onChange={setDraft} onSave={() => void saveSelected()} onCancel={cancelEdit} onAddChild={() => selectedCategory && requestCreate(selectedCategory.id)} onMove={openMoveDialog} onAdjustNumber={openNumberDialog} onDelete={() => selectedCategory && setDeleteTarget(selectedCategory)} /></div>
+          <div className="p-6"><CategoryDetail category={selectedCategory} draft={draft} categories={categories} saving={saving} moving={moving || numberSaving} error={saveError} hasActiveChild={selectedCategory ? activeChildIds.has(selectedCategory.id) : false} canDelete={Boolean(selectedCategory?.parent_id) || isAdmin} syncingShared={syncingShared} onChange={setDraft} onSave={() => void saveSelected()} onCancel={cancelEdit} onAddChild={() => selectedCategory && requestCreate(selectedCategory.id)} onMove={openMoveDialog} onAdjustNumber={openNumberDialog} onDelete={() => selectedCategory && setDeleteTarget(selectedCategory)} onSyncShared={() => void syncSharedSource()} /></div>
         </SheetContent>
       </Sheet>
 
@@ -686,8 +703,9 @@ function CategoryTreeNodeView({
 }) {
   const { category, children } = node;
   const isExpanded = expanded.has(category.id);
-  const sharedSourceId = category.category_kind === "shared_folder" ? category.external_source_id : null;
-  const hasChildren = children.length > 0 || Boolean(sharedSourceId);
+  const isSharedFolder = category.category_kind === "shared_folder";
+  const isSharedRoot = isSharedFolder && Boolean(category.external_source_id);
+  const hasChildren = children.length > 0 || isSharedRoot;
   const visibleIndex = visibleNodes.findIndex((item) => item.category.id === category.id);
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const currentIndex = visibleIndex < 0 ? index : visibleIndex;
@@ -734,11 +752,11 @@ function CategoryTreeNodeView({
     >
       <span className="flex w-11 shrink-0 items-center gap-1">
         {hasChildren ? <button type="button" aria-label={isExpanded ? `收起${category.display_name}` : `展开${category.display_name}`} title={isExpanded ? "收起" : "展开"} onClick={(event) => { event.stopPropagation(); onToggle(category.id); }} className="inline-flex size-6 items-center justify-center rounded-ui-sm text-muted-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{isExpanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}</button> : <span className="size-6" aria-hidden="true" />}
-        <span className="relative inline-flex size-4 shrink-0">{hasChildren && isExpanded ? <FolderOpen className="size-4 text-primary/80" aria-hidden="true" /> : <Folder className="size-4 text-muted-foreground" aria-hidden="true" />}{category.category_kind === "shared_folder" && <Network className="absolute -right-2 -top-1 size-2.5 text-primary" aria-label="共享文件夹" />}</span>
+        <span className="relative inline-flex size-4 shrink-0">{hasChildren && isExpanded ? <FolderOpen className="size-4 text-primary/80" aria-hidden="true" /> : <Folder className="size-4 text-muted-foreground" aria-hidden="true" />}{isSharedFolder && <Network className="absolute -right-2 -top-1 size-2.5 text-primary" aria-label="共享" />}</span>
       </span>
       <span className="flex min-w-0 flex-1 items-center gap-2">
         <span className={`inline-flex w-11 shrink-0 items-center gap-1 text-ui-xs font-medium ${category.is_active ? "text-success" : "text-muted-foreground"}`}><span className={`size-2 rounded-full ${category.is_active ? "bg-success" : "bg-muted-foreground/60"}`} aria-hidden="true" />{category.is_active ? "启用" : "停用"}</span>
-        <span className={`min-w-0 flex-1 break-words tabular-nums ${level === 1 ? "font-semibold" : "font-medium"}`}>{category.display_code} {category.display_name}{category.category_kind === "shared_folder" && <span className="ml-2 text-ui-xs font-normal text-primary">共享文件夹</span>}</span>
+        <span className={`min-w-0 flex-1 break-words tabular-nums ${level === 1 ? "font-semibold" : "font-medium"}`}>{category.display_code} {category.display_name}{isSharedFolder && <Badge variant="secondary" className="ml-1.5 align-middle">共享</Badge>}</span>
         <span className="hidden w-[3.75rem] shrink-0 text-right text-ui-xs tabular-nums text-muted-foreground sm:block">{category.item_count} 份{hasChildren ? ` · ${children.length} 项` : ""}</span>
         <span className="hidden w-[7.25rem] shrink-0 flex-wrap items-center justify-end gap-x-1 gap-y-0 sm:inline-flex" aria-label="问答与筛选状态">
           <Badge aria-label={category.chat_search_effective === false ? "企业知识问答关闭" : "企业知识问答开启"} variant={category.chat_search_effective === false ? "secondary" : "success"} className={category.chat_search_effective === false ? "line-through" : undefined}>问答</Badge>
@@ -749,7 +767,7 @@ function CategoryTreeNodeView({
     </div>
     {hasChildren && isExpanded && <div role="group" className="ml-5 border-l border-border bg-surface-muted/10 sm:ml-6">
       {children.map((child, childIndex) => <CategoryTreeNodeView key={child.category.id} node={child} level={level + 1} index={childIndex} siblingCount={children.length} selectedId={selectedId} expanded={expanded} visibleNodes={visibleNodes} nodeRefs={nodeRefs} onSelect={onSelect} onToggle={onToggle} />)}
-      {sharedSourceId && <ExternalCategoryTree sourceId={sharedSourceId} level={level + 1} foldersOnly />}
+      {isSharedRoot && children.length === 0 && <div className="px-4 py-3 text-ui-xs text-muted-foreground" role="status">共享目录尚未扫描出子目录。请选中共享文件夹后点击“同步远程目录”，或等待周期扫描。</div>}
     </div>}
   </>;
 }
@@ -763,6 +781,7 @@ function CategoryDetail({
   error,
   hasActiveChild,
   canDelete,
+  syncingShared,
   onChange,
   onSave,
   onCancel,
@@ -770,6 +789,7 @@ function CategoryDetail({
   onMove,
   onAdjustNumber,
   onDelete,
+  onSyncShared,
 }: {
   category: ManagedCategory | null;
   draft: CategoryDraft | null;
@@ -779,6 +799,7 @@ function CategoryDetail({
   error: string | null;
   hasActiveChild: boolean;
   canDelete: boolean;
+  syncingShared: boolean;
   onChange: (draft: CategoryDraft | null) => void;
   onSave: () => void;
   onCancel: () => void;
@@ -786,8 +807,12 @@ function CategoryDetail({
   onMove: () => void;
   onAdjustNumber: () => void;
   onDelete: () => void;
+  onSyncShared: () => void;
 }) {
   if (!category || !draft) return <EmptyState title="选择一个分类" description="从左侧选择分类后，在此维护分类信息。" />;
+  const isSharedFolder = category.category_kind === "shared_folder";
+  const isSharedRoot = isSharedFolder && Boolean(category.external_source_id);
+  const isSharedMirror = isSharedFolder && Boolean(category.external_relative_path);
   const isDirty = draft.display_name !== category.display_name || draft.is_active !== category.is_active
     || draft.chat_search_enabled !== (category.chat_search_enabled !== false)
     || draft.chat_filter_selectable !== (category.chat_filter_selectable !== false);
@@ -795,16 +820,16 @@ function CategoryDetail({
   const statusHelpId = `category-status-help-${category.id}`;
   const parent = categories.find((item) => item.id === category.parent_id);
   return <div className="flex h-full flex-col">
-    <div className="border-b border-border px-5 py-4 sm:px-6"><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold">{category.display_code} {category.display_name}</h3><Badge variant={category.is_active ? "success" : "secondary"}>{category.is_active ? "启用" : "停用"}</Badge>{isDirty && draft.is_active !== category.is_active && <Badge variant="warning">待保存：{draft.is_active ? "启用" : "停用"}</Badge>}</div><p className="mt-1 break-words text-ui-xs text-muted-foreground">{category.full_path}</p></div>
+    <div className="border-b border-border px-5 py-4 sm:px-6"><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold">{category.display_code} {category.display_name}</h3>{isSharedFolder && <Badge variant="secondary">共享</Badge>}<Badge variant={category.is_active ? "success" : "secondary"}>{category.is_active ? "启用" : "停用"}</Badge>{isDirty && draft.is_active !== category.is_active && <Badge variant="warning">待保存：{draft.is_active ? "启用" : "停用"}</Badge>}</div><p className="mt-1 break-words text-ui-xs text-muted-foreground">{category.full_path}</p></div>
     <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
       {error && <Alert variant="destructive" role="alert"><AlertTitle>保存失败</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
       <section aria-labelledby={`category-level-${category.id}`} className="space-y-3">
-        <div><h4 id={`category-level-${category.id}`} className="text-ui-sm font-semibold">目录结构</h4><p className="mt-1 break-words text-ui-xs text-muted-foreground">父分类：{parent ? `${parent.display_code} ${parent.display_name}` : "一级分类"} · 第 {category.level} 级 · {category.item_count} 份直接资料</p></div>
-        <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={onAddChild} disabled={moving || !category.is_active}><Plus className="size-4" />新增子分类</Button><Button variant="outline" onClick={onMove} disabled={moving || isDirty}><Move className="size-4" />移动至</Button>{canDelete && <Button variant="outline" className="text-destructive hover:text-destructive" onClick={onDelete} disabled={moving || isDirty}><Trash2 className="size-4" />删除文件夹</Button>}</div>
+        <div><h4 id={`category-level-${category.id}`} className="text-ui-sm font-semibold">目录结构</h4><p className="mt-1 break-words text-ui-xs text-muted-foreground">父分类：{parent ? `${parent.display_code} ${parent.display_name}` : "一级分类"} · 第 {category.level} 级 · {category.item_count} 份直接资料</p>{isSharedMirror && <p className="mt-1 text-ui-xs text-warning" role="status">共享子目录是远程目录的只读镜像：名称跟随远程目录，不能移动、改名或删除；下方可单独调整启用状态与问答/筛选设置。</p>}</div>
+        <div className="flex flex-wrap gap-2">{!isSharedMirror && <Button variant="outline" onClick={onAddChild} disabled={moving || !category.is_active}><Plus className="size-4" />新增子分类</Button>}{!isSharedMirror && <Button variant="outline" onClick={onMove} disabled={moving || isDirty}><Move className="size-4" />移动至</Button>}{isSharedRoot && <Button variant="outline" onClick={onSyncShared} disabled={moving || syncingShared}><FolderSync className="size-4" />{syncingShared ? "同步中…" : "同步远程目录"}</Button>}{canDelete && !isSharedMirror && <Button variant="outline" className="text-destructive hover:text-destructive" onClick={onDelete} disabled={moving || isDirty}><Trash2 className="size-4" />删除文件夹</Button>}</div>
       </section>
       <section aria-labelledby={`category-fields-${category.id}`} className="space-y-4">
         <h4 id={`category-fields-${category.id}`} className="text-ui-sm font-semibold">基本信息</h4>
-        <div className="grid gap-4 sm:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)]"><Field label="编号"><div className="flex gap-2"><Input value={category.display_code} readOnly aria-label="当前编号" className="tabular-nums" /><Button type="button" variant="outline" className="shrink-0" onClick={onAdjustNumber} disabled={moving || isDirty}><ListOrdered className="size-4" />调整编号</Button></div><span className="mt-1 block text-ui-xs font-normal text-muted-foreground">编号决定同级顺序；调整时其他同级编号会自动连续排列。</span></Field><Field label="显示名称"><Input value={draft.display_name} maxLength={100} onChange={(event) => onChange({ ...draft, display_name: event.target.value })} aria-label="显示名称" /></Field></div>
+        <div className="grid gap-4 sm:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)]"><Field label="编号"><div className="flex gap-2"><Input value={category.display_code} readOnly aria-label="当前编号" className="tabular-nums" /><Button type="button" variant="outline" className="shrink-0" onClick={onAdjustNumber} disabled={moving || isDirty}><ListOrdered className="size-4" />调整编号</Button></div><span className="mt-1 block text-ui-xs font-normal text-muted-foreground">编号决定同级顺序；调整时其他同级编号会自动连续排列。</span></Field><Field label="显示名称"><Input value={draft.display_name} maxLength={100} readOnly={isSharedMirror} onChange={(event) => onChange({ ...draft, display_name: event.target.value })} aria-label="显示名称" />{isSharedMirror && <span className="mt-1 block text-ui-xs font-normal text-muted-foreground">名称跟随远程目录，不能单独修改。</span>}</Field></div>
       </section>
       <section aria-labelledby={`category-status-${category.id}`} className="space-y-3 border-t border-border pt-4">
         <h4 id={`category-status-${category.id}`} className="text-ui-sm font-semibold">可用状态</h4>
@@ -858,7 +883,7 @@ function CategoryCreateForm({
   onCreate: () => void;
 }) {
   const canCreate = draft.display_name.trim() && positionValid;
-  return <div className="space-y-4"><Field label="父分类"><Select value={draft.parent_id} onChange={(event) => { const parentId = event.target.value; const nextSiblingCount = categories.filter((category) => category.parent_id === (parentId || null)).length; onChange({ ...draft, parent_id: parentId, target_position: String(nextSiblingCount + 1) }); }} aria-label="父分类"><option value="">一级分类</option>{categories.filter((category) => category.is_active).map((category) => <option key={category.id} value={category.id}>{category.full_path}</option>)}</Select></Field><Field label="分类名称"><Input value={draft.display_name} maxLength={100} onChange={(event) => onChange({ ...draft, display_name: event.target.value })} placeholder="例如 公司内部标准" aria-label="分类名称" /></Field><Field label="编号"><Input type="number" min={1} max={siblingCount + 1} step={1} value={draft.target_position} onChange={(event) => onChange({ ...draft, target_position: event.target.value })} aria-label="编号" /><span className="mt-1 block text-ui-xs font-normal text-muted-foreground">可填写 1 到 {siblingCount + 1}；使用已有编号时，确认后同级分类会自动顺延。</span></Field>{!positionValid && <p className="text-ui-sm text-destructive" role="alert">请输入 1 到 {siblingCount + 1} 之间的整数。</p>}<Button className="w-full" onClick={onCreate} disabled={saving || !canCreate}><Plus className="size-4" />{saving ? "新增中…" : "新增分类"}</Button></div>;
+  return <div className="space-y-4"><Field label="父分类"><Select value={draft.parent_id} onChange={(event) => { const parentId = event.target.value; const nextSiblingCount = categories.filter((category) => category.parent_id === (parentId || null)).length; onChange({ ...draft, parent_id: parentId, target_position: String(nextSiblingCount + 1) }); }} aria-label="父分类"><option value="">一级分类</option>{categories.filter((category) => category.is_active && !(category.category_kind === "shared_folder" && category.external_relative_path)).map((category) => <option key={category.id} value={category.id}>{category.full_path}</option>)}</Select></Field><Field label="分类名称"><Input value={draft.display_name} maxLength={100} onChange={(event) => onChange({ ...draft, display_name: event.target.value })} placeholder="例如 公司内部标准" aria-label="分类名称" /></Field><Field label="编号"><Input type="number" min={1} max={siblingCount + 1} step={1} value={draft.target_position} onChange={(event) => onChange({ ...draft, target_position: event.target.value })} aria-label="编号" /><span className="mt-1 block text-ui-xs font-normal text-muted-foreground">可填写 1 到 {siblingCount + 1}；使用已有编号时，确认后同级分类会自动顺延。</span></Field>{!positionValid && <p className="text-ui-sm text-destructive" role="alert">请输入 1 到 {siblingCount + 1} 之间的整数。</p>}<Button className="w-full" onClick={onCreate} disabled={saving || !canCreate}><Plus className="size-4" />{saving ? "新增中…" : "新增分类"}</Button></div>;
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {

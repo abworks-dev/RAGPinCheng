@@ -42,8 +42,12 @@ test.describe("资料管理", () => {
     }
     await page.getByRole("link", { name: "分类管理", exact: true }).click();
     await page.getByRole("button", { name: "展开共享培训资料" }).click();
-    await expect(page.getByTestId("shared-tree-item-shared-folder-course")).toContainText("一级课程");
+    // 共享子目录以受管镜像节点展示，样式与普通子分类一致；远程视频不进入分类树
+    const mirrorRow = page.getByTestId("category-tree-item-cat-shared-course");
+    await expect(mirrorRow).toContainText("一级课程");
+    await expect(mirrorRow).toContainText("共享");
     await expect(page.getByTestId("shared-tree-item-shared-video-intro")).toHaveCount(0);
+    await expect(page.getByText("共享培训导论.mp4", { exact: true })).toHaveCount(0);
     await expectNoBodyOverflow(page);
     expect((await page.screenshot({ fullPage: true })).byteLength).toBeGreaterThan(10_000);
   });

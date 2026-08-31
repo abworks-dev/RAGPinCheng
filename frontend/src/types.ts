@@ -367,6 +367,7 @@ export type ManagedCategory = {
   display_name: string;
   category_kind?: "folder" | "shared_folder";
   external_source_id?: string | null;
+  external_relative_path?: string | null;
   sort_order: number;
   level: number;
   is_active: boolean;
@@ -1139,7 +1140,7 @@ export type TranscriptionJob = {
   status: TranscriptionJobStatus;
   stage: string | null;
   processed_ms: number;
-  total_ms: number;
+  total_ms: number | null;
   failure_error_code: string | null;
   error_summary: string | null;
   failure: TranscriptionFailure | null;

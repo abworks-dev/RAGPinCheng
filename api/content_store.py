@@ -348,13 +348,15 @@ def list_categories(conn: sqlite3.Connection, *, include_inactive: bool = False)
     rows = conn.execute(
         f"""WITH RECURSIVE paths AS (
                 SELECT id,category_key,parent_id,display_code,display_name,sort_order,
-                       category_kind,external_source_id,level,is_active,chat_search_enabled,chat_filter_selectable,
+                       category_kind,external_source_id,external_relative_path,level,is_active,
+                       chat_search_enabled,chat_filter_selectable,
                        version,created_at,updated_at,
                        display_code || ' ' || display_name AS full_path
                 FROM category_nodes WHERE parent_id IS NULL AND deleted_at IS NULL
                 UNION ALL
                 SELECT c.id,c.category_key,c.parent_id,c.display_code,c.display_name,c.sort_order,
-                       c.category_kind,c.external_source_id,c.level,c.is_active,c.chat_search_enabled,c.chat_filter_selectable,
+                       c.category_kind,c.external_source_id,c.external_relative_path,c.level,c.is_active,
+                       c.chat_search_enabled,c.chat_filter_selectable,
                        c.version,c.created_at,c.updated_at,
                        p.full_path || ' / ' || c.display_code || ' ' || c.display_name
                 FROM category_nodes c JOIN paths p ON p.id=c.parent_id
@@ -812,6 +814,23 @@ def delete_category(
     }
 
 
+def is_shared_mirror_category(conn: sqlite3.Connection, category_id: str) -> bool:
+    """True when the category row is a read-only mirror of a remote shared folder.
+
+    Mirrors are ``category_kind='shared_folder'`` rows that carry an
+    ``external_relative_path`` (the remote folder they mirror is identified by
+    the source linked to their shared-folder root ancestor).  They never carry
+    their own ``external_source_id``; only the root shared folder does.
+    """
+    row = conn.execute(
+        """SELECT 1 FROM category_nodes
+           WHERE id=? AND category_kind='shared_folder'
+             AND external_relative_path IS NOT NULL AND deleted_at IS NULL""",
+        (category_id,),
+    ).fetchone()
+    return row is not None
+
+
 def create_category(
     conn: sqlite3.Connection,
     *,
@@ -853,6 +872,8 @@ def create_category(
                 raise ValueError("parent_category_not_found")
             if not parent["is_active"]:
                 raise ValueError("parent_category_inactive")
+            if is_shared_mirror_category(conn, parent_id):
+                raise ValueError("shared_folder_mirror_parent_forbidden")
             level = int(parent["level"]) + 1
         siblings = sorted(_category_siblings(conn, parent_id), key=_category_sibling_sort_key)
         if target_position is not None:
@@ -969,12 +990,19 @@ def update_category(
         conn.execute("BEGIN IMMEDIATE")
     try:
         category = conn.execute(
-            "SELECT parent_id,chat_search_enabled,chat_filter_selectable,category_kind,external_source_id "
+            "SELECT parent_id,display_name,chat_search_enabled,chat_filter_selectable,"
+            "category_kind,external_source_id,external_relative_path "
             "FROM category_nodes WHERE id=?",
             (category_id,),
         ).fetchone()
         if category is None:
             raise ValueError("category_not_found")
+        if (
+            category["category_kind"] == "shared_folder"
+            and category["external_relative_path"] is not None
+            and name != str(category["display_name"])
+        ):
+            raise ValueError("shared_folder_mirror_rename_blocked")
         if chat_search_enabled is None:
             chat_search_enabled = bool(category["chat_search_enabled"])
         if chat_filter_selectable is None:
@@ -1061,11 +1089,17 @@ def rename_category(
     conn.execute("BEGIN IMMEDIATE")
     try:
         category = conn.execute(
-            "SELECT parent_id,display_name,version FROM category_nodes WHERE id=?",
+            "SELECT parent_id,display_name,version,category_kind,external_relative_path "
+            "FROM category_nodes WHERE id=?",
             (category_id,),
         ).fetchone()
         if category is None:
             raise ValueError("category_not_found")
+        if (
+            category["category_kind"] == "shared_folder"
+            and category["external_relative_path"] is not None
+        ):
+            raise ValueError("shared_folder_mirror_rename_blocked")
         if int(category["version"]) != expected_version:
             raise ValueError("category_version_conflict")
         _ensure_category_sibling_identity_available(
@@ -1201,12 +1235,18 @@ def move_category(
     conn.execute("BEGIN IMMEDIATE")
     try:
         category = conn.execute(
-            """SELECT id,parent_id,display_code,display_name,sort_order,level,version
+            """SELECT id,parent_id,display_code,display_name,sort_order,level,version,
+                      category_kind,external_relative_path
                FROM category_nodes WHERE id=?""",
             (category_id,),
         ).fetchone()
         if category is None:
             raise ValueError("category_not_found")
+        if (
+            category["category_kind"] == "shared_folder"
+            and category["external_relative_path"] is not None
+        ):
+            raise ValueError("shared_folder_mirror_move_blocked")
         if int(category["version"]) != expected_version:
             raise ValueError("category_version_conflict")
         if target_parent_id == category_id:
@@ -1222,6 +1262,8 @@ def move_category(
                 raise ValueError("parent_category_not_found")
             if not parent["is_active"]:
                 raise ValueError("parent_category_inactive")
+            if is_shared_mirror_category(conn, target_parent_id):
+                raise ValueError("shared_folder_mirror_parent_forbidden")
             target_level = int(parent["level"]) + 1
             descendant = conn.execute(
                 """WITH RECURSIVE descendants(id) AS (

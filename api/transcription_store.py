@@ -45,6 +45,7 @@ from src.transcription.types import (
     PublicationIndexStatus,
     PublicationStatus,
     ReviewStatus,
+    TranscriptionInputRef,
     TranscriptionJobStage,
     TranscriptionJobStatus,
     TerminologyCorrectionConfig,
@@ -192,6 +193,68 @@ class SQLiteTranscriptionStore:
         ).fetchone()
         return int(row["next_attempt"])
 
+    def finalize_job_input(
+        self,
+        job_id: str,
+        *,
+        input_ref: TranscriptionInputRef,
+        execution: TranscriptionExecutionConfig,
+        snapshot: ProfileSnapshot,
+        execution_identity: str,
+        model_id: str | None,
+        model_revision: str | None,
+        expected_updated_at: int,
+        now: int,
+    ) -> TranscriptionJobRecord:
+        """Fill the audio fingerprint after the worker prepared the WAV.
+
+        The pending job is created without audio/execution fields so the task
+        list can show the preparing_audio phase.  Once the worker has run
+        ffmpeg, this CAS update writes the immutable input contract and the
+        derived execution identity onto the same row.
+        """
+        validate_uuid(job_id, "job_id")
+        if type(input_ref) is not TranscriptionInputRef:
+            raise ContractValidationError("invalid_input_ref", "input_ref")
+        if type(execution) is not TranscriptionExecutionConfig:
+            raise ContractValidationError("invalid_execution_config", "execution")
+        if type(snapshot) is not ProfileSnapshot:
+            raise ContractValidationError("invalid_profile_snapshot", "snapshot")
+        with self._transaction():
+            current = self._load_job_row(job_id)
+            if current.updated_at != expected_updated_at:
+                raise StoreConflictError("job_cas_conflict")
+            if (
+                current.status is not TranscriptionJobStatus.pending
+                or current.stage is not TranscriptionJobStage.preparing_audio
+            ):
+                raise ContractValidationError("finalize_requires_preparing", "job.stage")
+            changed = self._conn.execute(
+                """UPDATE transcription_jobs
+                   SET execution_identity=?,profile_snapshot_json=?,execution_config_json=?,
+                       execution_fingerprint=?,audio_sha256=?,input_kind=?,input_size_bytes=?,total_ms=?,
+                       model_id=?,model_revision=?,updated_at=?
+                   WHERE id=? AND updated_at=? AND status='pending'""",
+                (
+                    execution_identity,
+                    _json_text(snapshot.to_json_dict()),
+                    _json_text(execution.to_json_dict()),
+                    execution.execution_fingerprint,
+                    input_ref.content_sha256,
+                    input_ref.input_kind,
+                    input_ref.size_bytes,
+                    input_ref.duration_ms,
+                    model_id,
+                    model_revision,
+                    now,
+                    job_id,
+                    expected_updated_at,
+                ),
+            ).rowcount
+            if changed != 1:
+                raise StoreConflictError("job_cas_conflict")
+        return self.load_job(job_id)
+
     def mark_running(
         self,
         job_id: str,
@@ -208,6 +271,8 @@ class SQLiteTranscriptionStore:
             if current.updated_at != expected_updated_at:
                 raise StoreConflictError("job_cas_conflict")
             if current.status is TranscriptionJobStatus.pending:
+                if current.stage not in (None, TranscriptionJobStage.preparing_audio):
+                    raise ContractValidationError("pending_stage_unexpected", "job.stage")
                 if stage is not TranscriptionJobStage.validating_input:
                     raise ContractValidationError("invalid_stage_transition", "stage")
                 started_at = now
@@ -1197,7 +1262,12 @@ class SQLiteTranscriptionStore:
         if row is None:
             raise KeyError(job_id)
         try:
-            snapshot = ProfileSnapshot.from_json_dict(_load_json(row["profile_snapshot_json"], "profile_snapshot_json"))
+            raw_snapshot = row["profile_snapshot_json"]
+            snapshot = (
+                ProfileSnapshot.from_json_dict(_load_json(raw_snapshot, "profile_snapshot_json"))
+                if raw_snapshot is not None
+                else None
+            )
             scheme_snapshot = (
                 TranscriptionSchemeSnapshot.from_json_dict(
                     _load_json(row["scheme_snapshot_json"], "scheme_snapshot_json")
@@ -1205,17 +1275,22 @@ class SQLiteTranscriptionStore:
                 if row["scheme_snapshot_json"] is not None
                 else None
             )
-            execution = _execution_from_json(_load_json(row["execution_config_json"], "execution_config_json"))
+            raw_execution = row["execution_config_json"]
+            execution = (
+                _execution_from_json(_load_json(raw_execution, "execution_config_json"))
+                if raw_execution is not None
+                else None
+            )
             checkpoint = (
                 TranscriptionCheckpoint.from_json_dict(_load_json(row["checkpoint_json"], "checkpoint_json"))
                 if row["checkpoint_json"] is not None
                 else None
             )
-            if _json_text(snapshot.to_json_dict()) != row["profile_snapshot_json"]:
+            if snapshot is not None and _json_text(snapshot.to_json_dict()) != raw_snapshot:
                 raise ContractValidationError("noncanonical_persisted_json", "profile_snapshot_json")
             if scheme_snapshot is not None and _json_text(scheme_snapshot.to_json_dict()) != row["scheme_snapshot_json"]:
                 raise ContractValidationError("noncanonical_persisted_json", "scheme_snapshot_json")
-            if _json_text(execution.to_json_dict()) != row["execution_config_json"]:
+            if execution is not None and _json_text(execution.to_json_dict()) != raw_execution:
                 raise ContractValidationError("noncanonical_persisted_json", "execution_config_json")
             if checkpoint is not None and _json_text(checkpoint.to_json_dict()) != row["checkpoint_json"]:
                 raise ContractValidationError("noncanonical_persisted_json", "checkpoint_json")
@@ -1434,7 +1509,8 @@ class SQLiteTranscriptionStore:
             _json_text(record.scheme_snapshot.to_json_dict()) if record.scheme_snapshot else None,
             record.provider_key, record.model_id, record.model_revision,
             record.profile_definition_version, record.config_hash,
-            _json_text(record.profile_snapshot.to_json_dict()), _json_text(record.execution_config.to_json_dict()),
+            _json_text(record.profile_snapshot.to_json_dict()) if record.profile_snapshot else None,
+            _json_text(record.execution_config.to_json_dict()) if record.execution_config else None,
             record.execution_fingerprint, record.audio_sha256, record.input_kind, record.input_size_bytes,
             record.total_ms, record.processed_ms, record.status.value,
             record.stage.value if record.stage else None, record.failure_error_code,

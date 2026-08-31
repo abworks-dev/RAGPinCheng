@@ -394,6 +394,7 @@ class ManagedCategoryDTO(BaseModel):
     display_name: str
     category_kind: Literal["folder", "shared_folder"] = "folder"
     external_source_id: str | None = None
+    external_relative_path: str | None = None
     sort_order: int
     level: int
     is_active: bool
@@ -1669,7 +1670,7 @@ class TranscriptionJobDTO(BaseModel):
     status: str
     stage: str | None
     processed_ms: int
-    total_ms: int
+    total_ms: int | None = None
     failure_error_code: str | None
     error_summary: str | None
     failure: "TranscriptionFailureDTO | None" = None

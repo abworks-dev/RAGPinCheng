@@ -52,7 +52,7 @@ export function CategoryCascader({ categories, value, onChange, label = "目录"
   const [openUpward, setOpenUpward] = useState(false);
   const [query, setQuery] = useState("");
   const [candidateId, setCandidateId] = useState(value);
-  const activeCategories = useMemo(() => categories.filter((category) => category.is_active), [categories]);
+  const activeCategories = useMemo(() => categories.filter((category) => category.is_active && !(category.category_kind === "shared_folder" && Boolean(category.external_relative_path))), [categories]);
   const tree = useMemo(() => buildCategoryTree(activeCategories), [activeCategories]);
   const [activePath, setActivePath] = useState<string[]>(() => categoryPathIds(activeCategories, value));
   const selectedCategory = activeCategories.find((category) => category.id === value) || null;
