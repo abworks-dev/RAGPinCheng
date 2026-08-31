@@ -235,7 +235,7 @@ export function ExternalFolderBrowser({
         </tr></thead>
         <tbody className="divide-y divide-border">{visibleEntries.map((entry) => {
           const managedItem = entryManagedItem(entry);
-          return <tr key={entry.id} data-testid={`shared-library-row-${entry.id}`} className="transition-colors duration-normal hover:bg-surface-muted/60">
+          return <tr key={entry.id} data-testid={`shared-library-row-${entry.id}`} className={`transition-colors duration-normal hover:bg-surface-muted/60 ${entry.kind === "folder" ? "cursor-pointer" : ""}`} onClick={() => entry.kind === "folder" && openEntry(entry)}>
           <td className="px-1.5 py-3"><Checkbox aria-label={managedItem ? `选择${managedItem.title}` : `共享资料${entry.name}不可选择`} checked={Boolean(managedItem && selectedVersionIds.includes(managedItem.version_id))} disabled={!managedItem || !onToggleItem} onChange={() => managedItem && onToggleItem?.(managedItem)} /></td>
           <td className="px-1 py-3"><ManagedItemType folder={entry.kind === "folder"} sharedFolder={entry.kind === "folder"} docType={entry.kind === "video" ? "video" : undefined} compact /></td>
           <td className="max-w-xs px-1.5 py-3"><button type="button" className="block max-w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" disabled={entry.kind !== "folder"} onClick={() => entry.kind === "folder" && openEntry(entry)}><span className="flex flex-wrap items-center gap-2"><span className="break-words font-medium">{managedItem?.title || entry.name}</span><Badge variant="secondary">共享</Badge></span><span className="mt-0.5 block break-all text-ui-xs text-muted-foreground">{entry.relative_path}</span></button></td>

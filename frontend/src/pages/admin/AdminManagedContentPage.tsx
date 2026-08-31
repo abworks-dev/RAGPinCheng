@@ -4860,71 +4860,90 @@ export function AdminManagedContentPage() {
           >
             <Info className="size-4" />
           </IconButton>
-          <IconButton label={`重命名“${item.title}”`} tooltip={unavailableReason || (sourceReadOnly ? "共享源只读，不能重命名" : mediaManageAllowed ? "重命名视频" : "仅系统管理员可以重命名视频")} className="border border-border max-sm:size-10" disabled={disabled || !mediaManageAllowed} onClick={() => openMediaInfoDialog(item)}><Pencil className="size-4" /></IconButton>
-          <IconButton label={`更新“${item.title}”`} tooltip={unavailableReason || (sourceReadOnly ? "共享源只读，不能替换文件" : updateAllowed ? "更新视频资料" : "转录任务进行中，暂不能更新视频")} className="border border-border max-sm:size-10" disabled={disabled || !updateAllowed} onClick={() => { window.location.href = `${mediaBaseUrl}&action=replace`; }}><FileUp className="size-4" /></IconButton>
-          <IconButton
-            label={`调整“${item.title}”的归档目录`}
-            tooltip={sourceReadOnly ? "共享源只读，不能调整远程目录" : moveTooltip}
-            className="border border-border max-sm:size-10"
-            disabled={disabled || !movable}
-            onClick={() => {
-              setMoveTarget(item);
-              setMoveFolderId("");
-              setMoveError(null);
-            }}
-          >
-            <FolderInput className="size-4" />
-          </IconButton>
+          {!sourceReadOnly && (
+            <IconButton label={`重命名“${item.title}”`} tooltip={unavailableReason || (mediaManageAllowed ? "重命名视频" : "仅系统管理员可以重命名视频")} className="border border-border max-sm:size-10" disabled={disabled || !mediaManageAllowed} onClick={() => openMediaInfoDialog(item)}><Pencil className="size-4" /></IconButton>
+          )}
+          {!sourceReadOnly && (
+            <IconButton label={`更新“${item.title}”`} tooltip={unavailableReason || (updateAllowed ? "更新视频资料" : "转录任务进行中，暂不能更新视频")} className="border border-border max-sm:size-10" disabled={disabled || !updateAllowed} onClick={() => { window.location.href = `${mediaBaseUrl}&action=replace`; }}><FileUp className="size-4" /></IconButton>
+          )}
+          {!sourceReadOnly && (
+            <IconButton
+              label={`调整“${item.title}”的归档目录`}
+              tooltip={moveTooltip}
+              className="border border-border max-sm:size-10"
+              disabled={disabled || !movable}
+              onClick={() => {
+                setMoveTarget(item);
+                setMoveFolderId("");
+                setMoveError(null);
+              }}
+            >
+              <FolderInput className="size-4" />
+            </IconButton>
+          )}
           <IconButton label={`下载“${item.title}”`} tooltip={unavailableReason || (downloadable ? "选择下载视频、转录稿或两者" : "当前账号没有下载资料的权限")} className="border border-border max-sm:size-10" disabled={disabled || !downloadable || !item.media_id} onClick={() => openMediaDownload(item)}><Download className="size-4" /></IconButton>
-          <ActionsMenu
-            compact
-            disabled={disabled}
-            triggerLabel={`更多“${item.title}”的操作`}
-            menuLabel={`“${item.title}”的更多操作`}
-            options={[
-              {
-                key: "edit-transcript",
-                label: "编辑转录稿",
-                icon: <FilePenLine className="size-4" />,
-                href: derivedManageAllowed
-                  ? `${mediaBaseUrl}&workbench=1&action=edit-current`
-                  : undefined,
-                disabled: !derivedManageAllowed,
-                disabledReason: "当前账号没有发布权限",
-              },
-              {
-                key: "edit-media-info",
-                label: "编辑媒体信息",
-                icon: <Pencil className="size-4" />,
-                disabled: !mediaManageAllowed,
-                disabledReason: "当前账号没有发布权限",
-                onSelect: () => openMediaInfoDialog(item),
-              },
-              {
-                key: "replace-video",
-                label: "替换视频",
-                icon: <Video className="size-4" />,
-                href: mediaManageAllowed
-                  ? `${mediaBaseUrl}&action=replace`
-                  : undefined,
-                disabled: !mediaManageAllowed,
-                disabledReason: "当前账号没有发布权限",
-              },
-              {
-                key: "open-media",
-                label: "进入转录任务",
-                icon: <ExternalLink className="size-4" />,
-                href: derivedManageAllowed
-                  ? `${mediaBaseUrl}&workbench=1`
-                  : undefined,
-                disabled: !derivedManageAllowed,
-                disabledReason: item.media_id
-                  ? "仅系统管理员可以进入转录任务"
-                  : "媒体关联缺失",
-              },
-            ]}
-          />
-          <IconButton label={`删除“${item.title}”`} tooltip={unavailableReason || (sourceReadOnly ? "共享源只读，不能删除" : deletable ? "移入回收站（视频与转录稿可一起恢复）" : "仅系统管理员可以删除视频")} className="border border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive max-sm:size-10" disabled={disabled || !deletable} onClick={() => openDeleteDialog([item])}><Trash2 className="size-4" /></IconButton>
+          {sourceReadOnly ? (
+            <>
+              {derivedManageAllowed && (
+                <IconButton label={`编辑“${item.title}”的转录稿`} tooltip={unavailableReason || "编辑转录稿"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => { window.location.href = `${mediaBaseUrl}&workbench=1&action=edit-current`; }}><FilePenLine className="size-4" /></IconButton>
+              )}
+              {derivedManageAllowed && (
+                <IconButton label={`进入“${item.title}”的转录任务`} tooltip={unavailableReason || "进入转录任务"} className="border border-border max-sm:size-10" disabled={disabled} onClick={() => { window.location.href = `${mediaBaseUrl}&workbench=1`; }}><ExternalLink className="size-4" /></IconButton>
+              )}
+            </>
+          ) : (
+            <ActionsMenu
+              compact
+              disabled={disabled}
+              triggerLabel={`更多“${item.title}”的操作`}
+              menuLabel={`“${item.title}”的更多操作`}
+              options={[
+                {
+                  key: "edit-transcript",
+                  label: "编辑转录稿",
+                  icon: <FilePenLine className="size-4" />,
+                  href: derivedManageAllowed
+                    ? `${mediaBaseUrl}&workbench=1&action=edit-current`
+                    : undefined,
+                  disabled: !derivedManageAllowed,
+                  disabledReason: "当前账号没有发布权限",
+                },
+                {
+                  key: "edit-media-info",
+                  label: "编辑媒体信息",
+                  icon: <Pencil className="size-4" />,
+                  disabled: !mediaManageAllowed,
+                  disabledReason: "当前账号没有发布权限",
+                  onSelect: () => openMediaInfoDialog(item),
+                },
+                {
+                  key: "replace-video",
+                  label: "替换视频",
+                  icon: <Video className="size-4" />,
+                  href: mediaManageAllowed
+                    ? `${mediaBaseUrl}&action=replace`
+                    : undefined,
+                  disabled: !mediaManageAllowed,
+                  disabledReason: "当前账号没有发布权限",
+                },
+                {
+                  key: "open-media",
+                  label: "进入转录任务",
+                  icon: <ExternalLink className="size-4" />,
+                  href: derivedManageAllowed
+                    ? `${mediaBaseUrl}&workbench=1`
+                    : undefined,
+                  disabled: !derivedManageAllowed,
+                  disabledReason: item.media_id
+                    ? "仅系统管理员可以进入转录任务"
+                    : "媒体关联缺失",
+                },
+              ]}
+            />
+          )}
+          {!sourceReadOnly && (
+            <IconButton label={`删除“${item.title}”`} tooltip={unavailableReason || (deletable ? "移入回收站（视频与转录稿可一起恢复）" : "仅系统管理员可以删除视频")} className="border border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive max-sm:size-10" disabled={disabled || !deletable} onClick={() => openDeleteDialog([item])}><Trash2 className="size-4" /></IconButton>
+          )}
         </div>
       );
     }
