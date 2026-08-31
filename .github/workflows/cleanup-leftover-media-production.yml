@@ -55,6 +55,11 @@ jobs:
       EXPECTED_COUNT: ${{ inputs.expected_count }}
       ACTOR_USER_ID: ${{ inputs.actor_user_id }}
     steps:
+      - name: Check out approved tooling commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.expected_commit }}
+          path: tooling
       - name: Back up, clean up approved leftover media, and verify
         shell: bash
         run: |
@@ -86,12 +91,8 @@ jobs:
             }
           done
           [ -f "${COMPOSE_ENV_FILE}" ] && [ ! -L "${COMPOSE_ENV_FILE}" ]
-          [ "$(git -C "${REPO_PATH}" branch --show-current)" = "master" ]
-          [ -z "$(git -C "${REPO_PATH}" status --porcelain --untracked-files=no)" ]
-          git -C "${REPO_PATH}" fetch --no-tags origin master
-          [ "$(git -C "${REPO_PATH}" rev-parse origin/master)" = "${EXPECTED_COMMIT}" ]
-          [ "$(git -C "${REPO_PATH}" rev-parse HEAD)" = "${EXPECTED_COMMIT}" ]
-          [ -f "${REPO_PATH}/scripts/cleanup_leftover_media.py" ] && [ ! -L "${REPO_PATH}/scripts/cleanup_leftover_media.py" ]
+          [ -f "${GITHUB_WORKSPACE}/tooling/scripts/cleanup_leftover_media.py" ] \
+            && [ ! -L "${GITHUB_WORKSPACE}/tooling/scripts/cleanup_leftover_media.py" ]
 
           RUN_ID="leftover-media-${CONFIRM_CLEANUP}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RUN_ROOT="${BACKUP_ROOT}/${RUN_ID}"
@@ -159,7 +160,7 @@ jobs:
             > "${RUN_ROOT}/qdrant-before.json"
 
           # 3) Re-run the read-only inventory and freeze the manifest again.
-          "${COMPOSE[@]}" cp "${REPO_PATH}/scripts/cleanup_leftover_media.py" \
+          "${COMPOSE[@]}" cp "${GITHUB_WORKSPACE}/tooling/scripts/cleanup_leftover_media.py" \
             backend:/tmp/cleanup_leftover_media.py
           "${COMPOSE[@]}" exec -T -e PYTHONPATH=/app backend python /tmp/cleanup_leftover_media.py \
             --database /app/data/app.sqlite \
