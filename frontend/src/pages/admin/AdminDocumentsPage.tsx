@@ -347,16 +347,14 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
           </div>
           <IndexTaskSearchFilters searchInput={searchInput} categoryId={categoryId} docType={docType} sourceOrigin={sourceOrigin} status={status} history={history} includeArchived={includeArchived} categories={categories} onSearchInputChange={setSearchInput} onCategoryChange={setCategoryId} onDocTypeChange={setDocType} onSourceChange={setSourceOrigin} onStatusChange={setStatus} onHistoryChange={setHistory} onIncludeArchivedChange={setIncludeArchived} onClear={clearFilters} />
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <Button size="sm" variant="outline" className="h-control-md" onClick={() => void load(true)} disabled={loading || refreshing}>
+            <Button variant="outline" onClick={() => void load(true)} disabled={loading || refreshing}>
               <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
               {refreshing ? "刷新中…" : "刷新列表"}
             </Button>
             <div ref={bulkMenuRef} className="relative">
               <Button
                 ref={bulkMenuTriggerRef}
-                size="sm"
                 variant="outline"
-                className="h-control-md"
                 aria-haspopup="menu"
                 aria-expanded={bulkMenuOpen}
                 disabled={!canPublish || bulkBusy || selectedJobIds.length === 0}

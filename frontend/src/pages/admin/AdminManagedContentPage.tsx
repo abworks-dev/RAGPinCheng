@@ -1130,7 +1130,7 @@ function UploadTasksPanel({
             </label>
           </form>
           <div className="flex shrink-0 flex-wrap items-center gap-2 xl:justify-end">
-            <Button size="sm" variant="outline" className="h-control-md" onClick={() => void loadTasks()} disabled={loading}>
+            <Button variant="outline" onClick={() => void loadTasks()} disabled={loading}>
               <RefreshCw
                 className={loading ? "size-4 animate-spin" : "size-4"}
               />
@@ -1709,9 +1709,9 @@ function ActionsMenu({
     <>
       <Button
         ref={triggerRef}
-        size={compact ? "icon" : "sm"}
+        size={compact ? "icon" : "default"}
         variant="outline"
-        className={compact ? "!size-9 max-sm:!size-10" : "h-control-md"}
+        className={compact ? "!size-9 max-sm:!size-10" : undefined}
         disabled={disabled}
         aria-label={triggerLabel}
         title={triggerLabel}
@@ -5789,9 +5789,7 @@ export function AdminManagedContentPage() {
                 />
               )}
               <Button
-                size="sm"
                 variant="outline"
-                className="h-control-md"
                 onClick={() => void loadTrash()}
                 disabled={trashLoading}
               >
@@ -6729,8 +6727,6 @@ export function AdminManagedContentPage() {
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             {!sharedFolderMode && can("item.upload") && (
               <Button
-                size="sm"
-                className="h-control-md"
                 onClick={openUploadDialog}
                 disabled={
                   !enabled ||
@@ -6745,9 +6741,7 @@ export function AdminManagedContentPage() {
               </Button>
             )}
             <Button
-              size="sm"
               variant="outline"
-              className="h-control-md"
               onClick={() => void load(true)}
               disabled={loading || refreshing}
             >
@@ -6853,9 +6847,7 @@ export function AdminManagedContentPage() {
             ) : (
               (can("folder.request") || can("category.manage")) && (
                 <Button
-                  size="sm"
                   variant="outline"
-                  className="max-sm:h-control-md"
                   onClick={() =>
                     can("category.manage")
                       ? setNewFolderOpen(true)
