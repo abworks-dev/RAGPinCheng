@@ -1144,6 +1144,19 @@ def test_faster_whisper_qualification_preserves_native_stderr_before_failing():
     )
 
 
+def test_faster_whisper_qualification_records_gpu_occupancy_without_relaxing_gates():
+    script = read("scripts/qualify-faster-whisper-production.ps1")
+    assert "function Get-GpuComputeApps" in script
+    assert "--query-compute-apps=pid,process_name,used_memory" in script
+    assert "gpu-baseline-occupancy.json" in script
+    assert "gpu-gate-overflow.json" in script
+    assert "already meets the fixed 14 GiB qualification ceiling" in script
+    assert "inspect gpu-gate-overflow.json for the compute process holding GPU memory" in script
+    assert "$BaselineMemoryMiB -ge 14336" in script
+    assert "- $BaselineMemoryMiB -ge 8192" in script
+    assert "-ge 14336" in script
+
+
 def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
     script = read("scripts/qualify-faster-whisper-production.ps1")
     model = read("scripts/prepare_faster_whisper_model.py")
