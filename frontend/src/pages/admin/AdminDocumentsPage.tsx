@@ -194,8 +194,11 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
     offset: page * pageSize,
   }), [query, categoryId, docType, sourceOrigin, status, history, includeArchived, page, pageSize]);
 
-  const load = useCallback(async (background = false) => {
-    background ? setRefreshing(true) : setLoading(true);
+  // silent 用于后台自动轮询：不翻转手动刷新按钮的 spinning/文案状态，避免按钮周期性“抽动”。
+  const load = useCallback(async (background = false, silent = false) => {
+    if (!silent) {
+      background ? setRefreshing(true) : setLoading(true);
+    }
     setError(null);
     try {
     const unified = await adminContentApi.publicationJobs(params);
@@ -216,7 +219,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
       setError(caught?.message || String(caught));
     } finally {
       setLoading(false);
-      setRefreshing(false);
+      if (!silent) setRefreshing(false);
     }
   }, [params]);
 
@@ -231,7 +234,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
   }, [load]);
 
   const hasActive = listing.jobs.some((job) => ACTIVE_STATUSES.has(job.status));
-  useManagedContentLiveRefresh({ active: hasActive, refresh: () => load(true) });
+  useManagedContentLiveRefresh({ active: hasActive, refresh: () => load(true, true) });
 
   const counts = listing.status_counts;
   const allCount = Object.values(counts).reduce((sum, value) => sum + value, 0);
