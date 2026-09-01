@@ -448,6 +448,6 @@ def test_release_request_is_transactional_idempotent_and_replays_snapshot(asr_ap
         "SELECT profile_snapshot_json FROM asr_profile_release_requests"
     ).fetchone()
     snapshot = json.loads(row["profile_snapshot_json"])
-    assert snapshot["decode"]["prompt_asset_id"] == "asr_engineering_zh_v2"
+    assert snapshot["decode"]["prompt_asset_id"] is None
     assert "initial_prompt" not in snapshot["decode"]
     conn.close()

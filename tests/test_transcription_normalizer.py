@@ -154,3 +154,152 @@ def test_fixed_engineering_terms_are_not_split_across_timestamp_segments():
     texts = [item.text for item in result.segments]
     for term in ("AutoCAD", "12.5", "208", "95%"):
         assert any(term in text for text in texts)
+
+
+def test_prompt_echo_segment_is_dropped_without_deleting_real_terms():
+    profile = make_profile(
+        normalizer_config=NormalizerConfig(0, 500, 1000),
+        segmentation_config=TranscriptSegmentationConfig("natural", None, 500, 1000),
+        terminology_config=TerminologyCorrectionConfig("bim-engineering-v1"),
+    )
+    input_ref, _profile, execution, snapshot = make_execution_bundle(duration_ms=4000, profile=profile)
+    candidate = ProviderCandidate(
+        execution.provider_key,
+        "zh-CN",
+        4000,
+        (
+            seg(0, 0, 2, "这里演示 Revit 材质设置。"),
+            seg(1, 2, 4, "请准确识别 Revit、Navisworks、AutoCAD BIM-2026-0805 12.5 208 95% 以下是中文。"),
+        ),
+    )
+    result = normalize_candidate(input_ref, candidate, snapshot, execution)
+    assert [item.text for item in result.segments] == ["这里演示 Revit 材质设置。"]
+    assert TranscriptWarningCode.empty_segment_dropped in {item.code for item in result.warnings}
+
+
+def test_prompt_echo_without_following_chinese_marker_is_dropped():
+    profile = make_profile(
+        normalizer_config=NormalizerConfig(0, 500, 1000),
+        segmentation_config=TranscriptSegmentationConfig("natural", None, 500, 1000),
+        terminology_config=TerminologyCorrectionConfig("bim-engineering-v1"),
+    )
+    input_ref, _profile, execution, snapshot = make_execution_bundle(duration_ms=3000, profile=profile)
+    candidate = ProviderCandidate(
+        execution.provider_key,
+        "zh-CN",
+        3000,
+        (seg(0, 0, 3, "请准确识别 Revit、Navisworks、AutoCAD、BIM-2016-0805、GB 50016-0805、95%。"),),
+    )
+    with pytest.raises(ContractValidationError, match="empty_candidate"):
+        normalize_candidate(input_ref, candidate, snapshot, execution)
+
+
+def test_prompt_echo_suffix_is_removed_without_deleting_real_prefix():
+    profile = make_profile(
+        normalizer_config=NormalizerConfig(0, 500, 1000),
+        segmentation_config=TranscriptSegmentationConfig("natural", None, 500, 1000),
+        terminology_config=TerminologyCorrectionConfig("bim-engineering-v1"),
+    )
+    input_ref, _profile, execution, snapshot = make_execution_bundle(duration_ms=3000, profile=profile)
+    candidate = ProviderCandidate(
+        execution.provider_key,
+        "zh-CN",
+        3000,
+        (seg(0, 0, 3, "现在修改楼板材质。请准确识别 Revit、Navisworks、AutoCAD、BIM-2026-0805、95%。"),),
+    )
+    result = normalize_candidate(input_ref, candidate, snapshot, execution)
+    assert [item.text for item in result.segments] == ["现在修改楼板材质"]
+
+
+def test_prompt_echo_filter_keeps_normal_instructional_speech():
+    result = normalize_engineering(
+        "老师请准确识别 Revit 图标，然后打开材质设置。",
+        maximum_ms=None,
+        maximum_chars=500,
+    )
+    assert result.segments[0].text == "老师请准确识别 Revit 图标，然后打开材质设置。"
+    assert TranscriptWarningCode.empty_segment_dropped not in {item.code for item in result.warnings}
+
+
+def test_completed_sentence_is_not_merged_with_following_segment():
+    profile = make_profile(
+        normalizer_config=NormalizerConfig(0, 500, 1000),
+        segmentation_config=TranscriptSegmentationConfig("natural", None, 500, 1000),
+        terminology_config=TerminologyCorrectionConfig("bim-engineering-v1"),
+    )
+    input_ref, _profile, execution, snapshot = make_execution_bundle(duration_ms=4000, profile=profile)
+    candidate = ProviderCandidate(
+        execution.provider_key,
+        "zh-CN",
+        4000,
+        (
+            seg(0, 0, 1, "第一句已经完整结束。"),
+            seg(1, 1.001, 4, "第二句也完整。"),
+        ),
+    )
+    result = normalize_candidate(input_ref, candidate, snapshot, execution)
+    assert [item.text for item in result.segments] == ["第一句已经完整结束。", "第二句也完整。"]
+
+
+def test_three_unterminated_segments_merge_until_sentence_completion():
+    profile = make_profile(
+        normalizer_config=NormalizerConfig(0, 500, 1000),
+        segmentation_config=TranscriptSegmentationConfig("natural", None, 500, 1000),
+        terminology_config=TerminologyCorrectionConfig("bim-engineering-v1"),
+    )
+    input_ref, _profile, execution, snapshot = make_execution_bundle(duration_ms=5000, profile=profile)
+    candidate = ProviderCandidate(
+        execution.provider_key,
+        "zh-CN",
+        5000,
+        (
+            seg(0, 0, 1, "这是一个比较长的第一部分"),
+            seg(1, 1.001, 3, "接着是第二部分还没有结束"),
+            seg(2, 3.001, 5, "最后在这里结束。"),
+        ),
+    )
+    result = normalize_candidate(input_ref, candidate, snapshot, execution)
+    assert len(result.segments) == 1
+    assert result.segments[0].text.endswith("最后在这里结束。")
+
+
+def test_unterminated_segments_respect_duration_and_gap_bounds():
+    profile = make_profile(
+        normalizer_config=NormalizerConfig(0, 500, 1000),
+        segmentation_config=TranscriptSegmentationConfig("balanced", 3000, 500, 1000),
+        terminology_config=TerminologyCorrectionConfig("bim-engineering-v1"),
+    )
+    input_ref, _profile, execution, snapshot = make_execution_bundle(duration_ms=7000, profile=profile)
+    candidate = ProviderCandidate(
+        execution.provider_key,
+        "zh-CN",
+        7000,
+        (
+            seg(0, 0, 2, "这是一个较长的前半句没有结束"),
+            seg(1, 2.001, 4, "超过时长上限所以不能合并。"),
+            seg(2, 5.001, 7, "间隔超过上限也不能合并。"),
+        ),
+    )
+    result = normalize_candidate(input_ref, candidate, snapshot, execution)
+    assert len(result.segments) >= 3
+
+
+def test_unterminated_segment_merges_with_close_following_sentence():
+    profile = make_profile(
+        normalizer_config=NormalizerConfig(0, 500, 1000),
+        segmentation_config=TranscriptSegmentationConfig("natural", None, 500, 1000),
+        terminology_config=TerminologyCorrectionConfig("bim-engineering-v1"),
+    )
+    input_ref, _profile, execution, snapshot = make_execution_bundle(duration_ms=4000, profile=profile)
+    candidate = ProviderCandidate(
+        execution.provider_key,
+        "zh-CN",
+        4000,
+        (
+            seg(0, 0, 1, "这是一个较长的前半句没有结束"),
+            seg(1, 1.001, 4, "然后在这里结束。"),
+        ),
+    )
+    result = normalize_candidate(input_ref, candidate, snapshot, execution)
+    assert len(result.segments) == 1
+    assert result.segments[0].text == "这是一个较长的前半句没有结束\n然后在这里结束。"

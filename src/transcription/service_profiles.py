@@ -5,8 +5,6 @@ import hashlib
 import json
 from dataclasses import dataclass
 
-from src.prompts import load_prompt
-
 from .terminology import BIM_ENGINEERING_TERMS_V1
 from .types import (
     ContractValidationError,
@@ -169,8 +167,6 @@ FASTER_WHISPER_SERVICE_CONFIG = ServiceProfileConfig(
     ),
     beam_size=10,
     temperature=0.0,
-    initial_prompt=load_prompt("asr_engineering_zh_v1"),
-    prompt_asset_id="asr_engineering_zh_v1",
 )
 
 QWEN3_ASR_SERVICE_CONFIG = ServiceProfileConfig(
@@ -209,8 +205,6 @@ WHISPERX_FULL_DECODE_SERVICE_CONFIG = ServiceProfileConfig(
     hotwords=FASTER_WHISPER_SERVICE_CONFIG.hotwords,
     beam_size=FASTER_WHISPER_SERVICE_CONFIG.beam_size,
     temperature=0.1,
-    initial_prompt=FASTER_WHISPER_SERVICE_CONFIG.initial_prompt,
-    prompt_asset_id=FASTER_WHISPER_SERVICE_CONFIG.prompt_asset_id,
 )
 
 WHISPERX_V2_SERVICE_CONFIG = ServiceProfileConfig(
@@ -241,7 +235,5 @@ WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG = ServiceProfileConfig(
     hotwords=WHISPERX_V2_HOTWORDS_SERVICE_CONFIG.hotwords,
     beam_size=10,
     temperature=0.1,
-    initial_prompt=load_prompt("asr_engineering_zh_v2"),
-    prompt_asset_id="asr_engineering_zh_v2",
     qualification_policy="whisperx-r3/1",
 )
