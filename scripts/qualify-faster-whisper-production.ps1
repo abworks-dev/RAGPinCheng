@@ -739,9 +739,9 @@ except Exception:
         $mapping = @{}
     }
     foreach ($app in $apps) {
-        $pid = [string]$app.pid
-        if ($mapping -and $mapping.ContainsKey($pid)) {
-            $app.used_memory_mib = [string]$mapping[$pid] + " MiB"
+        $appPid = [string]$app.pid
+        if ($mapping -and $mapping.ContainsKey($appPid)) {
+            $app.used_memory_mib = [string]$mapping[$appPid] + " MiB"
         } elseif ($app.used_memory_mib -notmatch '\d') {
             $app.used_memory_mib = "[N/A]"
         }
@@ -2058,7 +2058,8 @@ try {
             Write-Host ("GPU_COMPUTE_APPS pid={0} name={1} used_mib={2}" -f $app.pid, $app.process_name, $app.used_memory_mib)
         }
         $runnerTempDir = Join-Path $env:RUNNER_TEMP ("faster-whisper-r3-" + $RunId)
-        if ($env:RUNNER_TEMP -and (Test-Path -LiteralPath $runnerTempDir -PathType Container)) {
+        if ($env:RUNNER_TEMP) {
+            New-Item -ItemType Directory -Path $runnerTempDir -Force | Out-Null
             Copy-Item -LiteralPath (Join-Path $EvidenceRoot "gpu-baseline-occupancy.json") `
                 -Destination (Join-Path $runnerTempDir "gpu-baseline-occupancy.json") -Force
         }
@@ -2599,7 +2600,8 @@ print('qualification-module-origins-verified')
                 Write-Host ("GPU_COMPUTE_APPS pid={0} name={1} used_mib={2}" -f $app.pid, $app.process_name, $app.used_memory_mib)
             }
             $runnerTempDir = Join-Path $env:RUNNER_TEMP ("faster-whisper-r3-" + $RunId)
-            if ($env:RUNNER_TEMP -and (Test-Path -LiteralPath $runnerTempDir -PathType Container)) {
+            if ($env:RUNNER_TEMP) {
+                New-Item -ItemType Directory -Path $runnerTempDir -Force | Out-Null
                 Copy-Item -LiteralPath (Join-Path $EvidenceRoot "gpu-gate-overflow.json") `
                     -Destination (Join-Path $runnerTempDir "gpu-gate-overflow.json") -Force
             }
