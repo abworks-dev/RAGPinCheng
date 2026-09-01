@@ -66,6 +66,8 @@ def build_pending_job(
     model_id: str | None = None,
     model_revision: str | None = None,
     scheme_snapshot: TranscriptionSchemeSnapshot | None = None,
+    audio_started_at: int | None = None,
+    audio_finished_at: int | None = None,
 ) -> TranscriptionJobRecord:
     return TranscriptionJobRecord(
         id=job_id,
@@ -110,6 +112,8 @@ def build_pending_job(
         updated_at=created_at,
         scheme_id=None if scheme_snapshot is None else scheme_snapshot.scheme_id,
         scheme_snapshot=scheme_snapshot,
+        audio_started_at=audio_started_at,
+        audio_finished_at=audio_finished_at,
     )
 
 

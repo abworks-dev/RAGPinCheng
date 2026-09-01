@@ -262,6 +262,8 @@ class TranscriptionApplicationService:
                     model_id=previous.model_id,
                     model_revision=previous.model_revision,
                     scheme_snapshot=previous.scheme_snapshot,
+                    audio_started_at=previous.audio_started_at,
+                    audio_finished_at=previous.audio_finished_at,
                 )
             created = store.create_job(record)
             if (
@@ -284,6 +286,12 @@ class TranscriptionApplicationService:
             job = store.load_job(job_id)
             if job.status is not TranscriptionJobStatus.pending:
                 return job
+            if job.stage is TranscriptionJobStage.preparing_audio:
+                job = store.begin_audio_preparation(
+                    job.id,
+                    expected_updated_at=job.updated_at,
+                    now=self._next_now(job, self.clock),
+                )
             prepared = self.preparer.prepare(job.media_id)
             if job.stage is TranscriptionJobStage.preparing_audio:
                 if (

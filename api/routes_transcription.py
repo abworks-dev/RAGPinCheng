@@ -50,6 +50,8 @@ from .schemas import (
     StartTranscriptionRequest,
     BulkStartTranscriptionRequest,
     BulkRetryTranscriptionRequest,
+    BulkReviewTranscriptionRequest,
+    BulkPublishTranscriptionRequest,
     BulkTranscriptionActionResponse,
     BulkTranscriptionItemDTO,
     BulkTranscriptionPreflightResponse,
@@ -227,6 +229,9 @@ def _job_dto(job) -> TranscriptionJobDTO:
         started_at=job.started_at,
         finished_at=job.finished_at,
         updated_at=job.updated_at,
+        audio_started_at=job.audio_started_at,
+        audio_finished_at=job.audio_finished_at,
+        transcribing_at=job.transcribing_at,
     )
 
 
@@ -776,6 +781,175 @@ def bulk_retry_jobs(
         failed=len(items) - succeeded,
     )
 
+
+@router.post("/media/bulk-review", response_model=BulkTranscriptionActionResponse, status_code=202)
+def bulk_review_transcripts(
+    body: BulkReviewTranscriptionRequest,
+    admin: CurrentUser = Depends(require_csrf_admin),
+) -> BulkTranscriptionActionResponse:
+    """Approve transcript versions in bulk, one row per media.
+
+    Each media either names an explicit version or falls back to its latest
+    version still awaiting review; every item is evaluated independently so a
+    single conflicting version never fails the whole batch.
+    """
+    items: list[TranscriptionActionItemDTO] = []
+    seen: set[str] = set()
+    conn = connect()
+    try:
+        service = _build_publication_service(conn)
+        for entry in body.items:
+            if entry.media_id in seen:
+                continue
+            seen.add(entry.media_id)
+            try:
+                version_id = entry.version_id
+                if not version_id:
+                    row = conn.execute(
+                        """SELECT id FROM transcript_versions
+                           WHERE media_id=? AND review_status='awaiting_review'
+                           ORDER BY created_at DESC,id DESC LIMIT 1""",
+                        (entry.media_id,),
+                    ).fetchone()
+                    if row is None:
+                        raise HTTPException(
+                            status_code=409,
+                            detail={
+                                "code": "no_version_awaiting_review",
+                                "message": "该视频没有待审核的转录版本。",
+                            },
+                        )
+                    version_id = str(row["id"])
+                service.review(
+                    version_id,
+                    approved=True,
+                    reviewed_by=admin.id,
+                    review_note=body.review_note,
+                )
+                items.append(TranscriptionActionItemDTO(
+                    media_id=entry.media_id,
+                    status="succeeded",
+                ))
+            except HTTPException as exc:
+                message = exc.detail.get("message") if isinstance(exc.detail, dict) else str(exc.detail)
+                items.append(TranscriptionActionItemDTO(
+                    media_id=entry.media_id,
+                    status="failed",
+                    message=message,
+                ))
+            except KeyError:
+                items.append(TranscriptionActionItemDTO(
+                    media_id=entry.media_id,
+                    status="failed",
+                    message="转录版本不存在",
+                ))
+            except (ContractValidationError, StoreConflictError):
+                items.append(TranscriptionActionItemDTO(
+                    media_id=entry.media_id,
+                    status="failed",
+                    message="当前版本状态不可审核，请刷新列表后重试",
+                ))
+            except Exception:
+                logger.exception("unexpected transcription review error for %s", entry.media_id)
+                items.append(TranscriptionActionItemDTO(
+                    media_id=entry.media_id,
+                    status="failed",
+                    message="操作失败，请稍后重试",
+                ))
+    finally:
+        conn.close()
+    succeeded = sum(item.status == "succeeded" for item in items)
+    return BulkTranscriptionActionResponse(
+        items=items,
+        succeeded=succeeded,
+        failed=len(items) - succeeded,
+    )
+
+
+@router.post("/media/bulk-publish", response_model=BulkTranscriptionActionResponse, status_code=202)
+def bulk_publish_transcripts(
+    body: BulkPublishTranscriptionRequest,
+    _admin: CurrentUser = Depends(require_csrf_admin),
+) -> BulkTranscriptionActionResponse:
+    """Publish the latest approved, unpublished transcript version per media.
+
+    Each media is handled independently: publication intent, candidate index
+    job and queue enqueue reuse the exact single-item contract, so a busy or
+    conflicting row only fails itself.
+    """
+    items: list[TranscriptionActionItemDTO] = []
+    seen: set[str] = set()
+    conn = connect()
+    try:
+        service = _build_publication_service(conn)
+        for media_id in body.media_ids:
+            if media_id in seen:
+                continue
+            seen.add(media_id)
+            try:
+                row = conn.execute(
+                    """SELECT id FROM transcript_versions
+                       WHERE media_id=? AND review_status='review_approved'
+                         AND publication_status IN ('not_published','publication_failed')
+                       ORDER BY created_at DESC,id DESC LIMIT 1""",
+                    (media_id,),
+                ).fetchone()
+                if row is None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "no_version_to_publish",
+                            "message": "该视频没有审核通过且未发布的转录版本。",
+                        },
+                    )
+                result = service.publish(str(row["id"]))
+                job = result["job"]
+                if job is not None and not result["reused"]:
+                    enqueue_publication(str(job["id"]))
+                items.append(TranscriptionActionItemDTO(
+                    media_id=media_id,
+                    status="succeeded",
+                ))
+            except HTTPException as exc:
+                message = exc.detail.get("message") if isinstance(exc.detail, dict) else str(exc.detail)
+                items.append(TranscriptionActionItemDTO(
+                    media_id=media_id,
+                    status="failed",
+                    message=message,
+                ))
+            except KeyError:
+                items.append(TranscriptionActionItemDTO(
+                    media_id=media_id,
+                    status="failed",
+                    message="转录版本不存在",
+                ))
+            except StoreConflictError:
+                items.append(TranscriptionActionItemDTO(
+                    media_id=media_id,
+                    status="failed",
+                    message="发布命令发生并发冲突，请刷新列表后重试",
+                ))
+            except ContractValidationError:
+                items.append(TranscriptionActionItemDTO(
+                    media_id=media_id,
+                    status="failed",
+                    message="当前版本尚不满足发布条件",
+                ))
+            except Exception:
+                logger.exception("unexpected transcription publish error for %s", media_id)
+                items.append(TranscriptionActionItemDTO(
+                    media_id=media_id,
+                    status="failed",
+                    message="操作失败，请稍后重试",
+                ))
+    finally:
+        conn.close()
+    succeeded = sum(item.status == "succeeded" for item in items)
+    return BulkTranscriptionActionResponse(
+        items=items,
+        succeeded=succeeded,
+        failed=len(items) - succeeded,
+    )
 
 
 def _build_publication_service(conn) -> TranscriptionPublicationApplicationService:

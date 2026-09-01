@@ -131,11 +131,25 @@ def test_application_persists_candidate_version_without_publication_or_index(tmp
         request_idempotency_key=REQUEST_ID,
         created_by=1,
     )
+    assert job.audio_started_at is None
     result = service.run_job(job.id)
     assert result.status is TranscriptionJobStatus.succeeded
     provider_factory = service.providers.factories[0]
     assert provider_factory.created_ports[0].application_job_id == job.id
     assert result.processed_ms == result.total_ms
+    assert result.audio_started_at is not None
+    assert result.audio_finished_at is not None
+    assert result.transcribing_at is not None
+    assert result.audio_finished_at >= result.audio_started_at
+    assert result.transcribing_at >= result.audio_finished_at
+    retry = service.create_retry_job(
+        previous_job_id=result.id,
+        request_idempotency_key="55555555-5555-4555-8555-555555555555",
+        created_by=1,
+    )
+    assert retry.audio_started_at == result.audio_started_at
+    assert retry.audio_finished_at == result.audio_finished_at
+    assert retry.transcribing_at is None
     conn = factory()
     try:
         version = conn.execute(

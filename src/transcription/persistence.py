@@ -297,6 +297,9 @@ class TranscriptionJobRecord:
     updated_at: int
     scheme_id: str | None = None
     scheme_snapshot: TranscriptionSchemeSnapshot | None = None
+    audio_started_at: int | None = None
+    audio_finished_at: int | None = None
+    transcribing_at: int | None = None
 
     def __post_init__(self) -> None:
         validate_uuid(self.id, "job.id")
@@ -382,6 +385,23 @@ class TranscriptionJobRecord:
             require_int(getattr(self, field), f"job.{field}")
         _optional_timestamp(self.started_at, "job.started_at")
         _optional_timestamp(self.finished_at, "job.finished_at")
+        _optional_timestamp(self.audio_started_at, "job.audio_started_at")
+        _optional_timestamp(self.audio_finished_at, "job.audio_finished_at")
+        _optional_timestamp(self.transcribing_at, "job.transcribing_at")
+        if self.audio_finished_at is not None and self.audio_started_at is None:
+            raise ContractValidationError("incomplete_audio_timing", "job.audio_finished_at")
+        if (
+            self.audio_started_at is not None
+            and self.audio_finished_at is not None
+            and self.audio_finished_at < self.audio_started_at
+        ):
+            raise ContractValidationError("audio_timing_reversed", "job.audio_finished_at")
+        if (
+            self.transcribing_at is not None
+            and self.audio_finished_at is not None
+            and self.transcribing_at < self.audio_finished_at
+        ):
+            raise ContractValidationError("transcribing_timing_reversed", "job.transcribing_at")
         self._validate_cross_fields()
 
     def _validate_cross_fields(self) -> None:

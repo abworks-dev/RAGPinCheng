@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Archive, ArrowLeft, Ban, CheckCircle2, ChevronDown, ClipboardCheck, FileUp, Film, FolderInput, LoaderCircle, RefreshCw, Repeat2, RotateCcw, Rocket, Search, Settings2, Trash2, Upload, XCircle } from "lucide-react";
+import { Archive, ArrowLeft, Ban, CheckCircle2, ChevronDown, ClipboardCheck, FileUp, Film, FolderInput, LoaderCircle, RefreshCw, Repeat2, RotateCcw, Rocket, Search, Send, Settings2, Trash2, Upload, XCircle } from "lucide-react";
 import { adminMediaApi } from "../../api/admin/media";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
@@ -20,8 +20,14 @@ import { CategoryTreePicker } from "../../components/admin/CategoryTreePicker";
 import { useTranscriptionJobs } from "../../hooks/useTranscriptionJobs";
 import { useAdminMediaAssets } from "../../hooks/useAdminMediaAssets";
 import { createRequestId } from "../../lib/request-id";
-import type { ManagedCategory, MediaAsset, MediaUploadPreflightEntry, TranscriptionJob, TranscriptionSchemeOption } from "../../types";
+import type { ManagedCategory, MediaAsset, MediaUploadPreflightEntry, TranscriptionJob, TranscriptionSchemeOption, TranscriptVersion } from "../../types";
 import { formatAdminDate, formatBytes } from "../../lib/admin-formatters";
+import {
+  audioElapsedSeconds,
+  formatElapsedClock,
+  transcriptionElapsedSeconds,
+  transcriptionProgress,
+} from "../../lib/transcription-progress";
 import { toast } from "../../components/ui/toast";
 
 type UploadMode = "manual" | "automatic";
@@ -111,17 +117,60 @@ function formatDuration(milliseconds: number) {
   return `${remainingSeconds}秒`;
 }
 
-function JobSummary({ job }: { job: TranscriptionJob }) {
-  if (job.status === "succeeded") return <p className="mt-1 text-ui-xs text-muted-foreground">草稿已生成，等待后续审核与发布。</p>;
-  if (job.status === "failed") return <p className="mt-1 text-ui-xs text-destructive">{job.failure?.message || job.error_summary || job.failure_error_code || "转录失败"}</p>;
-  if (job.status === "cancelled") return <p className="mt-1 text-ui-xs text-muted-foreground">任务已取消，可重新转录。</p>;
-  const stage = job.stage ? stageLabels[job.stage] || job.stage : "排队中";
-  if (job.status === "pending") return <p className="mt-1 text-ui-xs text-muted-foreground">{stage}{job.stage === "preparing_audio" ? "" : " · 等待服务调度"}</p>;
+function transcriptionVersionOptionLabel(version: TranscriptVersion, index: number, total: number) {
+  const source = version.source === "automatic" ? "自动转录" : version.derived_from_version_id ? "人工修订" : "人工转录";
+  const date = new Date(version.created_at * 1000).toLocaleDateString("zh-CN");
+  const rank = total === 1 ? "唯一版本" : index === 0 ? "最新一稿" : `第 ${index + 1} 稿`;
+  return `${rank} · ${date} · ${source}`;
+}
 
-  const elapsedMs = Math.max(0, Date.now() - (job.started_at ?? job.created_at) * 1000);
+function TimerLine({ job, nowMs }: { job: TranscriptionJob; nowMs: number }) {
+  const nowSec = nowMs / 1000;
+  const audio = audioElapsedSeconds(job, nowSec);
+  const transcription = transcriptionElapsedSeconds(job, nowSec);
+  if (audio === null && transcription === null) return null;
+  return (
+    <p className="flex flex-wrap items-center gap-x-2 tabular-nums">
+      {audio !== null && <span>音频提取 {formatElapsedClock(audio)}</span>}
+      {audio !== null && transcription !== null && <span aria-hidden="true" className="text-muted-foreground/60">·</span>}
+      {transcription !== null && <span>转录用时 {formatElapsedClock(transcription)}</span>}
+    </p>
+  );
+}
+
+function JobSummary({ job }: { job: TranscriptionJob }) {
+  const active = job.status === "pending" || job.status === "running";
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNowMs(Date.now());
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [active, job.job_id]);
+
+  if (job.status === "succeeded") {
+    return (
+      <div className="mt-1 space-y-1.5 text-ui-xs text-muted-foreground">
+        <p>草稿已生成，等待后续审核与发布。</p>
+        <TimerLine job={job} nowMs={nowMs} />
+      </div>
+    );
+  }
+  if (job.status === "failed") {
+    return (
+      <div className="mt-1 space-y-1.5 text-ui-xs text-muted-foreground">
+        <p className="text-destructive">{job.failure?.message || job.error_summary || job.failure_error_code || "转录失败"}</p>
+        <TimerLine job={job} nowMs={nowMs} />
+      </div>
+    );
+  }
+  if (job.status === "cancelled") return <p className="mt-1 text-ui-xs text-muted-foreground">任务已取消，可重新转录。</p>;
+
+  const stage = job.stage ? stageLabels[job.stage] || job.stage : "排队中";
+  const nowSec = nowMs / 1000;
+  const progress = transcriptionProgress(job, nowSec);
   const totalMs = job.total_ms;
   const hasCheckpoint = totalMs != null && totalMs > 0 && job.processed_ms > 0 && job.processed_ms < totalMs;
-  const progress = hasCheckpoint ? Math.min(100, Math.round((job.processed_ms / totalMs) * 100)) : null;
   const isTranscribing = job.stage === "transcribing";
   const durationDetail = totalMs != null && totalMs > 0
     ? `视频时长 ${formatDuration(totalMs)}`
@@ -129,11 +178,16 @@ function JobSummary({ job }: { job: TranscriptionJob }) {
   const detail = hasCheckpoint && totalMs != null
     ? `${formatDuration(job.processed_ms)} / ${formatDuration(totalMs)}`
     : isTranscribing
-      ? `模型整段处理中 · ${durationDetail} · 已耗时 ${formatDuration(elapsedMs)}`
+      ? `模型整段处理中 · ${durationDetail}`
       : "正在完成结果处理";
   return (
     <div className="mt-1 space-y-1.5 text-ui-xs text-muted-foreground">
-      <p>{stage} · {progress === null ? detail : `${progress}% · ${detail}`}</p>
+      <p className="flex flex-wrap items-center gap-x-2 font-medium text-foreground">
+        <span>{stage}</span>
+        {progress !== null && <span className="tabular-nums">{Math.round(progress)}%</span>}
+      </p>
+      <TimerLine job={job} nowMs={nowMs} />
+      <p>{detail}</p>
       <Progress label={`转录进度：${stage}`} value={progress} />
     </div>
   );
@@ -209,6 +263,15 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const [batchMenuOpen, setBatchMenuOpen] = useState(false);
   const [batchCleanupTargetIds, setBatchCleanupTargetIds] = useState<string[]>([]);
   const [batchActionBusy, setBatchActionBusy] = useState(false);
+  const [reviewDialogMediaIds, setReviewDialogMediaIds] = useState<string[]>([]);
+  const [reviewNote, setReviewNote] = useState("");
+  const [reviewVersionChoices, setReviewVersionChoices] = useState<Record<string, string>>({});
+  const [reviewVersionOptions, setReviewVersionOptions] = useState<Record<string, TranscriptVersion[]>>({});
+  const [reviewVersionsLoading, setReviewVersionsLoading] = useState(false);
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [publishDialogMediaIds, setPublishDialogMediaIds] = useState<string[]>([]);
+  const [publishSelectedIds, setPublishSelectedIds] = useState<string[]>([]);
+  const [publishBusy, setPublishBusy] = useState(false);
   const [startDialogMediaIds, setStartDialogMediaIds] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
     const params = new URLSearchParams(window.location.search);
@@ -381,8 +444,18 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const startDialogAssets = startDialogMediaIds
     .map((id) => mediaAssets.find((asset) => asset.media_id === id))
     .filter((asset): asset is MediaAsset => Boolean(asset));
+  const reviewDialogAssets = reviewDialogMediaIds
+    .map((id) => mediaAssets.find((asset) => asset.media_id === id))
+    .filter((asset): asset is MediaAsset => Boolean(asset));
+  const publishDialogAssets = publishDialogMediaIds
+    .map((id) => mediaAssets.find((asset) => asset.media_id === id))
+    .filter((asset): asset is MediaAsset => Boolean(asset));
   const selectedJobs = selectedMediaIds.map((id) => jobsByMediaId.get(id)).filter((job): job is TranscriptionJob => Boolean(job));
   const retryableSelectedAssets = selectedAssets.filter((asset) => asset.available_actions.includes("retry_transcription"));
+  const reviewableSelectedAssets = selectedAssets.filter((asset) =>
+    asset.available_actions.includes("review_transcript") && asset.review_status === "awaiting_review",
+  );
+  const publishableSelectedAssets = selectedAssets.filter((asset) => asset.available_actions.includes("publish_transcript"));
   const cleanableSelectedAssets = selectedAssets.filter((asset) =>
     asset.available_actions.includes("delete_failed")
     || asset.available_actions.includes("finalize_failed_cleanup"),
@@ -476,6 +549,83 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
     } finally {
       setBatchActionBusy(false);
     }
+  };
+  const openReviewDialog = (assets: MediaAsset[]) => {
+    const ids = assets.map((asset) => asset.media_id);
+    setReviewDialogMediaIds(ids);
+    setReviewNote("");
+    setReviewVersionChoices({});
+    setReviewVersionOptions({});
+    setBatchMenuOpen(false);
+    setReviewVersionsLoading(true);
+    void Promise.all(ids.map(async (mediaId) => {
+      try {
+        return [mediaId, await adminMediaApi.versions(mediaId)] as const;
+      } catch {
+        return [mediaId, [] as TranscriptVersion[]] as const;
+      }
+    })).then((entries) => {
+      const options = Object.fromEntries(entries) as Record<string, TranscriptVersion[]>;
+      setReviewVersionOptions(options);
+      setReviewVersionChoices(Object.fromEntries(ids.map((mediaId) => {
+        const versions = options[mediaId] || [];
+        const earliestWaiting = versions.find((version) => version.review_status === "awaiting_review");
+        return [mediaId, earliestWaiting?.version_id || versions[0]?.version_id || ""];
+      })));
+    }).finally(() => setReviewVersionsLoading(false));
+  };
+  const closeReviewDialog = () => {
+    if (reviewBusy) return;
+    setReviewDialogMediaIds([]);
+    setReviewVersionChoices({});
+    setReviewNote("");
+  };
+  const runBatchReview = async () => {
+    if (!reviewDialogMediaIds.length || reviewBusy) return;
+    setReviewBusy(true);
+    try {
+      const result = await adminMediaApi.bulkReviewTranscripts(
+        reviewDialogMediaIds.map((mediaId) => ({ media_id: mediaId, version_id: reviewVersionChoices[mediaId] || null })),
+        reviewNote.trim() || null,
+      );
+      showBatchToast("批量审核通过", result.succeeded, result.items.filter((item) => item.status === "failed").map((item) => item.message || "审核失败"));
+    } catch (cause) {
+      setUploadError(cause instanceof Error ? cause.message : String(cause));
+      return;
+    } finally {
+      setReviewBusy(false);
+    }
+    setReviewDialogMediaIds([]);
+    setReviewVersionChoices({});
+    setReviewNote("");
+    await refreshMediaState();
+  };
+  const openPublishDialog = (assets: MediaAsset[]) => {
+    const ids = assets.map((asset) => asset.media_id);
+    setPublishDialogMediaIds(ids);
+    setPublishSelectedIds(ids);
+    setBatchMenuOpen(false);
+  };
+  const closePublishDialog = () => {
+    if (publishBusy) return;
+    setPublishDialogMediaIds([]);
+    setPublishSelectedIds([]);
+  };
+  const runBatchPublish = async () => {
+    if (!publishSelectedIds.length || publishBusy) return;
+    setPublishBusy(true);
+    try {
+      const result = await adminMediaApi.bulkPublishTranscripts(publishSelectedIds);
+      showBatchToast("批量发布", result.succeeded, result.items.filter((item) => item.status === "failed").map((item) => item.message || "发布失败"));
+    } catch (cause) {
+      setUploadError(cause instanceof Error ? cause.message : String(cause));
+      return;
+    } finally {
+      setPublishBusy(false);
+    }
+    setPublishDialogMediaIds([]);
+    setPublishSelectedIds([]);
+    await refreshMediaState();
   };
   useEffect(() => { setMediaPage(0); setSelectedMediaIds([]); }, [mediaFilter, mediaPageSize, mediaQuery]);
   useEffect(() => { if (mediaPage >= mediaPageCount) setMediaPage(Math.max(0, mediaPageCount - 1)); }, [mediaPage, mediaPageCount]);
@@ -1087,7 +1237,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
               <a className={buttonVariants({ variant: "outline", size: "sm" })} href="/admin/asr"><Settings2 className="size-4" />转录配置</a>
               <Button size="sm" variant="outline" className="h-control-md" aria-label="刷新媒体资源" title="刷新媒体资源" disabled={loading} onClick={() => void refreshMediaState()}><RefreshCw className="size-4" aria-hidden="true" />刷新列表</Button>
-              <div className="relative"><Button size="sm" variant="outline" disabled={!selectedMediaIds.length || batchActionBusy} aria-haspopup="menu" aria-expanded={batchMenuOpen} onClick={() => setBatchMenuOpen((open) => !open)}>批量操作<ChevronDown className="size-4" /></Button>{batchMenuOpen && <div role="menu" aria-label="批量操作" className="absolute right-0 top-full z-dropdown mt-1 w-48 rounded-ui-md border border-border bg-popover p-1 shadow-overlay"><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" disabled={!startableSelectedAssets.length || batchActionBusy} onClick={() => openStartDialog(startableSelectedAssets)}><Rocket className="size-4" />开始转录（{startableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" disabled={!retryableSelectedAssets.length || batchActionBusy} onClick={() => void runBatchRetry()}><RotateCcw className="size-4" />重试所选（{retryableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" disabled={!cancellableSelectedJobs.length || batchActionBusy} onClick={() => void runBatchCancel()}><Ban className="size-4" />取消所选（{cancellableSelectedJobs.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm text-destructive hover:bg-destructive/10 disabled:opacity-40" disabled={!cleanableSelectedAssets.length || batchActionBusy} onClick={() => { setBatchCleanupTargetIds(cleanableSelectedAssets.map((asset) => asset.media_id)); setBatchMenuOpen(false); }}><Trash2 className="size-4" />清理所选（{cleanableSelectedAssets.length}）</button></div>}</div>
+              <div className="relative"><Button size="sm" variant="outline" disabled={!selectedMediaIds.length || batchActionBusy} aria-haspopup="menu" aria-expanded={batchMenuOpen} onClick={() => setBatchMenuOpen((open) => !open)}>批量操作<ChevronDown className="size-4" /></Button>{batchMenuOpen && <div role="menu" aria-label="批量操作" className="absolute right-0 top-full z-dropdown mt-1 w-52 rounded-ui-md border border-border bg-popover p-1 shadow-overlay"><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" disabled={!startableSelectedAssets.length || batchActionBusy} onClick={() => openStartDialog(startableSelectedAssets)}><Rocket className="size-4" />开始转录（{startableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" disabled={!reviewableSelectedAssets.length || batchActionBusy} onClick={() => openReviewDialog(reviewableSelectedAssets)}><ClipboardCheck className="size-4" />审核通过所选（{reviewableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" disabled={!publishableSelectedAssets.length || batchActionBusy} onClick={() => openPublishDialog(publishableSelectedAssets)}><Send className="size-4" />发布所选（{publishableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" disabled={!retryableSelectedAssets.length || batchActionBusy} onClick={() => void runBatchRetry()}><RotateCcw className="size-4" />重试所选（{retryableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" disabled={!cancellableSelectedJobs.length || batchActionBusy} onClick={() => void runBatchCancel()}><Ban className="size-4" />取消所选（{cancellableSelectedJobs.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm text-destructive hover:bg-destructive/10 disabled:opacity-40" disabled={!cleanableSelectedAssets.length || batchActionBusy} onClick={() => { setBatchCleanupTargetIds(cleanableSelectedAssets.map((asset) => asset.media_id)); setBatchMenuOpen(false); }}><Trash2 className="size-4" />清理所选（{cleanableSelectedAssets.length}）</button></div>}</div>
               {!embedded && <Button size="sm" onClick={() => setUploadDialogOpen(true)}><Upload className="size-4" />{hasUploadDraft ? `继续上传${pending.length ? `（${pending.length}）` : ""}` : "上传视频"}</Button>}
             </div>
           </div>
@@ -1159,26 +1309,96 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
         <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>配置转录方案</DialogTitle>
-            <DialogDescription>为所选视频设置默认方案，也可逐个覆盖后批量启动。</DialogDescription>
+            <DialogDescription>选定默认方案后，未单独设置的视频将全部使用该方案；个别视频可单独覆盖。</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <label className="block text-ui-sm font-medium">默认转录方案
-              <Select aria-label="默认转录方案" className="mt-1" value={startDefaultSchemeId} disabled={startBusy} onChange={(event) => setStartDefaultSchemeId(event.target.value)}>
-                <option value="">请选择可用方案</option>
-                {schemes.map((scheme) => <option key={scheme.scheme_id} value={scheme.scheme_id} disabled={!scheme.enabled || scheme.archived || scheme.availability !== "available"}>{scheme.name}{scheme.availability !== "available" ? "（不可用）" : ""}</option>)}
-              </Select>
-            </label>
-            <ul className="divide-y divide-border rounded-ui-md border border-border" aria-label="受影响的视频文件">
-              {startDialogAssets.map((asset) => <li key={asset.media_id} className="grid gap-3 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(12rem,18rem)] sm:items-center">
-                <div className="min-w-0"><p className="truncate text-ui-sm font-medium">{asset.title}</p><p className="truncate text-ui-xs text-muted-foreground">{asset.original_filename}</p></div>
-                <Select aria-label={`${asset.title}的转录方案`} value={startSchemeOverrides[asset.media_id] || ""} disabled={startBusy} onChange={(event) => setStartSchemeOverrides((current) => ({ ...current, [asset.media_id]: event.target.value }))}>
-                  <option value="">使用默认方案</option>
-                  {schemes.map((scheme) => <option key={scheme.scheme_id} value={scheme.scheme_id} disabled={!scheme.enabled || scheme.archived || scheme.availability !== "available"}>{scheme.name}</option>)}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <label className="min-w-0 flex-1 text-ui-sm font-medium">默认转录方案
+                <Select aria-label="默认转录方案" className="mt-1" value={startDefaultSchemeId} disabled={startBusy} onChange={(event) => setStartDefaultSchemeId(event.target.value)}>
+                  <option value="">请选择可用方案</option>
+                  {schemes.map((scheme) => <option key={scheme.scheme_id} value={scheme.scheme_id} disabled={!scheme.enabled || scheme.archived || scheme.availability !== "available"}>{scheme.name}{scheme.availability !== "available" ? "（不可用）" : ""}</option>)}
                 </Select>
-              </li>)}
+              </label>
+              <Button variant="outline" className="w-full sm:w-auto" disabled={startBusy || !Object.keys(startSchemeOverrides).length} onClick={() => setStartSchemeOverrides({})}>全部使用默认方案</Button>
+            </div>
+            <ul className="divide-y divide-border rounded-ui-md border border-border" aria-label="受影响的视频文件">
+              {startDialogAssets.map((asset) => {
+                const override = startSchemeOverrides[asset.media_id];
+                const effective = override || startDefaultSchemeId;
+                const scheme = schemes.find((entry) => entry.scheme_id === effective);
+                return (
+                  <li key={asset.media_id} className="grid gap-3 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(12rem,18rem)] sm:items-center">
+                    <div className="min-w-0">
+                      <p className="truncate text-ui-sm font-medium">{asset.title}</p>
+                      <p className="truncate text-ui-xs text-muted-foreground">{asset.original_filename}</p>
+                      <p className="truncate text-ui-xs text-muted-foreground">{override ? `已单独设置：${scheme?.name || effective}` : `跟随默认方案：${scheme?.name || "未选择方案"}`}</p>
+                    </div>
+                    <Select aria-label={`${asset.title}的转录方案`} value={override || ""} disabled={startBusy} onChange={(event) => setStartSchemeOverrides((current) => ({ ...current, [asset.media_id]: event.target.value }))}>
+                      <option value="">使用默认方案</option>
+                      {schemes.map((scheme) => <option key={scheme.scheme_id} value={scheme.scheme_id} disabled={!scheme.enabled || scheme.archived || scheme.availability !== "available"}>{scheme.name}</option>)}
+                    </Select>
+                  </li>
+                );
+              })}
             </ul>
           </div>
           <DialogFooter><Button variant="outline" disabled={startBusy} onClick={closeStartDialog}>取消</Button><Button disabled={startBusy || !startDefaultSchemeId || !startDialogAssets.length} onClick={() => void startSelectedTranscriptions()}>{startBusy ? "启动中…" : `开始转录（${startDialogAssets.length}）`}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={reviewDialogMediaIds.length > 0} onOpenChange={(open) => { if (!open) closeReviewDialog(); }}>
+        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>批量审核通过</DialogTitle>
+            <DialogDescription>为每个视频选择要审核通过的转录版本（默认最新一版）；只有待审核的版本可以被通过。</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <label className="block text-ui-sm font-medium">审核备注（可选）
+              <Input aria-label="批量审核备注" className="mt-1" placeholder="留空则不填写备注" value={reviewNote} disabled={reviewBusy} onChange={(event) => setReviewNote(event.target.value)} />
+            </label>
+            <ul className="divide-y divide-border rounded-ui-md border border-border" aria-label="批量审核的视频与版本">
+              {reviewDialogAssets.map((asset) => {
+                const versions = reviewVersionOptions[asset.media_id] || [];
+                const eligible = versions.filter((version) => version.review_status === "awaiting_review");
+                return (
+                  <li key={asset.media_id} className="grid gap-3 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(14rem,20rem)] sm:items-center">
+                    <div className="min-w-0">
+                      <p className="truncate text-ui-sm font-medium">{asset.title}</p>
+                      <p className="truncate text-ui-xs text-muted-foreground">{asset.original_filename}</p>
+                    </div>
+                    {reviewVersionsLoading
+                      ? <p className="text-ui-xs text-muted-foreground">正在加载转录版本…</p>
+                      : eligible.length === 0
+                        ? <p className="text-ui-xs text-destructive">没有待审核的转录版本</p>
+                        : <Select aria-label={`${asset.title}的审核版本`} value={reviewVersionChoices[asset.media_id] || ""} disabled={reviewBusy} onChange={(event) => setReviewVersionChoices((current) => ({ ...current, [asset.media_id]: event.target.value }))}>
+                            {eligible.map((version, index) => <option key={version.version_id} value={version.version_id}>{transcriptionVersionOptionLabel(version, index, eligible.length)}</option>)}
+                          </Select>}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+          <DialogFooter><Button variant="outline" disabled={reviewBusy} onClick={closeReviewDialog}>取消</Button><Button disabled={reviewBusy || reviewDialogAssets.some((asset) => !reviewVersionChoices[asset.media_id])} onClick={() => void runBatchReview()}>{reviewBusy ? "审核中…" : `审核通过（${reviewDialogMediaIds.length}）`}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={publishDialogMediaIds.length > 0} onOpenChange={(open) => { if (!open) closePublishDialog(); }}>
+        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>确认批量发布</DialogTitle>
+            <DialogDescription>发布后转录稿进入候选索引，成功后自动成为正式版本并对外可见。取消勾选可跳过对应视频。</DialogDescription>
+          </DialogHeader>
+          <ul className="divide-y divide-border rounded-ui-md border border-border" aria-label="将要发布的视频">
+            {publishDialogAssets.map((asset) => (
+              <li key={asset.media_id} className="flex items-start gap-3 p-3">
+                <Checkbox aria-label={`发布“${asset.title}”`} checked={publishSelectedIds.includes(asset.media_id)} disabled={publishBusy} onChange={() => setPublishSelectedIds((current) => current.includes(asset.media_id) ? current.filter((id) => id !== asset.media_id) : [...current, asset.media_id])} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-ui-sm font-medium">{asset.title}</p>
+                  <p className="truncate text-ui-xs text-muted-foreground">{asset.original_filename}</p>
+                  <p className="text-ui-xs text-muted-foreground">转录稿已审核通过，发布后将进入索引并成为正式版本。</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <DialogFooter><Button variant="outline" disabled={publishBusy} onClick={closePublishDialog}>取消</Button><Button disabled={publishBusy || publishSelectedIds.length === 0} onClick={() => void runBatchPublish()}>{publishBusy ? "发布中…" : `确认发布（${publishSelectedIds.length}）`}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
       <Dialog open={Boolean(moveTarget)} onOpenChange={(open) => { if (!open && !moveBusy) { setMoveTarget(null); setMoveCategoryId(""); setMoveError(null); } }}>
