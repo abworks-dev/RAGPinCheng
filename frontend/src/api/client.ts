@@ -1177,6 +1177,16 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ media_ids: mediaIds, request_idempotency_key: requestIdempotencyKey }),
     }),
+  bulkReviewTranscriptions: (items: Array<{ media_id: string; version_id?: string | null }>, reviewNote: string | null = null) =>
+    jsonFetch<BulkTranscriptionActionResult>("/api/admin/transcription/media/bulk-review", {
+      method: "POST",
+      body: JSON.stringify({ items, review_note: reviewNote }),
+    }),
+  bulkPublishTranscriptions: (mediaIds: string[]) =>
+    jsonFetch<BulkTranscriptionActionResult>("/api/admin/transcription/media/bulk-publish", {
+      method: "POST",
+      body: JSON.stringify({ media_ids: mediaIds }),
+    }),
   listTranscriptVersions: (mediaId: string) =>
     jsonFetch<TranscriptVersion[]>(`/api/admin/transcription/media/${mediaId}/versions`),
   previewTranscriptVersion: (versionId: string) =>

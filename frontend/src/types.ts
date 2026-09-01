@@ -1151,6 +1151,9 @@ export type TranscriptionJob = {
   started_at: number | null;
   finished_at: number | null;
   updated_at: number;
+  audio_started_at?: number | null;
+  audio_finished_at?: number | null;
+  transcribing_at?: number | null;
 };
 
 export type FailedMediaCleanup = {

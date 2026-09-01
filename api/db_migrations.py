@@ -1355,6 +1355,15 @@ MIGRATIONS = (
         "transcription_jobs_postponed_audio_preparation",
         ("RELAX_TRANSCRIPTION_JOBS_AUDIO_FOR_PREPARATION",),
     ),
+    Migration(
+        40,
+        "transcription_job_stage_timestamps",
+        (
+            "ALTER TABLE transcription_jobs ADD COLUMN audio_started_at INTEGER",
+            "ALTER TABLE transcription_jobs ADD COLUMN audio_finished_at INTEGER",
+            "ALTER TABLE transcription_jobs ADD COLUMN transcribing_at INTEGER",
+        ),
+    ),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(

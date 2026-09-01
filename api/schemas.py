@@ -1684,6 +1684,9 @@ class TranscriptionJobDTO(BaseModel):
     started_at: int | None
     finished_at: int | None
     updated_at: int
+    audio_started_at: int | None = None
+    audio_finished_at: int | None = None
+    transcribing_at: int | None = None
 
 
 class TranscriptionFailureDTO(BaseModel):
@@ -1814,6 +1817,26 @@ class BulkRetryTranscriptionRequest(BaseModel):
 
 
 class BulkFailedMediaDeleteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    media_ids: list[str] = Field(min_length=1, max_length=100)
+
+
+class BulkReviewTranscriptionItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    media_id: str
+    version_id: str | None = None
+
+
+class BulkReviewTranscriptionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[BulkReviewTranscriptionItem] = Field(min_length=1, max_length=100)
+    review_note: str | None = Field(default=None, max_length=500)
+
+
+class BulkPublishTranscriptionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     media_ids: list[str] = Field(min_length=1, max_length=100)
