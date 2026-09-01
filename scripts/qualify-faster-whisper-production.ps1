@@ -695,6 +695,27 @@ function Get-GpuSample {
     }
 }
 
+function Get-GpuComputeApps {
+    $output = & nvidia-smi.exe `
+        --query-compute-apps=pid,process_name,used_memory `
+        --format=csv,noheader,nounits 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        return @()
+    }
+    $apps = @()
+    foreach ($line in @($output)) {
+        $parts = @(([string]$line).Split(",") | ForEach-Object { $_.Trim() })
+        if ($parts.Count -eq 3) {
+            $apps += [ordered]@{
+                pid = $parts[0]
+                process_name = $parts[1]
+                used_memory_mib = $parts[2]
+            }
+        }
+    }
+    return $apps
+}
+
 function Stop-OwnedProcess {
     param(
         [object]$Process,
@@ -1989,6 +2010,19 @@ try {
     $BaselineMemoryMiB = [int]$gpuBaseline.memory_used_mib
     $PeakMemoryMiB = $BaselineMemoryMiB
     $PeakUtilization = [int]$gpuBaseline.utilization_percent
+    if ($BaselineMemoryMiB -ge 14336) {
+        $baselineOccupancy = [ordered]@{
+            schema_version = "faster-whisper-r3-baseline-occupancy/1"
+            commit_sha = $CommitSha.ToLowerInvariant()
+            run_id = $RunId
+            baseline_memory_mib = $BaselineMemoryMiB
+            memory_total_mib = [int]$gpuBaseline.memory_total_mib
+            ceiling_mib = 14336
+            compute_apps = @(Get-GpuComputeApps)
+        }
+        Write-JsonFile -Path (Join-Path $EvidenceRoot "gpu-baseline-occupancy.json") -Value $baselineOccupancy
+        throw "Production GPU idle baseline ${BaselineMemoryMiB} MiB already meets the fixed 14 GiB qualification ceiling; inspect gpu-baseline-occupancy.json for the compute process holding GPU memory"
+    }
     Write-JsonFile -Path (Join-Path $EvidenceRoot "preflight.json") -Value ([ordered]@{
         schema_version = "faster-whisper-r3-preflight/1"
         commit_sha = $CommitSha.ToLowerInvariant()
@@ -2509,7 +2543,18 @@ print('qualification-module-origins-verified')
             [int]$sample.memory_used_mib - $BaselineMemoryMiB -ge 8192 -or
             [int]$sample.memory_used_mib -ge 14336
         ) {
-            throw "GPU memory qualification gate exceeded"
+            $gateOverflow = [ordered]@{
+                schema_version = "faster-whisper-r3-gate-overflow/1"
+                commit_sha = $CommitSha.ToLowerInvariant()
+                run_id = $RunId
+                baseline_memory_mib = $BaselineMemoryMiB
+                peak_memory_mib = $PeakMemoryMiB
+                sample_memory_mib = [int]$sample.memory_used_mib
+                memory_total_mib = [int]$sample.memory_total_mib
+                compute_apps = @(Get-GpuComputeApps)
+            }
+            Write-JsonFile -Path (Join-Path $EvidenceRoot "gpu-gate-overflow.json") -Value $gateOverflow
+            throw "GPU memory qualification gate exceeded; inspect gpu-gate-overflow.json for the compute process holding GPU memory"
         }
         [void](Assert-BgeIdle)
         $currentGpuHealth = Invoke-RestMethod -Method Get -Uri "$GpuUrl/health" -TimeoutSec 10
