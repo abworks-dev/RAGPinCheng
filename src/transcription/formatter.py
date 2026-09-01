@@ -48,6 +48,9 @@ def format_transcript(canonical: CanonicalTranscript, *, title: str) -> bytes:
         body = segment.text.replace("\r\n", "\n").replace("\r", "\n").strip()
         if not body:
             raise ContractValidationError("empty_segment", f"segments[{segment.id}].text")
+        # Compatibility marker: the numeric suffix is the canonical segment
+        # sequence, not speaker diarization. Existing transcript parsers rely
+        # on this line shape, so do not present it as a detected speaker ID.
         bodies.append(f"说话人 {segment.id + 1} {_timestamp(segment.start_ms)}\n{body}")
     if not bodies:
         raise ContractValidationError("empty_canonical", "canonical.segments")

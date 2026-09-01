@@ -186,7 +186,7 @@ def test_authenticated_profile_identities_expose_hashes_without_prompt_text(tmp_
                 "service_profile_id": "faster-whisper-large-v3-turbo-v1",
                 "provider_key": "faster-whisper",
                 "profile_config_hash": FASTER_WHISPER_SERVICE_CONFIG.config_hash,
-                "prompt_asset_id": "asr_engineering_zh_v1",
+                "prompt_asset_id": None,
                 "qualification_policy": "not-required",
             },
             {

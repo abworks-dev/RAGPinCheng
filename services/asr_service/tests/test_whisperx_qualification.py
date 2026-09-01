@@ -160,7 +160,7 @@ def test_candidate_matrix_selects_only_improving_full_decode(monkeypatch):
         del timeout_ms
         if not service_config.hotwords:
             candidate = "baseline"
-        elif service_config.initial_prompt:
+        elif service_config.beam_size != 1 or service_config.temperature != 0.0:
             candidate = "full-decode"
         else:
             candidate = "hotwords"
@@ -180,7 +180,7 @@ def test_candidate_matrix_rejects_non_improving_or_false_positive_full_decode(
 ):
     def run_qualification(_manifest, *, timeout_ms, service_config):
         del timeout_ms
-        full = bool(service_config.initial_prompt)
+        full = service_config.beam_size != 1 or service_config.temperature != 0.0
         return {
             "status": "pass",
             "sample_count": 8,

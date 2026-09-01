@@ -226,8 +226,8 @@ def test_decode_candidates_use_public_asr_options_and_reuse_models(monkeypatch):
         "hotwords": expected_hotwords,
         "beam_size": 10,
         "temperatures": [0.1],
-        "initial_prompt": WHISPERX_FULL_DECODE_SERVICE_CONFIG.initial_prompt,
     }
+    assert WHISPERX_FULL_DECODE_SERVICE_CONFIG.initial_prompt == ""
     assert loads[1][2]["model"] is loads[2][2]["model"]
     assert len([item for item in calls if item[0] == "load_align_model"]) == 1
 

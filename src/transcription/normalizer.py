@@ -28,6 +28,27 @@ class _WorkSegment:
 
 
 _BOUNDARY_GROUPS = ("\n", "。！？!?；;", "，,", " \t")
+_SENTENCE_ENDINGS = frozenset("。！？!?；;")
+_PROMPT_ECHO_MARKERS = ("请准确识别", "要准确识别")
+_ENGINEERING_ECHO_TERMS = frozenset(
+    ("Revit", "Navisworks", "AutoCAD", "BIM-", "GB ", "12.5", "208", "95%")
+)
+
+
+def _prompt_echo_offset(text: str) -> int | None:
+    """Return a high-confidence prompt-echo suffix offset, preserving real speech."""
+    lowered = text.casefold()
+    candidates = [text.find(marker) for marker in _PROMPT_ECHO_MARKERS]
+    for start in sorted(position for position in candidates if position >= 0):
+        suffix = lowered[start:]
+        if sum(term.casefold() in suffix for term in _ENGINEERING_ECHO_TERMS) >= 3:
+            return start
+    return None
+
+
+def _ends_sentence(text: str) -> bool:
+    stripped = text.rstrip()
+    return bool(stripped and stripped[-1] in _SENTENCE_ENDINGS)
 
 
 def _to_milliseconds(value: str, unit: TimeUnit) -> int:
@@ -168,6 +189,12 @@ def normalize_candidate(
         if not text:
             warnings.append(_warning(TranscriptWarningCode.empty_segment_dropped, item.original_position))
             continue
+        echo_offset = _prompt_echo_offset(text)
+        if echo_offset is not None:
+            text = text[:echo_offset].rstrip(" \t\n，,。；;")
+            warnings.append(_warning(TranscriptWarningCode.empty_segment_dropped, item.original_position))
+            if not text:
+                continue
         converted.append(_WorkSegment(start_ms, end_ms, text, item.confidence, (item.original_position,)))
     if not converted:
         raise ContractValidationError("empty_candidate", "candidate.segments")
@@ -219,31 +246,51 @@ def normalize_candidate(
     )
     merged: list[_WorkSegment] = []
     index = 0
+    duration_limit = (
+        None if segmentation is None else segmentation.max_segment_duration_ms
+    )
     while index < len(deduplicated):
         current = deduplicated[index]
-        if index + 1 < len(deduplicated):
-            following = deduplicated[index + 1]
+        index += 1
+        while index < len(deduplicated):
+            following = deduplicated[index]
             joined_text = current.text + "\n" + following.text
             gap = following.start_ms - current.end_ms
-            if (
+            should_merge = (
                 len(current.text) < config.min_segment_chars
+                or (
+                    len(current.text) >= 8
+                    and len(following.text) >= 2
+                    and not _ends_sentence(current.text)
+                )
+            )
+            if not (
+                should_merge
                 and gap >= 0
                 and gap <= merge_gap_ms
                 and len(joined_text) <= max_segment_chars
-            ):
-                positions = current.original_positions + following.original_positions
-                merged.append(_WorkSegment(current.start_ms, following.end_ms, joined_text, None, positions))
-                warnings.append(
-                    _warning(
-                        TranscriptWarningCode.short_segment_merged,
-                        current.original_positions[0],
-                        following.original_positions,
-                    )
+                and (
+                    duration_limit is None
+                    or following.end_ms - current.start_ms <= duration_limit
                 )
-                index += 2
-                continue
+            ):
+                break
+            warnings.append(
+                _warning(
+                    TranscriptWarningCode.short_segment_merged,
+                    current.original_positions[0],
+                    following.original_positions,
+                )
+            )
+            current = _WorkSegment(
+                current.start_ms,
+                following.end_ms,
+                joined_text,
+                None,
+                current.original_positions + following.original_positions,
+            )
+            index += 1
         merged.append(current)
-        index += 1
 
     corrected_segments: list[_WorkSegment] = []
     for item in merged:

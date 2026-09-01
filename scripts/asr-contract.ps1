@@ -17,7 +17,7 @@ function Get-AsrRuntimeContractSpec {
         "faster-whisper" {
             return [pscustomobject][ordered]@{
                 engine = $Engine; model_revisions = @("0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf")
-                paths = @("services/asr_service/requirements-service-core.txt", "services/asr_service/requirements-windows.txt", "services/asr_service/requirements-faster-whisper.txt", "services/asr_service/app.py", "services/asr_service/model_cache.py", "src/prompts.py", "src/transcription/profile_catalog.py", "prompts/asr_engineering_zh_v1.md", "scripts/qualify-faster-whisper-production.ps1", "scripts/run_faster_whisper_qualification.py")
+                paths = @("services/asr_service/requirements-service-core.txt", "services/asr_service/requirements-windows.txt", "services/asr_service/requirements-faster-whisper.txt", "services/asr_service/app.py", "services/asr_service/model_cache.py", "src/transcription/service_profiles.py", "src/transcription/profile_catalog.py", "scripts/qualify-faster-whisper-production.ps1", "scripts/run_faster_whisper_qualification.py")
             }
         }
         "qwen3-asr" {
@@ -29,7 +29,7 @@ function Get-AsrRuntimeContractSpec {
         "whisperx" {
             return [pscustomobject][ordered]@{
                 engine = $Engine; model_revisions = @("53ecf83a5bedc5597eb8c8b34eac29e5345520ff", "51d27579a1040ee4e967979278d5f76b9c32c375")
-                paths = @("services/asr_service/requirements-service-core.txt", "services/asr_service/requirements-windows.txt", "services/asr_service/requirements-whisperx.txt", "services/asr_service/app.py", "services/asr_service/config.py", "services/asr_service/engine_protocol.py", "services/asr_service/engines/whisperx.py", "services/asr_service/model_cache.py", "src/prompts.py", "src/transcription/profile_catalog.py", "src/transcription/normalizer.py", "src/transcription/terminology.py", "prompts/asr_engineering_zh_v2.md", "scripts/asr_model_download.py", "scripts/qualify-whisperx-production.ps1", "scripts/run_whisperx_cuda_smoke.py", "scripts/run_whisperx_qualification.py", "scripts/run_whisperx_runtime_preflight.py")
+                paths = @("services/asr_service/requirements-service-core.txt", "services/asr_service/requirements-windows.txt", "services/asr_service/requirements-whisperx.txt", "services/asr_service/app.py", "services/asr_service/config.py", "services/asr_service/engine_protocol.py", "services/asr_service/engines/whisperx.py", "services/asr_service/model_cache.py", "src/transcription/service_profiles.py", "src/transcription/profile_catalog.py", "src/transcription/normalizer.py", "src/transcription/terminology.py", "scripts/asr_model_download.py", "scripts/qualify-whisperx-production.ps1", "scripts/run_whisperx_cuda_smoke.py", "scripts/run_whisperx_qualification.py", "scripts/run_whisperx_runtime_preflight.py")
             }
         }
     }
