@@ -151,6 +151,17 @@ workflow 对本次 run 生成收缩审计；只有任务成功且
 已收缩 run 默认保留 30 天且至少保留最新 3 次；ASR 部署成功后可按精确 commit 收缩
 对应 dependency run。周期清理与这些 workflow 共用生产 GPU 互斥组，默认只 DryRun。
 
+qualification 在 GPU 显存门禁失败时（相对基线增量 ≥ 8 GiB 或整卡 ≥ 14 GiB）会：
+在 preflight 阶段提前失败并写出 `gpu-baseline-occupancy.json`，或在 inference 门禁
+触发时写出 `gpu-gate-overflow.json`；两者都包含 `nvidia-smi --query-compute-apps`
+的 pid/进程名/per-process 显存（per-process 取不到时叠加 `pynvml`，仍失败回落
+`[N/A]`），并在 run 日志输出 `GPU_COMPUTE_APPS pid=… used_mib=…`，随 verdict
+artifact 上传。门禁前置条件是 GPU 空闲基线 < 14 GiB：该集成机会把非资格常驻
+模型/进程占用计入 baseline，导致 qualification 在加载任何 ASR 模型前就已失败，
+且失败发生在 `preflight`，不会构造 qualification report。此时应先在 GPU 主机
+释放显存并确认 `nvidia-smi --query-gpu=memory.used` 低于 14336 MiB 再重跑；
+该环境问题不应通过放宽 8/14 GiB 阈值或复用旧 qualification 解决。
+
 生产部署采用引擎通用的两层身份：`runtime_contract_sha256` 是某一引擎运行闭包
 （固定模型 revision 与明确源码文件的 Git blob 身份），`deployment_contract_sha256`
 是部署/预检行为闭包。两者都不依赖 Windows 工作树的 CRLF 字节。旧 R3 只能在当前
