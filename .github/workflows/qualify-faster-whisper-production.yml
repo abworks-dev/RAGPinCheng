@@ -467,6 +467,8 @@ jobs:
             ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\dependency-diagnostic.json
             ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-diagnostic.json
             ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\license-matrix.json
+            ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\gpu-baseline-occupancy.json
+            ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\gpu-gate-overflow.json
           if-no-files-found: warn
           retention-days: 14
 
@@ -481,6 +483,8 @@ jobs:
             ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\dependency-diagnostic.json
             ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\qualification-diagnostic.json
             ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\license-matrix.json
+            ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\gpu-baseline-occupancy.json
+            ${{ runner.temp }}\faster-whisper-r3-${{ github.run_id }}\gpu-gate-overflow.json
           if-no-files-found: error
           retention-days: 14
 

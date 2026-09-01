@@ -2021,6 +2021,14 @@ try {
             compute_apps = @(Get-GpuComputeApps)
         }
         Write-JsonFile -Path (Join-Path $EvidenceRoot "gpu-baseline-occupancy.json") -Value $baselineOccupancy
+        foreach ($app in @($baselineOccupancy.compute_apps)) {
+            Write-Host ("GPU_COMPUTE_APPS pid={0} name={1} used_mib={2}" -f $app.pid, $app.process_name, $app.used_memory_mib)
+        }
+        $runnerTempDir = Join-Path $env:RUNNER_TEMP ("faster-whisper-r3-" + $RunId)
+        if ($env:RUNNER_TEMP -and (Test-Path -LiteralPath $runnerTempDir -PathType Container)) {
+            Copy-Item -LiteralPath (Join-Path $EvidenceRoot "gpu-baseline-occupancy.json") `
+                -Destination (Join-Path $runnerTempDir "gpu-baseline-occupancy.json") -Force
+        }
         throw "Production GPU idle baseline ${BaselineMemoryMiB} MiB already meets the fixed 14 GiB qualification ceiling; inspect gpu-baseline-occupancy.json for the compute process holding GPU memory"
     }
     Write-JsonFile -Path (Join-Path $EvidenceRoot "preflight.json") -Value ([ordered]@{
@@ -2554,6 +2562,14 @@ print('qualification-module-origins-verified')
                 compute_apps = @(Get-GpuComputeApps)
             }
             Write-JsonFile -Path (Join-Path $EvidenceRoot "gpu-gate-overflow.json") -Value $gateOverflow
+            foreach ($app in @($gateOverflow.compute_apps)) {
+                Write-Host ("GPU_COMPUTE_APPS pid={0} name={1} used_mib={2}" -f $app.pid, $app.process_name, $app.used_memory_mib)
+            }
+            $runnerTempDir = Join-Path $env:RUNNER_TEMP ("faster-whisper-r3-" + $RunId)
+            if ($env:RUNNER_TEMP -and (Test-Path -LiteralPath $runnerTempDir -PathType Container)) {
+                Copy-Item -LiteralPath (Join-Path $EvidenceRoot "gpu-gate-overflow.json") `
+                    -Destination (Join-Path $runnerTempDir "gpu-gate-overflow.json") -Force
+            }
             throw "GPU memory qualification gate exceeded; inspect gpu-gate-overflow.json for the compute process holding GPU memory"
         }
         [void](Assert-BgeIdle)
