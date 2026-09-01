@@ -716,6 +716,39 @@ function Get-GpuComputeApps {
     return $apps
 }
 
+function Get-GpuComputeAppsWithMemory {
+    $apps = @(Get-GpuComputeApps)
+    $mapping = @{}
+    try {
+        $probe = @'
+import json, sys
+try:
+    import pynvml
+    pynvml.nvmlInit()
+    handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+    procs = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+    print(json.dumps({str(p.pid): str(round(p.usedGpuMemory / 1048576, 1)) for p in procs}, ensure_ascii=False))
+except Exception:
+    print("{}")
+'@
+        $json = (& $MachinePython -c $probe 2>$null | Select-Object -Last 1)
+        if ($json) {
+            $mapping = $json | ConvertFrom-Json -AsHashtable
+        }
+    } catch {
+        $mapping = @{}
+    }
+    foreach ($app in $apps) {
+        $pid = [string]$app.pid
+        if ($mapping -and $mapping.ContainsKey($pid)) {
+            $app.used_memory_mib = [string]$mapping[$pid] + " MiB"
+        } elseif ($app.used_memory_mib -notmatch '\d') {
+            $app.used_memory_mib = "[N/A]"
+        }
+    }
+    return $apps
+}
+
 function Stop-OwnedProcess {
     param(
         [object]$Process,
@@ -2018,7 +2051,7 @@ try {
             baseline_memory_mib = $BaselineMemoryMiB
             memory_total_mib = [int]$gpuBaseline.memory_total_mib
             ceiling_mib = 14336
-            compute_apps = @(Get-GpuComputeApps)
+            compute_apps = @(Get-GpuComputeAppsWithMemory)
         }
         Write-JsonFile -Path (Join-Path $EvidenceRoot "gpu-baseline-occupancy.json") -Value $baselineOccupancy
         foreach ($app in @($baselineOccupancy.compute_apps)) {
@@ -2559,7 +2592,7 @@ print('qualification-module-origins-verified')
                 peak_memory_mib = $PeakMemoryMiB
                 sample_memory_mib = [int]$sample.memory_used_mib
                 memory_total_mib = [int]$sample.memory_total_mib
-                compute_apps = @(Get-GpuComputeApps)
+                compute_apps = @(Get-GpuComputeAppsWithMemory)
             }
             Write-JsonFile -Path (Join-Path $EvidenceRoot "gpu-gate-overflow.json") -Value $gateOverflow
             foreach ($app in @($gateOverflow.compute_apps)) {
