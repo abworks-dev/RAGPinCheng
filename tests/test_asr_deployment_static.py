@@ -1151,6 +1151,9 @@ def test_faster_whisper_qualification_records_gpu_occupancy_without_relaxing_gat
     assert "--query-compute-apps=pid,process_name,used_memory" in script
     assert "function Get-GpuComputeAppsWithMemory" in script
     assert "pynvml.nvmlDeviceGetComputeRunningProcesses" in script
+    assert "$appPid = [string]$app.pid" in script
+    assert "$pid = [string]$app.pid" not in script
+    assert "New-Item -ItemType Directory -Path $runnerTempDir -Force" in script
     assert "gpu-baseline-occupancy.json" in script
     assert "gpu-gate-overflow.json" in script
     assert "already meets the fixed 14 GiB qualification ceiling" in script
