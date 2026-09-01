@@ -1103,10 +1103,10 @@ describe("AdminMediaPage wizard", () => {
     expect(within(row).queryByTestId("media-scheme-line")).not.toBeInTheDocument();
   });
 
-  it("re-transcribes a completed media and allows the same scheme after a warning", async () => {
+  it("re-transcribes a completed media and hides the duplicate retry action", async () => {
     mocks.listMediaAssets.mockResolvedValue([{
       ...assets[0],
-      available_actions: ["re_transcribe"],
+      available_actions: ["re_transcribe", "retry_transcription"],
       transcription_scheme_id: availableProfile.scheme_id,
       transcription_scheme_name: "受控中文转录",
       transcription_scheme_deleted: false,
@@ -1120,9 +1120,12 @@ describe("AdminMediaPage wizard", () => {
     render(<AdminMediaPage embedded />);
 
     const row = await screen.findByTestId("media-record-row");
+    expect(within(row).queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
     fireEvent.click(within(row).getByRole("button", { name: "重新转录" }));
     const dialog = screen.getByRole("dialog", { name: "配置重新转录方案" });
     expect(dialog).toHaveTextContent("原方案：受控中文转录");
+    expect(within(dialog).getByRole("combobox", { name: "重新转录批量方案" })).toHaveValue(availableProfile.scheme_id);
+    expect(within(dialog).getByRole("button", { name: "全部使用“受控中文转录”" })).toBeInTheDocument();
     const select = within(dialog).getByRole("combobox", { name: "项目交付培训的新转录方案" });
     expect(select).toHaveValue(availableProfile.scheme_id);
     expect(within(dialog).getByText(/所选方案与原转录方案一致/)).toBeInTheDocument();
@@ -1138,6 +1141,46 @@ describe("AdminMediaPage wizard", () => {
       availableProfile.scheme_id,
       expect.any(String),
     ));
+  });
+
+  it("applies one selected scheme to every re-transcription row", async () => {
+    mocks.listMediaAssets.mockResolvedValue([
+      {
+        ...assets[0],
+        media_id: "media-one",
+        title: "已完成视频一",
+        available_actions: ["re_transcribe", "retry_transcription"],
+        transcription_scheme_id: availableProfile.scheme_id,
+        transcription_scheme_name: "受控中文转录",
+        transcription_scheme_deleted: false,
+      },
+      {
+        ...assets[0],
+        media_id: "media-two",
+        title: "已完成视频二",
+        available_actions: ["re_transcribe", "retry_transcription"],
+        transcription_scheme_id: availableProfile.scheme_id,
+        transcription_scheme_name: "受控中文转录",
+        transcription_scheme_deleted: false,
+      },
+    ]);
+    mocks.listTranscriptionJobs.mockResolvedValue([
+      { ...succeededJob, media_id: "media-one" },
+      { ...succeededJob, job_id: "job-two", media_id: "media-two" },
+    ]);
+    render(<AdminMediaPage embedded />);
+    await screen.findByText("已完成视频一");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择当前页视频" }));
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "重新转录所选（2）" }));
+    const dialog = screen.getByRole("dialog", { name: "配置重新转录方案" });
+    fireEvent.change(within(dialog).getByRole("combobox", { name: "重新转录批量方案" }), { target: { value: secondProfile.scheme_id } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "全部使用“正式中文转录”" }));
+
+    expect(within(dialog).getByRole("combobox", { name: "已完成视频一的新转录方案" })).toHaveValue(secondProfile.scheme_id);
+    expect(within(dialog).getByRole("combobox", { name: "已完成视频二的新转录方案" })).toHaveValue(secondProfile.scheme_id);
+    expect(within(dialog).getAllByText("本次使用：正式中文转录")).toHaveLength(2);
   });
 
   it("re-transcribes only eligible media from the batch menu", async () => {
