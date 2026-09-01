@@ -1146,6 +1146,7 @@ def test_faster_whisper_qualification_preserves_native_stderr_before_failing():
 
 def test_faster_whisper_qualification_records_gpu_occupancy_without_relaxing_gates():
     script = read("scripts/qualify-faster-whisper-production.ps1")
+    workflow = read(".github/workflows/qualify-faster-whisper-production.yml")
     assert "function Get-GpuComputeApps" in script
     assert "--query-compute-apps=pid,process_name,used_memory" in script
     assert "gpu-baseline-occupancy.json" in script
@@ -1155,6 +1156,13 @@ def test_faster_whisper_qualification_records_gpu_occupancy_without_relaxing_gat
     assert "$BaselineMemoryMiB -ge 14336" in script
     assert "- $BaselineMemoryMiB -ge 8192" in script
     assert "-ge 14336" in script
+    assert "GPU_COMPUTE_APPS pid={0} name={1} used_mib={2}" in script
+    assert 'Join-Path $env:RUNNER_TEMP ("faster-whisper-r3-" + $RunId)' in script
+    assert "copy gpu-baseline-occupancy.json" not in script
+    assert "gpu-baseline-occupancy.json" in workflow
+    assert "gpu-gate-overflow.json" in workflow
+    assert workflow.count("gpu-baseline-occupancy.json") == 2
+    assert workflow.count("gpu-gate-overflow.json") == 2
 
 
 def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
