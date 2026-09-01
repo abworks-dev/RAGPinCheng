@@ -658,11 +658,15 @@ describe("Phase 4B transcription API contracts", () => {
     setCsrfToken("csrf-asr-bulk");
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ items: [], succeeded: 0, failed: 0 }))
+      .mockResolvedValueOnce(jsonResponse({ items: [], succeeded: 0, failed: 0 }))
+      .mockResolvedValueOnce(jsonResponse({ items: [], succeeded: 0, failed: 0 }))
       .mockResolvedValueOnce(jsonResponse({ items: [], succeeded: 0, failed: 0 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await api.bulkRetryTranscriptions(["media-1"], "22222222-2222-4222-8222-222222222222");
     await api.bulkDeleteFailedMediaAssets(["media-1"]);
+    await api.bulkReviewTranscriptions([{ media_id: "media-1", version_id: "version-1" }], "备注");
+    await api.bulkPublishTranscriptions(["media-1"]);
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/transcription/bulk-retry", expect.objectContaining({
       method: "POST",
@@ -670,6 +674,16 @@ describe("Phase 4B transcription API contracts", () => {
       body: JSON.stringify({ media_ids: ["media-1"], request_idempotency_key: "22222222-2222-4222-8222-222222222222" }),
     }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/media/bulk-delete-failed", expect.objectContaining({
+      method: "POST",
+      headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-asr-bulk" },
+      body: JSON.stringify({ media_ids: ["media-1"] }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/admin/transcription/media/bulk-review", expect.objectContaining({
+      method: "POST",
+      headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-asr-bulk" },
+      body: JSON.stringify({ items: [{ media_id: "media-1", version_id: "version-1" }], review_note: "备注" }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/admin/transcription/media/bulk-publish", expect.objectContaining({
       method: "POST",
       headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-asr-bulk" },
       body: JSON.stringify({ media_ids: ["media-1"] }),

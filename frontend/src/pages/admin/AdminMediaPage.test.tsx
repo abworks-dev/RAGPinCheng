@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   cancelTranscriptionJob: vi.fn(),
   retryTranscription: vi.fn(),
   bulkRetryTranscriptions: vi.fn(),
+  bulkReviewTranscriptions: vi.fn(),
+  bulkPublishTranscriptions: vi.fn(),
   bulkDeleteFailedMediaAssets: vi.fn(),
   managedCategories: vi.fn(),
   preflightMediaUpload: vi.fn(),
@@ -168,6 +170,8 @@ describe("AdminMediaPage wizard", () => {
     mocks.cancelTranscriptionJob.mockResolvedValue({ ...succeededJob, status: "cancelled" });
     mocks.retryTranscription.mockResolvedValue({ ...succeededJob, status: "pending" });
     mocks.bulkRetryTranscriptions.mockResolvedValue({ items: [], succeeded: 0, failed: 0 });
+    mocks.bulkReviewTranscriptions.mockResolvedValue({ items: [], succeeded: 0, failed: 0 });
+    mocks.bulkPublishTranscriptions.mockResolvedValue({ items: [], succeeded: 0, failed: 0 });
     mocks.bulkDeleteFailedMediaAssets.mockResolvedValue({ items: [], succeeded: 0, failed: 0 });
     mocks.managedCategories.mockResolvedValue([{
       id: "cat-05", category_key: "training", parent_id: null, display_code: "05",
@@ -516,35 +520,63 @@ describe("AdminMediaPage wizard", () => {
     await waitFor(() => expect(mocks.retryTranscription).toHaveBeenCalledWith("media-failed", expect.any(String)));
   });
 
-  it("uses indeterminate progress instead of a false zero percent while the model runs", async () => {
-    vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+  it("crawls progress by elapsed time and ticks both timers while the model runs", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1_000_060_000);
     mocks.listTranscriptionJobs.mockResolvedValue([{
       ...succeededJob,
       status: "running",
       stage: "transcribing",
       processed_ms: 0,
       total_ms: 600_000,
-      started_at: 900,
+      started_at: 999_940,
+      audio_started_at: 999_900,
+      audio_finished_at: 999_950,
+      transcribing_at: 1_000_000,
       finished_at: null,
     }]);
     render(<AdminMediaPage />);
 
     const row = await screen.findByTestId("media-record-row");
     expect(within(row).getByText(/模型整段处理中/)).toHaveTextContent("视频时长 10分0秒");
-    expect(within(row).getByText(/模型整段处理中/)).toHaveTextContent("已耗时 1分40秒");
-    expect(within(row).queryByText(/0%/)).not.toBeInTheDocument();
-    expect(within(row).getByRole("progressbar", { name: "转录进度：转录中" })).not.toHaveAttribute("aria-valuenow");
+    expect(within(row).getByText("音频提取 50秒")).toBeInTheDocument();
+    expect(within(row).getByText("转录用时 1分0秒")).toBeInTheDocument();
+    expect(within(row).getByText("35%")).toBeInTheDocument();
+    expect(within(row).getByRole("progressbar", { name: "转录进度：转录中" })).toHaveAttribute("aria-valuenow", "35");
+  });
+
+  it("shows a small advancing percentage while preparing the audio track", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1_000_010_000);
+    mocks.listTranscriptionJobs.mockResolvedValue([{
+      ...succeededJob,
+      status: "pending",
+      stage: "preparing_audio",
+      processed_ms: 0,
+      total_ms: null,
+      created_at: 1_000_000,
+      audio_started_at: 1_000_000,
+      audio_finished_at: null,
+      started_at: null,
+      finished_at: null,
+    }]);
+    render(<AdminMediaPage />);
+
+    const row = await screen.findByTestId("media-record-row");
+    expect(within(row).getByText("准备音轨")).toBeInTheDocument();
+    expect(within(row).getByText("音频提取 10秒")).toBeInTheDocument();
+    expect(within(row).getByText("7%")).toBeInTheDocument();
+    expect(within(row).getByRole("progressbar", { name: "转录进度：准备音轨" })).toHaveAttribute("aria-valuenow", "7");
   });
 
   it("does not present an unknown video duration as zero seconds", async () => {
-    vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    vi.spyOn(Date, "now").mockReturnValue(1_000_000_000);
     mocks.listTranscriptionJobs.mockResolvedValue([{
       ...succeededJob,
       status: "running",
       stage: "transcribing",
       processed_ms: 0,
       total_ms: 0,
-      started_at: 900,
+      started_at: 999_900,
+      transcribing_at: 1_000_000,
       finished_at: null,
     }]);
     render(<AdminMediaPage />);
@@ -554,7 +586,7 @@ describe("AdminMediaPage wizard", () => {
     expect(within(row).queryByText(/视频时长 0秒/)).not.toBeInTheDocument();
   });
 
-  it("shows a determinate percentage only when a real checkpoint exists", async () => {
+  it("shows a checkpoint-based percentage that still stays short of completion", async () => {
     mocks.listTranscriptionJobs.mockResolvedValue([{
       ...succeededJob,
       status: "running",
@@ -566,8 +598,25 @@ describe("AdminMediaPage wizard", () => {
     render(<AdminMediaPage />);
 
     const row = await screen.findByTestId("media-record-row");
-    expect(within(row).getByText(/50%/)).toHaveTextContent("5分0秒 / 10分0秒");
-    expect(within(row).getByRole("progressbar", { name: "转录进度：转录中" })).toHaveAttribute("aria-valuenow", "50");
+    expect(within(row).getByText("61%")).toBeInTheDocument();
+    expect(within(row).getByText("5分0秒 / 10分0秒")).toBeInTheDocument();
+    expect(within(row).getByRole("progressbar", { name: "转录进度：转录中" })).toHaveAttribute("aria-valuenow", "61");
+  });
+
+  it("freezes the per-second timers once the transcript succeeds", async () => {
+    mocks.listTranscriptionJobs.mockResolvedValue([{
+      ...succeededJob,
+      audio_started_at: 1000,
+      audio_finished_at: 1012,
+      transcribing_at: 1012,
+      finished_at: 3000,
+    }]);
+    render(<AdminMediaPage />);
+
+    const row = await screen.findByTestId("media-record-row");
+    expect(within(row).getByText("草稿已生成，等待后续审核与发布。")).toBeInTheDocument();
+    expect(within(row).getByText("音频提取 12秒")).toBeInTheDocument();
+    expect(within(row).getByText("转录用时 33分8秒")).toBeInTheDocument();
   });
 
   it("offers controlled cleanup for a failed managed task with terminal job history", async () => {
@@ -828,6 +877,101 @@ describe("AdminMediaPage wizard", () => {
     const dialog = screen.getByRole("dialog", { name: "配置转录方案" });
     expect(dialog).toHaveTextContent("待转录一");
     expect(dialog).toHaveTextContent("待转录二");
+  });
+
+  it("shows the effective scheme per video and resets every override to the default at once", async () => {
+    const pending = [
+      { ...assets[0], media_id: "media-one", title: "待转录一", status: "uploaded", review_status: null, current_version_id: null, publication_request_status: "pending_transcription", transcription_job_id: null, transcription_job_status: null, available_actions: ["start_transcription"] },
+      { ...assets[0], media_id: "media-two", title: "待转录二", status: "uploaded", review_status: null, current_version_id: null, publication_request_status: "pending_transcription", transcription_job_id: null, transcription_job_status: null, available_actions: ["start_transcription"] },
+    ];
+    mocks.listMediaAssets.mockResolvedValue(pending);
+    mocks.listTranscriptionJobs.mockResolvedValue([]);
+    render(<AdminMediaPage embedded />);
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "选择当前页视频" }));
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "开始转录（2）" }));
+    const dialog = screen.getByRole("dialog", { name: "配置转录方案" });
+
+    expect(within(dialog).getAllByText(/跟随默认方案：受控中文转录/)).toHaveLength(2);
+
+    fireEvent.change(within(dialog).getByRole("combobox", { name: "待转录一的转录方案" }), { target: { value: secondProfile.scheme_id } });
+    expect(within(dialog).getAllByText(/已单独设置：正式中文转录/)).toHaveLength(1);
+    expect(within(dialog).getByText(/跟随默认方案：受控中文转录/)).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "全部使用默认方案" }));
+    expect(within(dialog).getAllByText(/跟随默认方案：受控中文转录/)).toHaveLength(2);
+
+    fireEvent.change(within(dialog).getByRole("combobox", { name: "默认转录方案" }), { target: { value: secondProfile.scheme_id } });
+    expect(within(dialog).getAllByText(/跟随默认方案：正式中文转录/)).toHaveLength(2);
+  });
+
+  it("batch review picks a version per video, sends an optional note and reports partial failures", async () => {
+    const awaiting = [
+      { ...assets[0], media_id: "media-one", title: "待审核一", review_status: "awaiting_review", publication_request_status: "ready_to_publish", available_actions: ["review_transcript"], disabled_actions: {} },
+      { ...assets[0], media_id: "media-two", title: "待审核二", review_status: "awaiting_review", publication_request_status: "ready_to_publish", available_actions: ["review_transcript"], disabled_actions: {} },
+    ];
+    mocks.listMediaAssets.mockResolvedValue(awaiting);
+    mocks.listTranscriptionJobs.mockResolvedValue([]);
+    mocks.listTranscriptVersions.mockResolvedValue([
+      { version_id: "version-2", media_id: "media-one", source: "automatic", review_status: "awaiting_review", publication_status: "not_published", created_at: 200, updated_at: 200, is_current: false },
+      { version_id: "version-1", media_id: "media-one", source: "automatic", review_status: "awaiting_review", publication_status: "not_published", created_at: 100, updated_at: 100, is_current: false },
+    ]);
+    mocks.bulkReviewTranscriptions.mockResolvedValue({
+      items: [
+        { media_id: "media-one", status: "succeeded" },
+        { media_id: "media-two", status: "failed", message: "当前版本状态不可审核，请刷新列表后重试" },
+      ],
+      succeeded: 1,
+      failed: 1,
+    });
+    render(<AdminMediaPage embedded />);
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "选择当前页视频" }));
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "审核通过所选（2）" }));
+    const dialog = screen.getByRole("dialog", { name: "批量审核通过" });
+
+    await waitFor(() => expect(within(dialog).getByRole("combobox", { name: "待审核一的审核版本" })).toHaveValue("version-2"));
+    fireEvent.change(within(dialog).getByRole("combobox", { name: "待审核一的审核版本" }), { target: { value: "version-1" } });
+    fireEvent.change(within(dialog).getByLabelText("批量审核备注"), { target: { value: "术语复核通过" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "审核通过（2）" }));
+
+    await waitFor(() => expect(mocks.bulkReviewTranscriptions).toHaveBeenCalledWith(
+      [
+        { media_id: "media-one", version_id: "version-1" },
+        { media_id: "media-two", version_id: "version-2" },
+      ],
+      "术语复核通过",
+    ));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(
+      "批量审核通过：成功 1 项，失败 1 项",
+      expect.objectContaining({ description: expect.stringContaining("当前版本状态不可审核") }),
+    ));
+  });
+
+  it("batch publish shows every affected file and skips unchecked ones on confirm", async () => {
+    const approved = [
+      { ...assets[0], media_id: "media-a", title: "已审核视频A", review_status: "review_approved", publication_status: "not_published", publication_request_status: "ready_to_publish", available_actions: ["publish_transcript"], disabled_actions: {} },
+      { ...assets[0], media_id: "media-b", title: "已审核视频B", review_status: "review_approved", publication_status: "not_published", publication_request_status: "ready_to_publish", available_actions: ["publish_transcript"], disabled_actions: {} },
+    ];
+    mocks.listMediaAssets.mockResolvedValue(approved);
+    mocks.listTranscriptionJobs.mockResolvedValue([]);
+    render(<AdminMediaPage embedded />);
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "选择当前页视频" }));
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "发布所选（2）" }));
+    const dialog = screen.getByRole("dialog", { name: "确认批量发布" });
+
+    expect(within(dialog).getByText("已审核视频A")).toBeInTheDocument();
+    expect(within(dialog).getByText("已审核视频B")).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "发布“已审核视频B”" }));
+    expect(within(dialog).getByRole("button", { name: "确认发布（1）" })).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认发布（1）" }));
+
+    await waitFor(() => expect(mocks.bulkPublishTranscriptions).toHaveBeenCalledWith(["media-a"]));
   });
 
   it("uses the managed-content upload entry when embedded as transcription tasks", async () => {

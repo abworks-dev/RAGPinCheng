@@ -33,7 +33,7 @@ from api.routes_transcription import (
     router as transcription_router,
 )
 from src.transcription.asr_service_contract import ASR_API_VERSION, ServiceCapabilities
-from api.schemas import RetryTranscriptionRequest
+from api.schemas import BulkReviewTranscriptionRequest, RetryTranscriptionRequest
 from api.transcription_store import SQLiteTranscriptionStore
 from src.transcription.persistence import ManagedMarkdownRef
 from src.transcription.provider_protocol import ProviderFailureClassification
@@ -85,8 +85,20 @@ def test_management_reads_require_admin_and_mutations_require_csrf_admin():
          if route.path == "/admin/media/bulk-delete-failed" and "POST" in route.methods),
         None,
     )
+    bulk_review = next(
+        (route for route in transcription_router.routes
+         if route.path == "/admin/transcription/media/bulk-review" and "POST" in route.methods),
+        None,
+    )
+    bulk_publish = next(
+        (route for route in transcription_router.routes
+         if route.path == "/admin/transcription/media/bulk-publish" and "POST" in route.methods),
+        None,
+    )
     assert bulk_retry is not None
     assert bulk_delete is not None
+    assert bulk_review is not None
+    assert bulk_publish is not None
     revision = route_for(
         transcription_router,
         "/admin/transcription/versions/{base_version_id}/revisions",
@@ -112,6 +124,8 @@ def test_management_reads_require_admin_and_mutations_require_csrf_admin():
     assert require_csrf_admin in dependency_calls(retry)
     assert require_csrf_admin in dependency_calls(bulk_retry)
     assert require_csrf_admin in dependency_calls(bulk_delete)
+    assert require_csrf_admin in dependency_calls(bulk_review)
+    assert require_csrf_admin in dependency_calls(bulk_publish)
     assert require_csrf_admin in dependency_calls(revision)
     assert require_csrf_admin in dependency_calls(metadata_revision)
     assert require_admin in dependency_calls(timeline)
@@ -1528,6 +1542,138 @@ def test_bulk_retry_and_cleanup_contain_unexpected_item_failures(monkeypatch):
     assert (cleanup_result.succeeded, cleanup_result.failed) == (0, 1)
     assert cleanup_result.items[0].message == "操作失败，请稍后重试"
     assert "sensitive" not in cleanup_result.items[0].message
+
+
+class _FakeRow:
+    def __init__(self, mapping):
+        self._mapping = mapping
+
+    def __getitem__(self, key):
+        return self._mapping[key]
+
+
+class _FakeCursor:
+    def __init__(self, row):
+        self._row = row
+
+    def fetchone(self):
+        return self._row
+
+
+class _FakeConnection:
+    def __init__(self, versions_by_media):
+        self.versions_by_media = versions_by_media
+        self.closed = False
+
+    def execute(self, _sql, params=()):
+        media_id = params[0] if params else None
+        version = self.versions_by_media.get(media_id)
+        if version is None:
+            return _FakeCursor(None)
+        return _FakeCursor(_FakeRow({"id": version}))
+
+    def close(self):
+        self.closed = True
+
+
+def test_bulk_review_and_publish_return_itemized_partial_results(monkeypatch):
+    import api.routes_transcription as routes_transcription
+    import api.schemas as schemas
+
+    review_request = getattr(schemas, "BulkReviewTranscriptionRequest", None)
+    review_item = getattr(schemas, "BulkReviewTranscriptionItem", None)
+    publish_request = getattr(schemas, "BulkPublishTranscriptionRequest", None)
+    assert review_request is not None and review_item is not None and publish_request is not None
+
+    other = "11111111-1111-4111-8111-111111111111"
+    review_service = {"reviewed": [], "published": []}
+
+    class FakeService:
+        def review(self, version_id, *, approved, reviewed_by, review_note):
+            review_service["reviewed"].append((version_id, approved, reviewed_by, review_note))
+
+        def publish(self, version_id):
+            review_service["published"].append(version_id)
+            return {"version": None, "job": {"id": "index-job-1"}, "reused": False}
+
+    connection = _FakeConnection({MEDIA_ID: "version-1"})
+    published_jobs = []
+
+    monkeypatch.setattr(routes_transcription, "connect", lambda: connection)
+    monkeypatch.setattr(routes_transcription, "_build_publication_service", lambda _conn: FakeService())
+    monkeypatch.setattr(routes_transcription, "enqueue_publication", published_jobs.append, raising=False)
+
+    review_result = routes_transcription.bulk_review_transcripts(
+        review_request(
+            items=[
+                review_item(media_id=MEDIA_ID, version_id="version-1"),
+                review_item(media_id=other),
+            ],
+            review_note="批量复核通过",
+        ),
+        ADMIN,
+    )
+    assert (review_result.succeeded, review_result.failed) == (1, 1)
+    assert [(item.media_id, item.status) for item in review_result.items] == [
+        (MEDIA_ID, "succeeded"),
+        (other, "failed"),
+    ]
+    assert review_service["reviewed"] == [("version-1", True, ADMIN.id, "批量复核通过")]
+    assert review_result.items[1].message == "该视频没有待审核的转录版本。"
+
+    publish_result = routes_transcription.bulk_publish_transcripts(
+        publish_request(media_ids=[MEDIA_ID, other]),
+        ADMIN,
+    )
+    assert (publish_result.succeeded, publish_result.failed) == (1, 1)
+    assert review_service["published"] == ["version-1"]
+    assert published_jobs == ["index-job-1"]
+    assert publish_result.items[1].message == "该视频没有审核通过且未发布的转录版本。"
+    assert connection.closed is True
+
+
+def test_bulk_review_and_publish_contain_unexpected_item_failures(monkeypatch):
+    import api.routes_transcription as routes_transcription
+    import api.schemas as schemas
+
+    class ExplodingService:
+        def review(self, *_args, **_kwargs):
+            raise sqlite3.OperationalError("sensitive database detail")
+
+        def publish(self, *_args, **_kwargs):
+            raise sqlite3.OperationalError("sensitive database detail")
+
+    monkeypatch.setattr(routes_transcription, "connect", lambda: _FakeConnection({MEDIA_ID: "version-1"}))
+    monkeypatch.setattr(routes_transcription, "_build_publication_service", lambda _conn: ExplodingService())
+
+    review_result = routes_transcription.bulk_review_transcripts(
+        schemas.BulkReviewTranscriptionRequest(
+            items=[schemas.BulkReviewTranscriptionItem(media_id=MEDIA_ID, version_id="version-1")],
+        ),
+        ADMIN,
+    )
+    assert (review_result.succeeded, review_result.failed) == (0, 1)
+    assert review_result.items[0].message == "操作失败，请稍后重试"
+    assert "sensitive" not in review_result.items[0].message
+
+    publish_result = routes_transcription.bulk_publish_transcripts(
+        schemas.BulkPublishTranscriptionRequest(media_ids=[MEDIA_ID]),
+        ADMIN,
+    )
+    assert (publish_result.succeeded, publish_result.failed) == (0, 1)
+    assert publish_result.items[0].message == "操作失败，请稍后重试"
+    assert "sensitive" not in publish_result.items[0].message
+
+
+def test_bulk_review_request_rejects_untrusted_controls():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        BulkReviewTranscriptionRequest(  # type: ignore[call-arg]
+            items=[],
+            review_note="x",
+            force_review="yes",
+        )
 
 
 def test_retry_request_rejects_all_untrusted_execution_controls():

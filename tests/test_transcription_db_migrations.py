@@ -65,6 +65,46 @@ def test_empty_database_initializes_all_phase2_tables(tmp_path):
     assert not (tmp_path / "backups").exists()
 
 
+def test_schema_40_adds_transcription_job_stage_timestamps(tmp_path):
+    path = tmp_path / "app.sqlite"
+    init_db(path, backup_dir=tmp_path / "backups")
+    conn = sqlite3.connect(path)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(transcription_jobs)")}
+    assert {"audio_started_at", "audio_finished_at", "transcribing_at"} <= columns
+    conn.execute(
+        """INSERT INTO transcription_jobs(
+            id,media_id,attempt_number,request_idempotency_key,profile_id,provider_key,
+            profile_definition_version,config_hash,processed_ms,status,stage,created_at,updated_at,
+            audio_started_at,audio_finished_at,transcribing_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            "11111111-1111-4111-8111-111111111111",
+            "123e4567-e89b-12d3-a456-426614174000",
+            1,
+            "22222222-2222-4222-8222-222222222222",
+            "funasr-sensevoice-zh-experimental-v1",
+            "funasr-sensevoice",
+            "managed-v1",
+            "a" * 64,
+            0,
+            "pending",
+            "preparing_audio",
+            1000,
+            1000,
+            1000,
+            None,
+            None,
+        ),
+    )
+    conn.commit()
+    assert conn.execute("SELECT audio_started_at FROM transcription_jobs").fetchone()[0] == 1000
+    assert (
+        conn.execute("SELECT max(version) FROM app_schema_migrations").fetchone()[0]
+        == db_migrations.CURRENT_SCHEMA_VERSION
+    )
+    conn.close()
+
+
 def test_legacy_database_is_backed_up_then_migrated(tmp_path):
     path = tmp_path / "app.sqlite"
     conn = sqlite3.connect(path)

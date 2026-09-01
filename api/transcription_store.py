@@ -171,8 +171,9 @@ class SQLiteTranscriptionStore:
                         profile_snapshot_json,execution_config_json,execution_fingerprint,audio_sha256,input_kind,
                         input_size_bytes,total_ms,processed_ms,status,stage,failure_error_code,failure_classification,
                         error_summary,checkpoint_json,result_version_id,canonical_sha256,draft_markdown_rel_path,
-                        draft_markdown_sha256,created_at,started_at,finished_at,updated_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        draft_markdown_sha256,created_at,started_at,finished_at,updated_at,
+                        audio_started_at,audio_finished_at,transcribing_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     self._job_values(record),
                 )
                 self._conn.execute(
@@ -192,6 +193,38 @@ class SQLiteTranscriptionStore:
             (media_id,),
         ).fetchone()
         return int(row["next_attempt"])
+
+    def begin_audio_preparation(
+        self,
+        job_id: str,
+        *,
+        expected_updated_at: int,
+        now: int,
+    ) -> TranscriptionJobRecord:
+        """Stamp the moment the worker starts ffmpeg audio extraction.
+
+        Only the first worker pass on a preparing job records the start;
+        later transitions never overwrite it.
+        """
+        validate_uuid(job_id, "job_id")
+        with self._transaction():
+            current = self._load_job_row(job_id)
+            if current.updated_at != expected_updated_at:
+                raise StoreConflictError("job_cas_conflict")
+            if (
+                current.status is not TranscriptionJobStatus.pending
+                or current.stage is not TranscriptionJobStage.preparing_audio
+            ):
+                raise ContractValidationError("prepare_requires_pending", "job.stage")
+            changed = self._conn.execute(
+                """UPDATE transcription_jobs
+                   SET audio_started_at=COALESCE(audio_started_at,?),updated_at=?
+                   WHERE id=? AND updated_at=? AND status='pending' AND stage='preparing_audio'""",
+                (now, now, job_id, expected_updated_at),
+            ).rowcount
+            if changed != 1:
+                raise StoreConflictError("job_cas_conflict")
+        return self.load_job(job_id)
 
     def finalize_job_input(
         self,
@@ -233,7 +266,7 @@ class SQLiteTranscriptionStore:
                 """UPDATE transcription_jobs
                    SET execution_identity=?,profile_snapshot_json=?,execution_config_json=?,
                        execution_fingerprint=?,audio_sha256=?,input_kind=?,input_size_bytes=?,total_ms=?,
-                       model_id=?,model_revision=?,updated_at=?
+                       model_id=?,model_revision=?,audio_finished_at=?,updated_at=?
                    WHERE id=? AND updated_at=? AND status='pending'""",
                 (
                     execution_identity,
@@ -246,6 +279,7 @@ class SQLiteTranscriptionStore:
                     input_ref.duration_ms,
                     model_id,
                     model_revision,
+                    now,
                     now,
                     job_id,
                     expected_updated_at,
@@ -287,9 +321,11 @@ class SQLiteTranscriptionStore:
             else:
                 raise ContractValidationError("terminal_job_cannot_run", "job.status")
             changed = self._conn.execute(
-                """UPDATE transcription_jobs SET status='running',stage=?,started_at=?,updated_at=?
+                """UPDATE transcription_jobs SET status='running',stage=?,started_at=?,
+                   transcribing_at=CASE WHEN ?='transcribing' THEN COALESCE(transcribing_at,?) ELSE transcribing_at END,
+                   updated_at=?
                    WHERE id=? AND updated_at=?""",
-                (stage.value, started_at, now, job_id, expected_updated_at),
+                (stage.value, started_at, stage.value, now, now, job_id, expected_updated_at),
             ).rowcount
             if changed != 1:
                 raise StoreConflictError("job_cas_conflict")
@@ -1312,6 +1348,9 @@ class SQLiteTranscriptionStore:
                 row["draft_markdown_rel_path"], row["draft_markdown_sha256"], row["created_at"],
                 row["started_at"], row["finished_at"], row["updated_at"],
                 scheme_id=row["scheme_id"], scheme_snapshot=scheme_snapshot,
+                audio_started_at=row["audio_started_at"],
+                audio_finished_at=row["audio_finished_at"],
+                transcribing_at=row["transcribing_at"],
             )
         except (ValueError, TypeError, ContractValidationError) as exc:
             raise PersistedStateError(f"invalid_job:{job_id}") from exc
@@ -1518,4 +1557,5 @@ class SQLiteTranscriptionStore:
             record.error_summary, _json_text(record.checkpoint.to_json_dict()) if record.checkpoint else None,
             record.result_version_id, record.canonical_sha256, record.draft_markdown_rel_path,
             record.draft_markdown_sha256, record.created_at, record.started_at, record.finished_at, record.updated_at,
+            record.audio_started_at, record.audio_finished_at, record.transcribing_at,
         )

@@ -97,11 +97,15 @@ test.describe("转录任务", () => {
 
     await expect(row.getByText(/模型整段处理中/)).toContainText("视频时长 1小时20分");
     await expect(row.getByText(/模型整段处理中/)).not.toContainText("0%");
-    await expect(row.getByRole("progressbar", { name: "转录进度：转录中" })).not.toHaveAttribute("aria-valuenow");
+    const progress = row.getByRole("progressbar", { name: "转录进度：转录中" });
+    await expect(progress).toHaveAttribute("aria-valuenow");
+    const progressValue = Number(await progress.getAttribute("aria-valuenow"));
+    expect(progressValue).toBeGreaterThan(0);
+    expect(progressValue).toBeLessThan(100);
     await expect(row.getByRole("button", { name: "取消" })).toBeEnabled();
     await expectNoBodyOverflow(page);
     const viewport = page.viewportSize()!;
-    await page.screenshot({ path: testInfo.outputPath(`transcription-indeterminate-${viewport.width}x${viewport.height}.png`) });
+    await page.screenshot({ path: testInfo.outputPath(`transcription-active-progress-${viewport.width}x${viewport.height}.png`) });
   });
 
   test("永久失败任务保留禁用原因", async ({ page }, testInfo) => {
