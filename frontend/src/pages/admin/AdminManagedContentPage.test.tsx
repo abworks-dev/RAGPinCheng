@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import type React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminManagedContentPage } from "./AdminManagedContentPage";
+import { MANAGED_COLUMN_CLASS } from "../../components/admin/ManagedContentTable";
 
 const mocks = vi.hoisted(() => ({
   role: "user" as "user" | "admin",
@@ -422,6 +423,8 @@ describe("AdminManagedContentPage", () => {
     expect(screen.getByTestId("shared-library-row-video-1")).toHaveTextContent("待发布");
     const addressBar = screen.getByTestId("managed-folder-address");
     expect(within(addressBar).getByText("共享")).toHaveClass("rounded-full");
+    // 共享根层级的地址栏按钮带“共享”标记
+    expect(within(addressBar).getByRole("button", { name: "04 共享培训 共享" })).toBeInTheDocument();
     expect(within(addressBar).queryByRole("button", { name: "一级课程" })).not.toBeInTheDocument();
     const sharedFolderRow = screen.getByTestId("shared-library-row-folder-1");
     expect(within(sharedFolderRow).getByRole("button", { name: "打开文件夹“一级课程”" })).toBeEnabled();
@@ -478,10 +481,12 @@ describe("AdminManagedContentPage", () => {
 
     fireEvent.click(sharedFolderRow);
     await waitFor(() => expect(mocks.externalEntries).toHaveBeenLastCalledWith("source-1", "一级课程"));
-    expect(within(addressBar).getByRole("button", { name: "一级课程" })).toBeInTheDocument();
+    // 远程层级同样带“共享”标记，且共享根标记保留
+    expect(within(addressBar).getByRole("button", { name: "一级课程 共享" })).toBeInTheDocument();
+    expect(within(addressBar).getByRole("button", { name: "04 共享培训 共享" })).toBeInTheDocument();
     fireEvent.click(within(addressBar).getByRole("button", { name: "返回上一目录" }));
     await waitFor(() => expect(mocks.externalEntries).toHaveBeenLastCalledWith("source-1", ""));
-    expect(within(addressBar).queryByRole("button", { name: "一级课程" })).not.toBeInTheDocument();
+    expect(within(addressBar).queryByRole("button", { name: "一级课程 共享" })).not.toBeInTheDocument();
   });
 
   it("shows library-wide status counts at the root while keeping the file list empty", async () => {
@@ -783,9 +788,10 @@ it("uses comfortable selection and type tracks in the managed content table", as
     await openRootFolder();
 
     const table = screen.getByRole("table");
-    expect(within(table).getByRole("columnheader", { name: "选择当前页资料" })).toHaveClass("w-12", "px-3");
-    expect(within(table).getByRole("columnheader", { name: /类型/ })).toHaveClass("w-16", "px-2");
-    expect(within(table).getAllByRole("row")[1].firstElementChild).toHaveClass("w-12", "px-3");
+    // 列布局复用共享常量，与共享目录表保持同一几何
+    expect(within(table).getByRole("columnheader", { name: "选择当前页资料" })).toHaveClass(...MANAGED_COLUMN_CLASS.checkboxTh.split(" "));
+    expect(within(table).getByRole("columnheader", { name: /类型/ })).toHaveClass(...MANAGED_COLUMN_CLASS.typeTh.split(" "));
+    expect(within(table).getAllByRole("row")[1].firstElementChild).toHaveClass(...MANAGED_COLUMN_CLASS.checkboxTd.split(" "));
   });
 
   it("shows a folder-only root instead of the empty state", async () => {

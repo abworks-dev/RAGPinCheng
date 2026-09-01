@@ -175,6 +175,17 @@ const sharedManagedItem = {
   has_pending_revision: false,
 };
 
+const sharedLevel2ManagedItem = {
+  ...sharedManagedItem,
+  item_id: "media-transcript-shared-video-level2",
+  title: "建模准备",
+  media_id: "media-shared-level2",
+  version_id: "88888888-8888-4888-8888-888888888888",
+  original_filename: "建模准备.mp4",
+  source_rel_path: "一级课程/建模准备.mp4",
+  lifecycle_status: "transcript_ready",
+};
+
 const trashItems = [{
   ...items[4],
   source_rel_path: "公司知识库归档/制度与流程/企业知识库使用规范.md",
@@ -864,10 +875,18 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && path === "/api/admin/external-media/sources") return json(route, []);
     if (request.method() === "GET" && /^\/api\/admin\/external-media\/sources\/[^/]+\/entries$/.test(path)) {
       const parent = new URL(request.url()).searchParams.get("parent") || "";
-      const entries = scenario === "shared_library" && !parent ? [
-        { id: "shared-folder-course", kind: "folder", name: "一级课程", relative_path: "一级课程" },
-        { id: "shared-video-intro", kind: "video", name: "共享培训导论.mp4", relative_path: "共享培训导论.mp4", availability: "available", media_id: "media-shared-intro", lifecycle_status: "transcript_approved", modified_ns: 1_700_000_000_000_000_000 },
-      ] : [];
+      const entries = scenario === "shared_library"
+        ? parent === ""
+          ? [
+              { id: "shared-folder-course", kind: "folder", name: "一级课程", relative_path: "一级课程" },
+              { id: "shared-video-intro", kind: "video", name: "共享培训导论.mp4", relative_path: "共享培训导论.mp4", availability: "available", media_id: "media-shared-intro", lifecycle_status: "transcript_approved", modified_ns: 1_700_000_000_000_000_000 },
+            ]
+          : parent === "一级课程"
+            ? [
+                { id: "shared-video-level2", kind: "video", name: "建模准备.mp4", relative_path: "一级课程/建模准备.mp4", availability: "available", media_id: "media-shared-level2", lifecycle_status: "transcript_ready", modified_ns: 1_700_000_000_000_000_000 },
+              ]
+            : []
+        : [];
       return json(route, { source_id: "source-shared", parent_relative_path: parent, entries });
     }
     if (request.method() === "GET" && path === "/api/admin/transcription/profiles") return json(route, transcriptionProfiles);
@@ -1067,7 +1086,7 @@ export async function installAdminRoutes(
       return task ? json(route, task) : json(route, { detail: "合成任务不存在" }, 404);
     }
     if (path === "/api/admin/content/items-page") {
-      const fixtureItems = scenario === "media_library" ? [mediaLibraryItem] : scenario === "shared_library" ? [sharedManagedItem] : items;
+      const fixtureItems = scenario === "media_library" ? [mediaLibraryItem] : scenario === "shared_library" ? [sharedManagedItem, sharedLevel2ManagedItem] : items;
       const rows = scenario === "empty" ? [] : fixtureItems.map((item) => item.lifecycle_status === "publication_failed" && scenario === "publication_failure" ? { ...item, latest_publication_status: "failed", publication_attempt_count: 4, publication_failure: { code: "pdf_password_required", message: "PDF 需要密码才能解析。", retryable: false, recommended_action: "请上传已解除密码保护的 PDF。" } } : item);
       return json(route, { items: rows, total: rows.length, status_counts: rows.reduce<Record<string, number>>((counts, item) => ({ ...counts, [item.lifecycle_status]: (counts[item.lifecycle_status] || 0) + 1 }), {}) });
     }
