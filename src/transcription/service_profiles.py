@@ -164,8 +164,7 @@ FASTER_WHISPER_SERVICE_CONFIG = ServiceProfileConfig(
         "焊缝",
         "螺栓",
         "规范编号",
-    )
-    + BIM_ENGINEERING_TERMS_V1,
+    ),
     beam_size=10,
     temperature=0.0,
 )
