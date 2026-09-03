@@ -332,33 +332,41 @@ admission=disabled
 
 ### 2.2 固定候选
 
+候选为完整版 large-v3（2026-09-03 批准，R2：turbo 在 noisy-bim-zh CER 0.25
+不达标，探索矩阵 turbo 增强 hotwords 最低 0.188 仍超 0.15；large-v3 同口径
+CER=0.125 且 8/8 样本过、负样本误报 0；模型文件已离线在 GPU 主机）。profile
+id 暂沿用 `faster-whisper-large-v3-turbo-v1`（仅模型与 revision 变更，改名作为
+后续独立项）。
+
 ```text
 python=3.11
 faster-whisper=1.2.1
 ctranslate2=4.8.1
-model_id=dropbox-dash/faster-whisper-large-v3-turbo
-model_revision=0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf
+model_id=Systran/faster-whisper-large-v3
+model_revision=53ecf83a5bedc5597eb8c8b34eac29e5345520ff
 device=cuda
 compute_type=float16
 language=zh
 task=transcribe
-beam_size=1
+beam_size=10
 temperature=0.0
 vad_filter=false
 condition_on_previous_text=false
 word_timestamps=false
-hotwords=null
+hotwords=12 标准词 + BIM_ENGINEERING_TERMS_V1（Revit/Navisworks/AutoCAD/BIM 等 8 词）
 local_files_only=true
 ```
 
 模型 `model.bin` 的冻结公开身份为：
 
 ```text
-size_bytes=1617884929
-sha256=e76620f83d5f5769e6a5f66c8013e1292a797de79b3581b44b6c7f9e36d77f31
+size_bytes=（由资格 run 在 GPU 主机重算后回填）
+sha256=（由资格 run 在 GPU 主机重算；revision 固定为 53ecf83a…）
 ```
 
-R3 必须在本机重新计算大小与 SHA-256；公开值只作为比对基线。
+R3 必须在本机重新计算大小与 SHA-256；公开值只作为比对基线。旧 turbo 候选
+（dropbox-dash/faster-whisper-large-v3-turbo@0a363e91）作为历史失败记录保留，
+不参与 admission。
 
 ### 2.3 当前生产拓扑
 

@@ -44,8 +44,8 @@ class ServiceProfileConfig:
             ),
             "faster-whisper-large-v3-turbo-v1": (
                 "faster-whisper",
-                "dropbox-dash/faster-whisper-large-v3-turbo",
-                "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
+                "Systran/faster-whisper-large-v3",
+                "53ecf83a5bedc5597eb8c8b34eac29e5345520ff",
                 "zh-CN",
                 None,
                 None,
@@ -148,8 +148,8 @@ SENSEVOICE_SERVICE_CONFIG = ServiceProfileConfig(
 FASTER_WHISPER_SERVICE_CONFIG = ServiceProfileConfig(
     "faster-whisper-large-v3-turbo-v1",
     "faster-whisper",
-    "dropbox-dash/faster-whisper-large-v3-turbo",
-    "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
+    "Systran/faster-whisper-large-v3",
+    "53ecf83a5bedc5597eb8c8b34eac29e5345520ff",
     "zh-CN",
     hotwords=(
         "GB 50016-2014",
@@ -164,7 +164,8 @@ FASTER_WHISPER_SERVICE_CONFIG = ServiceProfileConfig(
         "焊缝",
         "螺栓",
         "规范编号",
-    ),
+    )
+    + BIM_ENGINEERING_TERMS_V1,
     beam_size=10,
     temperature=0.0,
 )
