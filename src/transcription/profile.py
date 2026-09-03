@@ -177,8 +177,8 @@ class FasterWhisperRemoteConfig:
     config_kind: str = "faster-whisper"
     config_version: str = "1"
     service_profile_id: str = "faster-whisper-large-v3-turbo-v1"
-    model_id: str = "dropbox-dash/faster-whisper-large-v3-turbo"
-    model_revision: str = "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
+    model_id: str = "Systran/faster-whisper-large-v3"
+    model_revision: str = "53ecf83a5bedc5597eb8c8b34eac29e5345520ff"
     expected_api_version: str = "asr-service/1"
     upload_part_bytes: int = 8 * 1024 * 1024
     poll_interval_ms: int = 1000
@@ -193,9 +193,9 @@ class FasterWhisperRemoteConfig:
             raise ContractValidationError(
                 "invalid_service_profile_id", "service_profile_id"
             )
-        if self.model_id != "dropbox-dash/faster-whisper-large-v3-turbo":
+        if self.model_id != "Systran/faster-whisper-large-v3":
             raise ContractValidationError("invalid_model_id", "model_id")
-        if self.model_revision != "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf":
+        if self.model_revision != "53ecf83a5bedc5597eb8c8b34eac29e5345520ff":
             raise ContractValidationError("invalid_model_revision", "model_revision")
         if self.expected_api_version != "asr-service/1":
             raise ContractValidationError(

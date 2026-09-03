@@ -84,7 +84,7 @@ def test_exact_candidate_identities_and_three_engine_registry():
         ServiceProfileConfig(
             "faster-whisper-large-v3-turbo-v1",
             "faster-whisper",
-            "dropbox-dash/faster-whisper-large-v3-turbo",
+            "Systran/faster-whisper-large-v3",
             "0" * 40,
             "zh-CN",
         )

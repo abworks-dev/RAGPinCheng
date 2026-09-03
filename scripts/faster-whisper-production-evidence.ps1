@@ -1,7 +1,7 @@
 Set-StrictMode -Version Latest
 
-$script:FasterWhisperModelId = "dropbox-dash/faster-whisper-large-v3-turbo"
-$script:FasterWhisperModelRevision = "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
+$script:FasterWhisperModelId = "Systran/faster-whisper-large-v3"
+$script:FasterWhisperModelRevision = "53ecf83a5bedc5597eb8c8b34eac29e5345520ff"
 $script:FasterWhisperSampleSetId = "self-made-faster-whisper-r3"
 $script:FasterWhisperAnnotationVersion = "1"
 $script:FasterWhisperQualificationManifestSha256 = "cb2cad81ec8d592a2fadcb4b35903cb563acee200aad13be2bde7687c59ca80b"

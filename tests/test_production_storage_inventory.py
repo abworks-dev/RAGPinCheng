@@ -183,8 +183,8 @@ def test_inventory_classifies_model_preparation_and_repair_caches(tmp_path: Path
 
     preparation_root = data_root / "model-preparation" / "faster-whisper"
     final_manifest = (
-        data_root / "models" / "faster-whisper-large-v3-turbo" /
-        "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf" / "model-manifest.json"
+        data_root / "models" / "faster-whisper-large-v3" /
+        "53ecf83a5bedc5597eb8c8b34eac29e5345520ff" / "model-manifest.json"
     )
     final_manifest.parent.mkdir(parents=True)
     final_manifest.write_text('{"status":"ready"}', encoding="utf-8")
@@ -200,7 +200,7 @@ def test_inventory_classifies_model_preparation_and_repair_caches(tmp_path: Path
         os.utime(run, (old.timestamp() + int(run_id), old.timestamp() + int(run_id)))
     candidate_manifest = (
         preparation_root / "100" / "staging" / "candidate-cache" /
-        "faster-whisper-large-v3-turbo" / "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf" /
+        "faster-whisper-large-v3" / "53ecf83a5bedc5597eb8c8b34eac29e5345520ff" /
         "model-manifest.json"
     )
     candidate_manifest.parent.mkdir(parents=True)

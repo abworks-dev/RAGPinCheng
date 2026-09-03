@@ -31,9 +31,9 @@ from services.asr_service.model_cache import (
     validate_faster_whisper_cache,
 )
 
-MODEL_BIN_SIZE_BYTES = 1_617_884_929
+MODEL_BIN_SIZE_BYTES = 3_087_284_237
 MODEL_BIN_SHA256 = (
-    "e76620f83d5f5b69efd3d87e3dc180c1bd21df9fbebacfd4335e5e1efcc018da"
+    "69f74147e3334731bc3a76048724833325d2ec74642fb52620eda87352e3d4f1"
 )
 MANIFEST_NAME = "model-manifest.json"
 FIXED_MODEL_FILES = (
