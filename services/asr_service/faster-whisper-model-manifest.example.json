@@ -1,8 +1,8 @@
 {
   "schema_version": "asr-model-manifest/1",
-  "model_id": "dropbox-dash/faster-whisper-large-v3-turbo",
-  "model_revision": "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
-  "model_path": "faster-whisper-large-v3-turbo/0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
+  "model_id": "Systran/faster-whisper-large-v3",
+  "model_revision": "53ecf83a5bedc5597eb8c8b34eac29e5345520ff",
+  "model_path": "faster-whisper-large-v3/53ecf83a5bedc5597eb8c8b34eac29e5345520ff",
   "files": [
     {
       "path": "replace-with-relative-model-file",

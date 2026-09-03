@@ -25,8 +25,8 @@ from .types import (
 FASTER_WHISPER_PROFILE_ID = "faster-whisper-zh-experimental-v1"
 FASTER_WHISPER_PROVIDER_KEY = "faster-whisper"
 FASTER_WHISPER_SERVICE_PROFILE_ID = "faster-whisper-large-v3-turbo-v1"
-FASTER_WHISPER_MODEL_ID = "dropbox-dash/faster-whisper-large-v3-turbo"
-FASTER_WHISPER_MODEL_REVISION = "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
+FASTER_WHISPER_MODEL_ID = "Systran/faster-whisper-large-v3"
+FASTER_WHISPER_MODEL_REVISION = "53ecf83a5bedc5597eb8c8b34eac29e5345520ff"
 
 QWEN3_ASR_PROFILE_ID = "qwen3-asr-zh-experimental-v1"
 QWEN3_ASR_PROVIDER_KEY = "qwen3-asr"

@@ -16,7 +16,7 @@ function Get-AsrRuntimeContractSpec {
     switch ($Engine) {
         "faster-whisper" {
             return [pscustomobject][ordered]@{
-                engine = $Engine; model_revisions = @("0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf")
+                engine = $Engine; model_revisions = @("53ecf83a5bedc5597eb8c8b34eac29e5345520ff")
                 paths = @("services/asr_service/requirements-service-core.txt", "services/asr_service/requirements-windows.txt", "services/asr_service/requirements-faster-whisper.txt", "services/asr_service/app.py", "services/asr_service/model_cache.py", "src/transcription/service_profiles.py", "src/transcription/profile_catalog.py", "scripts/qualify-faster-whisper-production.ps1", "scripts/run_faster_whisper_qualification.py")
             }
         }

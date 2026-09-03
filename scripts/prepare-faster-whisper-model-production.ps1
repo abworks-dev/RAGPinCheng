@@ -15,7 +15,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $taskName = "RAGPinCheng-ASR"
-$modelRevision = "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
+$modelRevision = "53ecf83a5bedc5597eb8c8b34eac29e5345520ff"
 $minimumFreeBytes = 10GB
 
 function Get-ServiceSnapshot {

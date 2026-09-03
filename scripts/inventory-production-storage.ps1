@@ -778,7 +778,7 @@ function Get-AsrModelPreparationInventory {
             }
         }
         $complete=[bool]($prepareValid -and $offlineValid -and $manifestValid)
-        $relativeModelPath='faster-whisper-large-v3-turbo\0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf'
+        $relativeModelPath='faster-whisper-large-v3\53ecf83a5bedc5597eb8c8b34eac29e5345520ff'
         $candidateManifestPath=Join-Path (Join-Path $run.FullName 'staging\candidate-cache') (Join-Path $relativeModelPath 'model-manifest.json')
         $finalManifestPath=Join-Path (Join-Path $DataRoot 'models') (Join-Path $relativeModelPath 'model-manifest.json')
         $candidateManifestMatchesFinal=[bool](

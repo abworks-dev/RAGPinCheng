@@ -87,7 +87,8 @@ Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审�
   缓存/依赖缺失时仅相应 Profile 不可用，不阻止现有 SenseVoice 服务启动；
 - Windows ASR candidate promotion 的 Ubuntu 跨节点门禁严格验证 `/health`、`/v1/capabilities`、`/v1/diagnostics` 与 `/v1/profile-identities`；管理页依赖的身份契约不得只由基础 health 或 capability 代替。
 - faster-whisper adapter 固定
-  `dropbox-dash/faster-whisper-large-v3-turbo@0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf`
+  `Systran/faster-whisper-large-v3@53ecf83a5bedc5597eb8c8b34eac29e5345520ff`
+  （2026-09-03 由 turbo 切换：noisy-bim-zh CER 0.25→0.125）
   与 CUDA FP16 参数；生产资格只接受
   `${PRODUCTION_ASR_DATA_ROOT}\models` 下已持久化且通过完整 Manifest、文件集合、
   大小和 SHA-256 校验的本地制品，不在资格运行中访问 Hugging Face。首次填充或

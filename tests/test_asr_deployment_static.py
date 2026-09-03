@@ -1369,8 +1369,8 @@ def test_faster_whisper_qualification_freezes_dependencies_model_and_gates():
         script.index("Save-ProcessEnvironment -Names"),
     )
     assert "Restore-ProcessEnvironment" in script
-    assert "e76620f83d5f5b69efd3d87e3dc180c1bd21df9fbebacfd4335e5e1efcc018da" in model
-    assert "1617884929" in model.replace("_", "")
+    assert "69f74147e3334731bc3a76048724833325d2ec74642fb52620eda87352e3d4f1" in model
+    assert "3087284237" in model.replace("_", "")
     assert "snapshot_download" not in model
     assert "FIXED_MODEL_FILES" in model
     assert "DOWNLOAD_ATTEMPTS = 3" in model
