@@ -2278,3 +2278,18 @@ def test_whisperx_candidate_requires_two_qualification_identities_and_stays_inac
     assert "production_services_modified -ne $false" in evidence
     assert "Register-ScheduledTask" not in evidence
     assert "New-NetFirewallRule" not in evidence
+
+
+def test_faster_whisper_service_config_pins_systran_largev3_candidate():
+    """2026-09-03 批准：faster-whisper 固定候选 turbo → Systran large-v3@53ecf83a。
+    turbo 在 noisy-bim-zh CER 0.25/增强 0.188 不达标；large-v3 同口径 0.125 且 8/8 过。
+    profile id 暂沿用（仅 model/revision/hotwords 变更，改名留作独立项）。"""
+    profiles = read("src/transcription/service_profiles.py")
+    assert "Systran/faster-whisper-large-v3" in profiles
+    assert "53ecf83a5bedc5597eb8c8b34eac29e5345520ff" in profiles
+    assert "dropbox-dash/faster-whisper-large-v3-turbo" not in profiles
+    assert "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf" not in profiles
+    assert "BIM_ENGINEERING_TERMS_V1" in profiles
+    assert "faster-whisper-large-v3-turbo-v1" in profiles
+    assert "beam_size=10" in profiles
+    assert "temperature=0.0" in profiles
