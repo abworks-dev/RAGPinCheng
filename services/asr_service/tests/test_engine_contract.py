@@ -53,10 +53,10 @@ def test_engine_registry_rejects_profile_mismatch_and_duplicates():
 
 def test_exact_candidate_identities_and_three_engine_registry():
     assert FASTER_WHISPER_SERVICE_CONFIG.model_id == (
-        "dropbox-dash/faster-whisper-large-v3-turbo"
+        "Systran/faster-whisper-large-v3"
     )
     assert FASTER_WHISPER_SERVICE_CONFIG.model_revision == (
-        "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
+        "53ecf83a5bedc5597eb8c8b34eac29e5345520ff"
     )
     faster = EngineRegistration(
         FakeEngine(

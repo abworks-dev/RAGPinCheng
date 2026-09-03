@@ -125,7 +125,7 @@ def test_lazy_local_gpu_model_and_decode_parameters_are_exact(monkeypatch):
         "vad_filter": False,
         "condition_on_previous_text": False,
         "word_timestamps": False,
-        "hotwords": "GB 50016-2014 建筑设计防火规范 GB 50011-2010 建筑抗震设计规范 构件碰撞 净高分析 复核 建筑信息模型 钢结构 焊缝 螺栓 规范编号",
+        "hotwords": "GB 50016-2014 建筑设计防火规范 GB 50011-2010 建筑抗震设计规范 构件碰撞 净高分析 复核 建筑信息模型 钢结构 焊缝 螺栓 规范编号 Revit Navisworks AutoCAD BIM BIM-2026-0805 12.5 208 95%",
     }
 
 
