@@ -219,9 +219,13 @@ def test_decode_candidates_use_public_asr_options_and_reuse_models(monkeypatch):
 
     assert all(type(item) is EngineChunkCandidate for item in (baseline, hotwords, full))
     loads = [item for item in calls if item[0] == "load_model"]
-    assert loads[0][2]["asr_options"] == {}
+    # 引擎始终显式传单温度（含 0.0），避免 whisperx 默认多温度采样丢数字
+    assert loads[0][2]["asr_options"] == {"temperatures": [0.0]}
     expected_hotwords = " ".join(WHISPERX_HOTWORDS_SERVICE_CONFIG.hotwords)
-    assert loads[1][2]["asr_options"] == {"hotwords": expected_hotwords}
+    assert loads[1][2]["asr_options"] == {
+        "hotwords": expected_hotwords,
+        "temperatures": [0.0],
+    }
     assert loads[2][2]["asr_options"] == {
         "hotwords": expected_hotwords,
         "beam_size": 10,
