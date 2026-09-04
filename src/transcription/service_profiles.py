@@ -232,7 +232,7 @@ WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG = ServiceProfileConfig(
     "53ecf83a5bedc5597eb8c8b34eac29e5345520ff",
     "zh-CN",
     hotwords=WHISPERX_V2_HOTWORDS_SERVICE_CONFIG.hotwords,
-    beam_size=20,
+    beam_size=10,
     temperature=0.0,
     qualification_policy="whisperx-r3/1",
 )
