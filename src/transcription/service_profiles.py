@@ -5,7 +5,6 @@ import hashlib
 import json
 from dataclasses import dataclass
 
-from .terminology import BIM_ENGINEERING_TERMS_V1
 from .types import (
     ContractValidationError,
     require_int,
@@ -222,7 +221,7 @@ WHISPERX_V2_HOTWORDS_SERVICE_CONFIG = ServiceProfileConfig(
     "Systran/faster-whisper-large-v3",
     "53ecf83a5bedc5597eb8c8b34eac29e5345520ff",
     "zh-CN",
-    hotwords=FASTER_WHISPER_SERVICE_CONFIG.hotwords + BIM_ENGINEERING_TERMS_V1,
+    hotwords=FASTER_WHISPER_SERVICE_CONFIG.hotwords,
     qualification_policy="whisperx-r3/1",
 )
 
