@@ -540,6 +540,13 @@ class RemoteAsrProvider:
                 )
                 self.sleep(config.poll_interval_ms / 1000)
                 job = self.client.get_job(job_id)
+                if job.state is ServiceJobState.paused:
+                    # The service pauses a job when a dequeue gate is busy
+                    # (e.g. shared-GPU BGE activity, low disk, OOM latch).
+                    # Re-enqueue is idempotent and resumes the job as soon as
+                    # the gate clears; without it a paused job would idle here
+                    # until the app deadline expires and fail with a timeout.
+                    job = self.client.start_job(job_id)
 
             interrupted = self._interrupted(
                 job_id, deadline, execution.timeout_ms

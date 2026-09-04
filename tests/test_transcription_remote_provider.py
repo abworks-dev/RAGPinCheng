@@ -15,6 +15,7 @@ from src.transcription.asr_service_contract import (
     ServiceFailureCode,
     ServiceJob,
     ServiceJobState,
+    ServicePauseReason,
     ServiceProfileIdentities,
     ServiceProfileIdentity,
     ServiceResult,
@@ -70,6 +71,7 @@ class FakeClient:
     job: ServiceJob | None = None
     provider_key: str = PROVIDER_KEY
     service_profile_id: str = SERVICE_PROFILE_ID
+    _resumed: bool = field(default=False, init=False, compare=False)
 
     def capabilities(self) -> ServiceCapabilities:
         self.calls.append("capabilities")
@@ -112,6 +114,15 @@ class FakeClient:
             self.job = self.job.transition(
                 ServiceJobState.running
             ).transition(ServiceJobState.failed, failure_code=ServiceFailureCode.provider_oom)
+        elif self.mode == "resume_after_pause" and self.job.state is ServiceJobState.paused:
+            # 暂停后首次续跑：进入队列并开始运行
+            self._resumed = True
+            self.job = self.job.transition(
+                ServiceJobState.queued
+            ).transition(ServiceJobState.running)
+        elif self.mode == "resume_blocked" and self.job.state is ServiceJobState.paused:
+            # 闸门一直未清：续跑只回到队列，随后又被暂停
+            self.job = self.job.transition(ServiceJobState.queued)
         else:
             self.job = self.job.transition(ServiceJobState.running)
         return self.job
@@ -125,6 +136,39 @@ class FakeClient:
         }:
             return self.job
         if self.mode == "timeout":
+            return self.job
+        if self.mode == "resume_after_pause":
+            if (
+                self.job.state is ServiceJobState.running
+                and not self._resumed
+            ):
+                # 首次出队后被暂停，等待客户端续跑
+                self.job = self.job.transition(
+                    ServiceJobState.paused,
+                    pause_reason=ServicePauseReason.bge_busy,
+                )
+            elif self.job.state is ServiceJobState.queued:
+                self.job = self.job.transition(
+                    ServiceJobState.paused,
+                    pause_reason=ServicePauseReason.bge_busy,
+                )
+            elif self.job.state is ServiceJobState.running:
+                self.job = self.job.transition(
+                    ServiceJobState.succeeded,
+                    processed_ms=self.job.total_ms,
+                )
+            return self.job
+        if self.mode == "resume_blocked":
+            if self.job.state is ServiceJobState.running:
+                self.job = self.job.transition(
+                    ServiceJobState.paused,
+                    pause_reason=ServicePauseReason.bge_busy,
+                )
+            elif self.job.state is ServiceJobState.queued:
+                self.job = self.job.transition(
+                    ServiceJobState.paused,
+                    pause_reason=ServicePauseReason.bge_busy,
+                )
             return self.job
         self.job = self.job.transition(
             ServiceJobState.succeeded,
@@ -336,6 +380,27 @@ def test_timeout_best_effort_cancels_before_returning_failure():
     assert result.error_code is ProviderErrorCode.provider_timeout
     assert result.timeout_ms == 1000
     assert client.calls[-1] == "cancel"
+
+
+def test_paused_job_is_auto_resumed_until_gate_clears():
+    # 出队瞬间撞上暂停闸门（如 BGE busy）→ 客户端在轮询中自动续跑
+    client = FakeClient("resume_after_pause")
+    result = run(client)
+    assert result.__class__.__name__ == "CanonicalTranscript"
+    # 预设 start + 暂停后的再次 start 续跑
+    assert client.calls.count("start") == 2
+
+
+def test_paused_while_gate_stays_blocked_keeps_polling_and_times_out():
+    # 闸门长期未清（如 OOM latch）：续跑尝试不崩溃，最终按超时语义收尾
+    times = iter((0.0,) * 8 + (2.0,))
+    client = FakeClient("resume_blocked")
+    result = run(client, monotonic=lambda: next(times))
+    assert type(result) is ProviderFailure
+    assert result.error_code is ProviderErrorCode.provider_timeout
+    assert result.timeout_ms == 1000
+    assert client.calls[-1] == "cancel"
+    assert client.calls.count("start") > 2
 
 
 def test_cancellation_never_produces_candidate():
