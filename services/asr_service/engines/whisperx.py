@@ -140,10 +140,11 @@ class WhisperXEngine:
             options["hotwords"] = " ".join(config.hotwords)
         if config.beam_size != 1:
             options["beam_size"] = config.beam_size
-        if config.temperature != 0.0:
-            options["temperatures"] = [config.temperature]
         if config.initial_prompt:
             options["initial_prompt"] = config.initial_prompt
+        # 始终显式传入单温度：whisperx 在未传 temperatures 时使用默认多温度采样表
+        # （0.0/0.2/...），会导致规范编号等数字在采样中丢位（如 GB 50016→GB 5016）。
+        options["temperatures"] = [config.temperature]
         return options
 
     def _load_models(
