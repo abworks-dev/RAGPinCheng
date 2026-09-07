@@ -194,6 +194,8 @@ class WhisperXEngine:
                 vad_filter=False,
                 condition_on_previous_text=False,
                 word_timestamps=False,
+                # 抑制 hotwords 高偏置在长音频停顿段的循环复读；实测不压低规范编号识别。
+                repetition_penalty=2.0,
             )
             transcribe_segments = [
                 {"id": i, "start": seg.start, "end": seg.end, "text": seg.text}
