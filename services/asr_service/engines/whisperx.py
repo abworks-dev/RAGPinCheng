@@ -111,9 +111,6 @@ class WhisperXEngine:
     unavailable_reason_code: str = "model-cache-unavailable"
     last_failure_stage: str | None = field(default=None, init=False)
     last_failure_type: str | None = field(default=None, init=False)
-    _decode_signature: tuple[tuple[str, ...], int, float, str] | None = field(
-        default=None, init=False
-    )
 
     def capabilities(self) -> ServiceEngineCapabilities:
         if self._model is not None and self._align_model is not None:
@@ -151,36 +148,19 @@ class WhisperXEngine:
         self, config: ServiceProfileConfig
     ) -> tuple[object, object, object]:
         whisperx = importlib.import_module("whisperx")
-        signature = (
-            config.hotwords,
-            config.beam_size,
-            config.temperature,
-            config.initial_prompt,
-        )
-        if self._model is None or (
-            self._decode_signature is not None
-            and self._decode_signature != signature
-        ):
+        if self._model is None:
             if self.model_path is None:
                 raise RuntimeError("model_cache_unavailable")
-            existing_model = (
-                getattr(self._model, "model", None)
-                if self._model is not None
-                else None
+            # 转写解码层用 faster-whisper 确定性直连（与 faster qualification 相同参数）。
+            # 模型仅加载一次；解码参数（beam/temperature/hotwords/prompt）每次 transcribe 传入，
+            # 规避 whisperx pipeline 采样/内部 VAD 上下文导致标准代码编号丢位（GB 50016→GB 5016）。
+            faster_whisper = importlib.import_module("faster_whisper")
+            self._model = faster_whisper.WhisperModel(
+                str(self.model_path),
+                device="cuda",
+                compute_type="float16",
+                local_files_only=True,
             )
-            load_kwargs = {
-                "compute_type": "float16",
-                "language": "zh",
-                "download_root": str(self.model_path.parent),
-                "local_files_only": True,
-                "asr_options": self._decode_options(config),
-            }
-            if existing_model is not None:
-                load_kwargs["model"] = existing_model
-            self._model = whisperx.load_model(
-                str(self.model_path), "cuda", **load_kwargs
-            )
-        self._decode_signature = signature
         if self._align_model is None:
             if self.align_model_path is None:
                 raise RuntimeError("model_cache_unavailable")
@@ -201,12 +181,28 @@ class WhisperXEngine:
             stage = "decode-audio"
             audio = _decode_audio_bytes(chunk.content)
             stage = "transcribe"
-            raw = model.transcribe(audio, batch_size=1, language="zh")
-            stage = "validate-transcription"
-            if type(raw) is not dict or type(raw.get("segments")) is not list or raw.get("language") not in ("zh", "zh-CN"):
+            # faster-whisper 确定性解码：与 faster qualification 相同参数，
+            # 规避 whisperx pipeline 采样导致标准代码编号丢位。
+            seg_iter, _info = model.transcribe(
+                audio,
+                language="zh",
+                task="transcribe",
+                beam_size=config.beam_size,
+                temperature=config.temperature,
+                hotwords=" ".join(config.hotwords) if config.hotwords else None,
+                initial_prompt=config.initial_prompt if config.initial_prompt else None,
+                vad_filter=False,
+                condition_on_previous_text=False,
+                word_timestamps=False,
+            )
+            transcribe_segments = [
+                {"id": i, "start": seg.start, "end": seg.end, "text": seg.text}
+                for i, seg in enumerate(seg_iter)
+            ]
+            if not transcribe_segments:
                 raise ValueError("invalid transcription output")
             stage = "align"
-            aligned = whisperx.align(raw["segments"], align_model, align_metadata, audio, "cuda", return_char_alignments=False)
+            aligned = whisperx.align(transcribe_segments, align_model, align_metadata, audio, "cuda", return_char_alignments=False)
             stage = "validate-alignment"
             if type(aligned) is not dict or type(aligned.get("segments")) is not list:
                 raise ValueError("invalid alignment output")
