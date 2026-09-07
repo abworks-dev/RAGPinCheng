@@ -198,7 +198,7 @@ try {
         $downloadArguments = @(
             "-m", "pip", "download", "--no-cache-dir", "--only-binary=:all:",
             "--dest", $wheelhouse,
-            "--index-url", "https://pypi.org/simple",
+            "--index-url", "https://pypi.tuna.tsinghua.edu.cn/simple",
             "--extra-index-url", "https://download.pytorch.org/whl/cu128",
             "--find-links", $qualifiedWheelSeed,
             "torch==2.8.0+cu128", "torchaudio==2.8.0+cu128",
