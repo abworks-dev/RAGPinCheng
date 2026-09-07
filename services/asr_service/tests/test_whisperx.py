@@ -31,16 +31,30 @@ class Model:
 def install_fake(monkeypatch, *, devices=1, compute=frozenset({"float16"})):
     calls = []
 
-    def load_model(*args, **kwargs):
-        calls.append(("load_model", args, kwargs))
-        return Model(kwargs.get("model"))
+    def load_align_model(*args, **kwargs):
+        calls.append(("load_align_model", args, kwargs))
+        return object(), object()
 
-    module = SimpleNamespace(
-        load_model=load_model,
-        load_align_model=lambda *args, **kwargs: (calls.append(("load_align_model", args, kwargs)) or (object(), object())),
-        load_audio=lambda value: b"decoded",
-        align=lambda *_args, **_kwargs: {"segments": [{"start": 0.0005, "end": 1.0005, "text": " 品丞 BIM "}]},
+    whisperx_module = SimpleNamespace(
+        load_model=lambda *args, **kwargs: None,
+        load_align_model=load_align_model,
+        align=lambda *_args, **_kwargs: {
+            "segments": [{"start": 0.0005, "end": 1.0005, "text": " 品丞 BIM "}]
+        },
     )
+
+    def _faster_factory(*args, **kwargs):
+        calls.append(("fw_load", args, kwargs))
+
+        def transcribe(*ta, **tk):
+            calls.append(("fw_transcribe", ta, tk))
+            return iter(
+                [SimpleNamespace(start=0.0005, end=1.0005, text="品丞 BIM")]
+            ), SimpleNamespace(language="zh")
+
+        return SimpleNamespace(transcribe=transcribe)
+
+    faster_module = SimpleNamespace(WhisperModel=_faster_factory)
 
     def load(name):
         calls.append(("import", name))
@@ -50,7 +64,9 @@ def install_fake(monkeypatch, *, devices=1, compute=frozenset({"float16"})):
                 get_supported_compute_types=lambda _device: compute,
             )
         if name == "whisperx":
-            return module
+            return whisperx_module
+        if name == "faster_whisper":
+            return faster_module
         raise AssertionError(name)
 
     monkeypatch.setattr(whisperx_engine, "importlib", SimpleNamespace(import_module=load))
@@ -193,7 +209,7 @@ def test_lazy_local_models_map_aligned_segments(monkeypatch):
     assert [(x.start_value, x.end_value, x.text) for x in result.segments] == [
         ("1", "1001", "品丞 BIM")
     ]
-    assert any(call[0] == "load_model" for call in calls)
+    assert any(call[0] == "fw_load" for call in calls)
     assert any(call[0] == "load_align_model" for call in calls)
 
 
@@ -218,22 +234,18 @@ def test_decode_candidates_use_public_asr_options_and_reuse_models(monkeypatch):
     )
 
     assert all(type(item) is EngineChunkCandidate for item in (baseline, hotwords, full))
-    loads = [item for item in calls if item[0] == "load_model"]
-    # 引擎始终显式传单温度（含 0.0），避免 whisperx 默认多温度采样丢数字
-    assert loads[0][2]["asr_options"] == {"temperatures": [0.0]}
-    expected_hotwords = " ".join(WHISPERX_HOTWORDS_SERVICE_CONFIG.hotwords)
-    assert loads[1][2]["asr_options"] == {
-        "hotwords": expected_hotwords,
-        "temperatures": [0.0],
-    }
-    assert loads[2][2]["asr_options"] == {
-        "hotwords": expected_hotwords,
-        "beam_size": 10,
-        "temperatures": [0.1],
-    }
+    fw_loads = [c for c in calls if c[0] == "fw_load"]
+    fw_trans = [c for c in calls if c[0] == "fw_transcribe"]
+    # faster-whisper 模型只加载一次，解码参数每次 transcribe 显式传入
+    assert len(fw_loads) == 1
+    assert len(fw_trans) == 3
+    kwargs_list = [c[2] for c in fw_trans]
+    assert kwargs_list[0]["temperature"] == 0.0
+    assert kwargs_list[0].get("hotwords") is None
+    assert any(c["beam_size"] == 10 for c in kwargs_list)
+    assert any("GB 50016" in (c.get("hotwords") or "") for c in kwargs_list)
     assert WHISPERX_FULL_DECODE_SERVICE_CONFIG.initial_prompt == ""
-    assert loads[1][2]["model"] is loads[2][2]["model"]
-    assert len([item for item in calls if item[0] == "load_align_model"]) == 1
+    assert len([c for c in calls if c[0] == "load_align_model"]) == 1
 
 
 def test_missing_cache_and_cuda_fail_closed(monkeypatch):
@@ -277,7 +289,7 @@ def test_invalid_output_exposes_only_allowlisted_stage_and_exception_type(monkey
 
     class Empty:
         def transcribe(self, *_args, **_kwargs):
-            return {"language": "zh", "segments": ()}
+            return iter(()), SimpleNamespace(language="zh")
 
     engine = WhisperXEngine(
         _model=Empty(),
@@ -291,5 +303,5 @@ def test_invalid_output_exposes_only_allowlisted_stage_and_exception_type(monkey
 
     assert type(result) is ProviderFailure
     assert result.error_code is ProviderErrorCode.invalid_provider_output
-    assert engine.last_failure_stage == "validate-transcription"
+    assert engine.last_failure_stage == "transcribe"
     assert engine.last_failure_type == "ValueError"
