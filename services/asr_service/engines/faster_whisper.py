@@ -151,6 +151,9 @@ class FasterWhisperEngine:
                 condition_on_previous_text=False,
                 word_timestamps=False,
                 hotwords=" ".join(config.hotwords) if config.hotwords else None,
+                # 抑制长音频中因 hotwords 高偏置在停顿/低信息段的循环复读
+                # （实测不压低 GB 50016-2014 等规范编号的完整识别）。
+                repetition_penalty=2.0,
             )
             if type(output) is not tuple or len(output) != 2:
                 raise ValueError("invalid engine output")
