@@ -404,7 +404,7 @@ function Get-QualifiedFasterWhisperEvidence {
         -CacheKey ([string]$verdict.wheel_cache_key)
     $modelCacheRoot = Join-Path $DataRoot "models"
     $modelManifestPath = Join-Path $modelCacheRoot (
-        "faster-whisper-large-v3-turbo\{0}\model-manifest.json" -f
+        "faster-whisper-large-v3\{0}\model-manifest.json" -f
         $script:FasterWhisperModelRevision
     )
     return [pscustomobject]@{
