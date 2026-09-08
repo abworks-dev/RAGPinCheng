@@ -112,6 +112,7 @@ class TranscriptWarningCode(Enum):
     long_segment_split = "long_segment_split"
     terminology_corrected = "terminology_corrected"
     duration_segment_split = "duration_segment_split"
+    hallucinated_tail_dropped = "hallucinated_tail_dropped"
 
 
 def _fullmatch(pattern: str, value: str) -> bool:

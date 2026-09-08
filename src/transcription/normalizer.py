@@ -7,7 +7,11 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from .canonical import CanonicalSegment, CanonicalTranscript, _build_canonical, warning_sort_key
 from .profile import ProfileSnapshot, TranscriptionExecutionConfig, validate_execution_consistency
 from .provider_protocol import ProviderCandidate
-from .terminology import correct_terminology, protected_terminology_spans
+from .terminology import (
+    clean_hallucinated_standard,
+    correct_terminology,
+    protected_terminology_spans,
+)
 from .types import (
     ContractValidationError,
     TimeUnit,
@@ -297,15 +301,6 @@ def normalize_candidate(
         corrected_text, changed = correct_terminology(
             item.text, execution_config.terminology_config
         )
-        corrected_segments.append(
-            _WorkSegment(
-                item.start_ms,
-                item.end_ms,
-                corrected_text,
-                item.confidence,
-                item.original_positions,
-            )
-        )
         if changed:
             warnings.append(
                 _warning(
@@ -314,6 +309,26 @@ def normalize_candidate(
                     item.original_positions[1:],
                 )
             )
+        # 保守清洗：整段仅由 hotword 偏置拼凑的"幻觉规范/术语尾巴"（无任何真实内容）剔除。
+        # 仅在正文纯为偏置词时才剔除，保留含真实语流的引用。
+        cleaned_text, dropped = clean_hallucinated_standard(corrected_text)
+        if dropped:
+            warnings.append(
+                _warning(
+                    TranscriptWarningCode.hallucinated_tail_dropped,
+                    item.original_positions[0],
+                )
+            )
+            continue
+        corrected_segments.append(
+            _WorkSegment(
+                item.start_ms,
+                item.end_ms,
+                cleaned_text,
+                item.confidence,
+                item.original_positions,
+            )
+        )
 
     final_segments: list[_WorkSegment] = []
     for item in corrected_segments:
