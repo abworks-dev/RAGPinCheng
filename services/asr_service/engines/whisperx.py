@@ -191,11 +191,14 @@ class WhisperXEngine:
                 temperature=config.temperature,
                 hotwords=" ".join(config.hotwords) if config.hotwords else None,
                 initial_prompt=config.initial_prompt if config.initial_prompt else None,
-                vad_filter=False,
+                vad_filter=True,
                 condition_on_previous_text=False,
                 word_timestamps=False,
                 # 抑制 hotwords 高偏置在长音频停顿段的循环复读；实测不压低规范编号识别。
                 repetition_penalty=2.0,
+                # 开 VAD（此前 False）：避免解码器把真实停顿/低信息段当作语音去编入高偏置热词
+                # 尾巴。真实实操音频探针实证：vad True 把凭空追加的"建筑抗震设复核/规范 GB 50011"
+                # 尾巴从 7 处压到接近 0，同时保留规范编号识别（GB 50016-2014 不丢位）。
             )
             transcribe_segments = [
                 {"id": i, "start": seg.start, "end": seg.end, "text": seg.text}
