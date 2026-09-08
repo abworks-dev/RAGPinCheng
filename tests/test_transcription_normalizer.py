@@ -303,3 +303,45 @@ def test_unterminated_segment_merges_with_close_following_sentence():
     result = normalize_candidate(input_ref, candidate, snapshot, execution)
     assert len(result.segments) == 1
     assert result.segments[0].text == "这是一个较长的前半句没有结束\n然后在这里结束。"
+
+
+# --- 保守幻觉规范/术语尾巴清洗 ---
+
+def _norm_with_terminology(segments, duration=10_000):
+    from src.transcription.profile import ProfileSnapshot, TranscriptionExecutionConfig
+    from src.transcription.types import NormalizerConfig, TranscriptSegmentationConfig
+    profile = make_profile(
+        normalizer_config=NormalizerConfig(0, 500, 1000),
+        segmentation_config=TranscriptSegmentationConfig("natural", None, 500, 1000),
+        terminology_config=TerminologyCorrectionConfig("bim-engineering-v1"),
+    )
+    i, _, e, s = make_execution_bundle(duration_ms=duration, profile=profile)
+    c = ProviderCandidate(e.provider_key, "zh-CN", duration, tuple(segments))
+    return normalize_candidate(i, c, s, e)
+
+
+def test_pure_bias_hallucinated_lines_are_dropped():
+    # Large inter-segment gaps keep each line a standalone segment (as in real
+    # whisperx output), so the pure-bias hallucination line is dropped on its own.
+    result = _norm_with_terminology([
+        seg(0, 0, 1, "标高是否正确。"),
+        seg(1, 4.0, 5.0, "建筑抗震设复核 规范 GB 50011-2010"),
+        seg(2, 8.0, 9.0, "那具体看一下怎么检查。"),
+    ])
+    texts = [x.text for x in result.segments]
+    assert texts == ["标高是否正确。", "那具体看一下怎么检查。"]
+    assert any(w.code == TranscriptWarningCode.hallucinated_tail_dropped for w in result.warnings)
+
+
+def test_genuine_content_is_not_dropped():
+    result = _norm_with_terminology([
+        seg(0, 0, 2, "1310-1280 复核构件碰撞和净高分析。"),
+        seg(1, 2.01, 4, "请核对规范编号 GB 50016-2014 后再提交。"),
+    ])
+    texts = [x.text for x in result.segments]
+    assert len(texts) == 2
+    assert "1310-1280" in texts[0]
+    assert "GB 50016-2014" in texts[1]
+    assert not any(w.code == TranscriptWarningCode.hallucinated_tail_dropped for w in result.warnings)
+
+

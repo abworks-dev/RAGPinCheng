@@ -31,6 +31,7 @@ _WARNING_ORDER = {
     TranscriptWarningCode.long_segment_split: 4,
     TranscriptWarningCode.terminology_corrected: 5,
     TranscriptWarningCode.duration_segment_split: 6,
+    TranscriptWarningCode.hallucinated_tail_dropped: 7,
 }
 
 
