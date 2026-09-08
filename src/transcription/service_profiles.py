@@ -168,6 +168,16 @@ FASTER_WHISPER_SERVICE_CONFIG = ServiceProfileConfig(
     temperature=0.0,
 )
 
+# whisperx 专用热词：在 faster 全量热词基础上去掉孤立且易被长音频停顿段拼凑成虚构尾巴的
+# "复核" 与 "规范编号"（保留 GB 数字词、规范名称与工程术语，避免规范编号丢位）。
+# 真实实操音频探针实证：该集合 + vad_filter=True 把凭空追加的"建筑抗震设复核/规范 GB 50011"
+# 尾巴从 7 处压到接近 0，同时 GB 50016-2014 不丢位。
+WHISPERX_HOTWORDS = tuple(
+    word
+    for word in FASTER_WHISPER_SERVICE_CONFIG.hotwords
+    if word not in ("复核", "规范编号")
+)
+
 QWEN3_ASR_SERVICE_CONFIG = ServiceProfileConfig(
     "qwen3-asr-06b-aligner-v1",
     "qwen3-asr",
@@ -221,7 +231,7 @@ WHISPERX_V2_HOTWORDS_SERVICE_CONFIG = ServiceProfileConfig(
     "Systran/faster-whisper-large-v3",
     "53ecf83a5bedc5597eb8c8b34eac29e5345520ff",
     "zh-CN",
-    hotwords=FASTER_WHISPER_SERVICE_CONFIG.hotwords,
+    hotwords=WHISPERX_HOTWORDS,
     qualification_policy="whisperx-r3/1",
 )
 
@@ -231,7 +241,7 @@ WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG = ServiceProfileConfig(
     "Systran/faster-whisper-large-v3",
     "53ecf83a5bedc5597eb8c8b34eac29e5345520ff",
     "zh-CN",
-    hotwords=WHISPERX_V2_HOTWORDS_SERVICE_CONFIG.hotwords,
+    hotwords=WHISPERX_HOTWORDS,
     beam_size=10,
     temperature=0.0,
     qualification_policy="whisperx-r3/1",
