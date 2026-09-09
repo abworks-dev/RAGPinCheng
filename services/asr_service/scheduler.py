@@ -21,6 +21,7 @@ from src.transcription.provider_protocol import (
 )
 from src.transcription.types import ContractValidationError, TimeUnit
 
+from .audio import extract_audio_window
 from .engine_protocol import EngineChunkCandidate, PreparedAudioChunk
 from .engine_registry import EngineRegistry
 from .storage import LocalJobRepository
@@ -53,6 +54,9 @@ class Scheduler:
     failure_limit: int = 3
     enabled: bool = False
     disk_allows: Callable[[], bool] = lambda: True
+    chunk_duration_ms: int = 30_000
+    chunk_overlap_ms: int = 1_000
+    audio_window_extractor: Callable[..., bytes] = lambda content, **_: content
     _queue: list[str] = field(default_factory=list, init=False)
     _active_lock: Lock = field(default_factory=Lock, init=False)
     _state_lock: RLock = field(default_factory=RLock, init=False)
@@ -215,73 +219,102 @@ class Scheduler:
             checkpoint = self.repo.checkpoint(job_id)
             candidate_language = service_config.language
             artifact_refs = ()
+            segments = () if checkpoint is None else checkpoint.partial_segments
+            content = None
+            start_index = 0 if checkpoint is None else checkpoint.next_chunk_index
             if checkpoint is not None and checkpoint.processed_ms == job.total_ms:
-                segments = checkpoint.partial_segments
+                start_index = (job.total_ms + self.chunk_duration_ms - 1) // self.chunk_duration_ms
             else:
-                chunk = PreparedAudioChunk(
-                    0, 0, job.total_ms, self.repo.content(job_id)
-                )
-                try:
-                    result = engine.transcribe_chunk(
-                        chunk,
-                        service_config,
-                    )
-                except Exception:
-                    result = ProviderFailure(
-                        request.provider_key,
-                        ProviderErrorCode.provider_contract_violation,
-                        classification=ProviderFailureClassification.permanent,
-                    )
-                if type(result) is ProviderFailure:
-                    if result.error_code is ProviderErrorCode.provider_oom:
-                        self.oom_latched = True
-                    with self._state_lock:
-                        current = self.repo.get(job_id)
-                        if current.state is ServiceJobState.cancelled:
-                            return current
-                        self.repo.save_result(job_id, result)
-                        if result.error_code is ProviderErrorCode.provider_oom:
-                            return self._fail(
-                                running, ServiceFailureCode.provider_oom
-                            )
-                        return self._fail(
-                            running,
-                            ServiceFailureCode.engine_failure_transient
-                            if result.retryable
-                            else ServiceFailureCode.engine_failure_permanent,
+                content = self.repo.content(job_id)
+                while start_index * self.chunk_duration_ms < job.total_ms:
+                    core_start = start_index * self.chunk_duration_ms
+                    core_end = min(job.total_ms, core_start + self.chunk_duration_ms)
+                    window_start = max(0, core_start - self.chunk_overlap_ms)
+                    window_end = min(job.total_ms, core_end + self.chunk_overlap_ms)
+                    try:
+                        chunk_content = self.audio_window_extractor(
+                            content, start_ms=window_start, end_ms=window_end
                         )
-                if type(result) is not EngineChunkCandidate:
-                    return self._fail(
-                        running, ServiceFailureCode.invalid_engine_output
+                        chunk = PreparedAudioChunk(
+                            start_index, window_start, window_end, chunk_content
+                        )
+                        result = engine.transcribe_chunk(chunk, service_config)
+                    except Exception:
+                        result = ProviderFailure(
+                            request.provider_key,
+                            ProviderErrorCode.provider_contract_violation,
+                            classification=ProviderFailureClassification.permanent,
+                        )
+                    if type(result) is ProviderFailure:
+                        if result.error_code is ProviderErrorCode.provider_oom:
+                            self.oom_latched = True
+                        with self._state_lock:
+                            current = self.repo.get(job_id)
+                            if current.state is ServiceJobState.cancelled:
+                                return current
+                            self.repo.save_result(job_id, result)
+                            return self._fail(
+                                running,
+                                ServiceFailureCode.provider_oom
+                                if result.error_code is ProviderErrorCode.provider_oom
+                                else (
+                                    ServiceFailureCode.engine_failure_transient
+                                    if result.retryable
+                                    else ServiceFailureCode.engine_failure_permanent
+                                ),
+                            )
+                    if type(result) is not EngineChunkCandidate:
+                        return self._fail(running, ServiceFailureCode.invalid_engine_output)
+                    if (
+                        result.provider_key != request.provider_key
+                        or result.language != service_config.language
+                        or result.duration_ms != chunk.end_ms - chunk.start_ms
+                    ):
+                        return self._fail(running, ServiceFailureCode.invalid_engine_output)
+                    candidate_language = result.language
+                    artifact_refs = result.artifact_refs
+                    accepted = [
+                        CandidateSegment(
+                            0,
+                            str(int(item.start_value) + window_start),
+                            str(int(item.end_value) + window_start),
+                            TimeUnit.milliseconds,
+                            item.text,
+                            item.confidence,
+                        )
+                        for item in result.segments
+                        if core_start <= int(item.start_value) + window_start < core_end
+                    ]
+                    merged = list(segments)
+                    seen = {
+                        (item.start_value, item.end_value, item.text.strip())
+                        for item in merged
+                    }
+                    for item in accepted:
+                        key = (item.start_value, item.end_value, item.text.strip())
+                        if key not in seen:
+                            merged.append(item)
+                            seen.add(key)
+                    merged.sort(key=lambda item: (int(item.start_value), int(item.end_value)))
+                    segments = tuple(
+                        CandidateSegment(
+                            position,
+                            item.start_value,
+                            item.end_value,
+                            item.time_unit,
+                            item.text,
+                            item.confidence,
+                        )
+                        for position, item in enumerate(merged)
                     )
-                if (
-                    result.provider_key != request.provider_key
-                    or result.language != service_config.language
-                    or result.duration_ms != chunk.end_ms - chunk.start_ms
-                ):
-                    return self._fail(
-                        running, ServiceFailureCode.invalid_engine_output
+                    checkpoint = self.repo.new_checkpoint(
+                        job_id,
+                        next_chunk_index=start_index + 1,
+                        processed_ms=core_end,
+                        partial_segments=segments,
                     )
-                candidate_language = result.language
-                artifact_refs = result.artifact_refs
-                segments = tuple(
-                    CandidateSegment(
-                        item.original_position,
-                        str(int(item.start_value) + chunk.start_ms),
-                        str(int(item.end_value) + chunk.start_ms),
-                        TimeUnit.milliseconds,
-                        item.text,
-                        item.confidence,
-                    )
-                    for item in result.segments
-                )
-                checkpoint = self.repo.new_checkpoint(
-                    job_id,
-                    next_chunk_index=1,
-                    processed_ms=job.total_ms,
-                    partial_segments=segments,
-                )
-                self.repo.save_checkpoint(checkpoint)
+                    self.repo.save_checkpoint(checkpoint)
+                    start_index += 1
 
             with self._state_lock:
                 current = self.repo.get(job_id)
