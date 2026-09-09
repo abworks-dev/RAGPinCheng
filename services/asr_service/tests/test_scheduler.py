@@ -55,6 +55,37 @@ def scheduler(tmp_path, *, mode="success", decision=BgePriorityDecision.allow, e
     return repo, value
 
 
+def test_scheduler_splits_audio_windows_and_checkpoints_each_core_range(tmp_path):
+    repo = LocalJobRepository(tmp_path, 1024)
+    calls = []
+
+    def extractor(content, *, start_ms, end_ms):
+        calls.append((start_ms, end_ms))
+        return content
+
+    job = queued_job(repo, data=b"windowed")
+    service = Scheduler(
+        repo,
+        EngineRegistry((EngineRegistration(FakeEngine(), SENSEVOICE_SERVICE_CONFIG),)),
+        FixedBgePriorityProbe(BgePriorityDecision.allow),
+        enabled=True,
+        chunk_duration_ms=400,
+        chunk_overlap_ms=100,
+        audio_window_extractor=extractor,
+    )
+    service.enqueue(job.job_id)
+
+    completed = service.run_next()
+
+    assert completed.state is ServiceJobState.succeeded
+    assert calls == [(0, 500), (300, 900), (700, 1000)]
+    checkpoint = repo.checkpoint(job.job_id)
+    assert checkpoint is not None
+    assert checkpoint.next_chunk_index == 3
+    assert checkpoint.processed_ms == 1000
+    assert len(checkpoint.partial_segments) == 1
+
+
 def test_scheduler_runs_fifo_and_at_most_one_active(tmp_path):
     repo, service = scheduler(tmp_path)
     first = queued_job(repo, request_id="1" * 64, data=b"one")
