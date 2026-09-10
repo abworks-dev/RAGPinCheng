@@ -105,6 +105,30 @@ if (Test-Path -LiteralPath $reportRoot -PathType Container) {
     $reportFiles = @(Get-ChildItem -LiteralPath $reportRoot -File -Force | ForEach-Object { [string]$_.Name })
 }
 
+$spoolResults = @()
+$spoolRoot = Join-Path $runRoot "spool"
+if (Test-Path -LiteralPath $spoolRoot -PathType Container) {
+    foreach ($resultPath in @(Get-ChildItem -LiteralPath $spoolRoot -Filter "result.json" -File -Recurse -Force)) {
+        try {
+            $result = Get-Content -LiteralPath $resultPath.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+            $jobPath = Join-Path $resultPath.DirectoryName "job.json"
+            $job = if (Test-Path -LiteralPath $jobPath -PathType Leaf) {
+                Get-Content -LiteralPath $jobPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            } else { $null }
+            $spoolResults += [ordered]@{
+                job_id = [string]$result.job_id
+                job_state = if ($null -ne $job) { [string]$job.state } else { "" }
+                failure_code = if ($null -ne $job) { [string]$job.failure_code } else { "" }
+                result_type = [string]$result.result.type
+                error_code = [string]$result.result.error_code
+                classification = [string]$result.result.classification
+            }
+        } catch {
+            $spoolResults += [ordered]@{ parse_error = $true }
+        }
+    }
+}
+
 $report = [ordered]@{
     schema_version = "asr-qualification-run-diagnostic/1"
     observed_at_utc = [DateTimeOffset]::UtcNow.ToString("o")
@@ -120,6 +144,7 @@ $report = [ordered]@{
     summary_present = (Test-Path -LiteralPath $verdictPath -PathType Leaf)
     diagnostic_present = (Test-Path -LiteralPath $diagnosticPath -PathType Leaf)
     report_files = @($reportFiles | Select-Object -First 40)
+    spool_results = @($spoolResults | Select-Object -First 20)
     log_inventory = @($inventory | Select-Object -First 40)
     runner_stdout = Get-LogTail -FileName "qualification-runner.stdout.log"
     runner_stderr = Get-LogTail -FileName "qualification-runner.stderr.log"
