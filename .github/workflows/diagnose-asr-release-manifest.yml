@@ -1,0 +1,104 @@
+name: Diagnose ASR Release Manifest
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character merged master SHA to inspect"
+        required: true
+        type: string
+      candidate_id:
+        description: "Exact candidate ID under read-only investigation"
+        required: true
+        default: "34283259608"
+        type: string
+      candidate_manifest_sha256:
+        description: "Exact candidate release manifest SHA-256"
+        required: true
+        default: "dcbe445a29cdcc0b2bf2c333a4f40bd73eabd1db2312c78cc6ef71c9b3a545d4"
+        type: string
+      confirm_diagnostic:
+        description: "Confirm read-only release manifest diagnostic"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    if: ${{ inputs.confirm_diagnostic == true }}
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 10
+    env:
+      PRODUCTION_ASR_PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
+      PRODUCTION_ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+    steps:
+      - name: Validate immutable revision and diagnostic gate
+        shell: powershell
+        run: |
+          if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') { throw "commit_sha must be a full SHA" }
+          if ("${{ inputs.commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) { throw "commit_sha must equal the dispatch revision" }
+          if ("${{ github.ref }}" -ne "refs/heads/master") { throw "ASR release diagnostics must run from master" }
+          if (-not [Convert]::ToBoolean("${{ inputs.confirm_diagnostic }}")) { throw "confirm_diagnostic must be enabled" }
+          if ("${{ inputs.candidate_id }}" -notmatch '^[0-9]{1,20}$') { throw "candidate_id is invalid" }
+          if ("${{ inputs.candidate_manifest_sha256 }}" -notmatch '^[0-9a-fA-F]{64}$') { throw "candidate_manifest_sha256 is invalid" }
+
+      - name: Check out requested revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Collect read-only release manifest evidence
+        shell: powershell
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP "asr-release-manifest-diagnostic-${{ github.run_id }}.json"
+          & "${{ github.workspace }}\scripts\diagnose-asr-release-manifest.ps1" `
+            -CommitSha "${{ inputs.commit_sha }}" `
+            -CandidateId "${{ inputs.candidate_id }}" `
+            -ExpectedManifestSha256 "${{ inputs.candidate_manifest_sha256 }}" `
+            -ReportPath $report `
+            -SourceRoot "${{ github.workspace }}"
+
+      - name: Publish sanitized diagnostic summary
+        if: ${{ always() }}
+        shell: powershell
+        run: |
+          $path = Join-Path $env:RUNNER_TEMP "asr-release-manifest-diagnostic-${{ github.run_id }}.json"
+          if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $result = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+            @(
+              "## ASR release manifest diagnostic",
+              "",
+              "- Status: ``$($result.status)``",
+              "- Active state matches target: ``$($result.active_state.matches_target)``",
+              "- Release app root present: ``$($result.release_layout.app_root_present)``",
+              "- Manifest SHA matches expected: ``$($result.release_layout.manifest_sha256_matches_expected)``",
+              "- Strict contract probe: ``$($result.contract_probe.strict_outcome)``",
+              "- Legacy-allowed contract probe: ``$($result.contract_probe.legacy_allowed_outcome)``",
+              "- Strict message: ``$($result.contract_probe.strict_message)``",
+              "- Legacy message: ``$($result.contract_probe.legacy_allowed_message)``",
+              "- App files declared/actual: ``$($result.app_root_drift.declared_files)/$($result.app_root_drift.actual_files)``",
+              "- Extra/missing/size/hash drift: ``$($result.app_root_drift.extra_count)/$($result.app_root_drift.missing_count)/$($result.app_root_drift.size_mismatch_count)/$($result.app_root_drift.hash_mismatch_count)``",
+              "- Scheduled Task action kind: ``$($result.scheduled_task.action_kind)``",
+              "- Listener count: ``$($result.listener_count)``"
+            ) -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          } else {
+            "Release manifest diagnostic ended before sanitized evidence was written; nothing was modified." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          }
+
+      - name: Upload sanitized diagnostic evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: asr-release-manifest-diagnostic-${{ github.run_id }}
+          path: ${{ runner.temp }}/asr-release-manifest-diagnostic-${{ github.run_id }}.json
+          if-no-files-found: warn
+          retention-days: 30
