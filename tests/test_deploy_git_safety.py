@@ -23,6 +23,12 @@ class TestDeployGitSafety(unittest.TestCase):
         cls.app_backup_recovery_workflow = (
             ROOT / ".github/workflows/recover-production-app-backup.yml"
         ).read_text(encoding="utf-8")
+        cls.asr_release_diagnostic_workflow = (
+            ROOT / ".github/workflows/diagnose-asr-release-manifest.yml"
+        ).read_text(encoding="utf-8")
+        cls.asr_release_diagnostic_script = (
+            ROOT / "scripts/diagnose-asr-release-manifest.ps1"
+        ).read_text(encoding="utf-8")
         cls.source_decoupled_compose = (
             ROOT / "docker/compose.source-decoupled.yml"
         ).read_text(encoding="utf-8")
@@ -231,6 +237,41 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertNotIn("docker compose down", workflow)
         self.assertNotIn("docker compose up", workflow)
         self.assertNotIn(" stop backend", workflow)
+
+    def test_asr_release_manifest_diagnostic_is_read_only_and_allowlisted(self):
+        workflow = self.asr_release_diagnostic_workflow
+        script = self.asr_release_diagnostic_script
+
+        self.assertIn("name: Diagnose ASR Release Manifest", workflow)
+        self.assertIn("confirm_diagnostic", workflow)
+        self.assertIn('"${{ github.ref }}" -ne "refs/heads/master"', workflow)
+        self.assertIn("environment: production-asr", workflow)
+        self.assertIn("group: production-gpu-exclusive", workflow)
+        self.assertIn("asr-release-manifest-diagnostic-", workflow)
+        self.assertIn("diagnose-asr-release-manifest.ps1", workflow)
+        self.assertNotIn("docker compose", workflow)
+        self.assertNotIn("Stop-ScheduledTask", workflow)
+        self.assertNotIn("Register-ScheduledTask", workflow)
+
+        self.assertIn('$approvedCandidateId = "34283259608"', script)
+        self.assertIn(
+            '$approvedManifestSha256 = "dcbe445a29cdcc0b2bf2c333a4f40bd73eabd1db2312c78cc6ef71c9b3a545d4"',
+            script,
+        )
+        self.assertIn("Release manifest diagnostic is restricted to the approved candidate", script)
+        self.assertIn("must stay inside RUNNER_TEMP", script)
+        self.assertIn("read_only = $true", script)
+        self.assertIn("production_services_modified = $false", script)
+        for forbidden in (
+            "Stop-ScheduledTask",
+            "Register-ScheduledTask",
+            "Stop-Process",
+            "Move-Item",
+            "Remove-Item",
+            "Set-Content",
+            "Register-",
+        ):
+            self.assertNotIn(forbidden, script)
 
     def test_app_only_deployment_refuses_all_active_application_jobs_before_backup(self):
         workflow = self.app_only_workflow
