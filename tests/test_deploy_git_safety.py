@@ -306,6 +306,11 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("Undeclared release file is outside the approved bytecode-cache class", script)
         self.assertIn("Release manifest still does not validate after quarantine", script)
         self.assertIn("ASR service verification failed after quarantine", script)
+        # verify-asr-service.ps1 is a PowerShell script that signals failure by
+        # throwing; under StrictMode reading an unset $LASTEXITCODE raises
+        # instead of comparing, which would roll back a repair that verified.
+        self.assertNotIn("$LASTEXITCODE -ne", script)
+        self.assertIn("if (-not $?) { throw 'ASR service verification failed after quarantine' }", script)
         self.assertIn("Active ASR release state does not match the approved repair target", script)
         # The repair must never stop or re-register the running service, and it
         # must never touch the release configuration or the declared app bytes.
