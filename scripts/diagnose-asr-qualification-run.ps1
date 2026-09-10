@@ -123,6 +123,19 @@ $report = [ordered]@{
     log_inventory = @($inventory | Select-Object -First 40)
     runner_stdout = Get-LogTail -FileName "qualification-runner.stdout.log"
     runner_stderr = Get-LogTail -FileName "qualification-runner.stderr.log"
+    service_logs = @(
+        foreach ($name in @(
+            "qualification-service.stderr.log",
+            "qualification-service.stdout.log",
+            "model-preparation.log",
+            "cuda-preflight.log",
+            "sample-manifest-validation.log",
+            "production-asr-verification-before.log"
+        )) {
+            $tail = Get-LogTail -FileName $name
+            if ($null -ne $tail) { $tail }
+        }
+    )
 }
 New-Item -ItemType Directory -Path (Split-Path -Path $reportFullPath -Parent) -Force | Out-Null
 [IO.File]::WriteAllText(
