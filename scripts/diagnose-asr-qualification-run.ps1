@@ -23,7 +23,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $approvedRunIds = @{
-    'faster-whisper' = @('34502135237', '34503574407')
+    'faster-whisper' = @('34502135237', '34503574407', '34520883347')
     'whisperx' = @()
 }
 if ($RunId -notin $approvedRunIds[$Engine]) {
