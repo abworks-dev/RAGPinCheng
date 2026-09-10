@@ -1,0 +1,113 @@
+name: Diagnose ASR Qualification Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character merged master SHA to inspect"
+        required: true
+        type: string
+      engine:
+        description: "Qualification engine whose failed run is inspected"
+        required: true
+        default: faster-whisper
+        type: choice
+        options:
+          - faster-whisper
+          - whisperx
+      run_id:
+        description: "Exact failed qualification run ID"
+        required: true
+        type: string
+      confirm_diagnostic:
+        description: "Confirm read-only qualification run log diagnostic"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    if: ${{ inputs.confirm_diagnostic == true }}
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 10
+    env:
+      PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT: ${{ vars.PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT }}
+      PRODUCTION_WHISPERX_ROOT: ${{ vars.PRODUCTION_WHISPERX_ROOT }}
+    steps:
+      - name: Validate immutable revision and diagnostic gate
+        shell: powershell
+        run: |
+          if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') { throw "commit_sha must be a full SHA" }
+          if ("${{ inputs.commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) { throw "commit_sha must equal the dispatch revision" }
+          if ("${{ github.ref }}" -ne "refs/heads/master") { throw "qualification run diagnostics must run from master" }
+          if (-not [Convert]::ToBoolean("${{ inputs.confirm_diagnostic }}")) { throw "confirm_diagnostic must be enabled" }
+          if ("${{ inputs.run_id }}" -notmatch '^[0-9]{1,20}$') { throw "run_id is invalid" }
+      - name: Check out requested revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+      - name: Collect read-only qualification run evidence
+        shell: powershell
+        run: |
+          $root = if ("${{ inputs.engine }}" -eq "faster-whisper") {
+            $env:PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT
+          } else {
+            $env:PRODUCTION_WHISPERX_ROOT
+          }
+          if ([string]::IsNullOrWhiteSpace($root)) { throw "qualification root variable is missing" }
+          $report = Join-Path $env:RUNNER_TEMP "asr-qualification-run-${{ github.run_id }}.json"
+          & "${{ github.workspace }}\scripts\diagnose-asr-qualification-run.ps1" `
+            -CommitSha "${{ inputs.commit_sha }}" `
+            -Engine "${{ inputs.engine }}" `
+            -RunId "${{ inputs.run_id }}" `
+            -ReportPath $report `
+            -QualificationRoot $root `
+            -SourceRoot "${{ github.workspace }}"
+      - name: Publish sanitized summary
+        if: ${{ always() }}
+        shell: powershell
+        run: |
+          $path = Join-Path $env:RUNNER_TEMP "asr-qualification-run-${{ github.run_id }}.json"
+          if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $result = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+            @(
+              "## ASR qualification run diagnostic",
+              "",
+              "- Engine / run: ``$($result.engine)`` / ``$($result.run_id)``",
+              "- Run root present: ``$($result.run_root_present)``; log root: ``$($result.log_root_present)``",
+              "- Summary present: ``$($result.summary_present)``; diagnostic present: ``$($result.diagnostic_present)``",
+              "- Log files: ``$(@($result.log_inventory).Count)``",
+              "- Runner stdout captured: ``$($null -ne $result.runner_stdout)``; stderr captured: ``$($null -ne $result.runner_stderr)``",
+              "",
+              "### Runner stderr tail",
+              "",
+              "``````",
+              "$(@($result.runner_stderr.tail) -join "`n")",
+              "``````",
+              "",
+              "### Runner stdout tail",
+              "",
+              "``````",
+              "$(@($result.runner_stdout.tail) -join "`n")",
+              "``````"
+            ) -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          } else {
+            "Qualification run diagnostic ended before sanitized evidence was written; nothing was modified." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          }
+      - name: Upload sanitized diagnostic evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: asr-qualification-run-diagnostic-${{ github.run_id }}
+          path: ${{ runner.temp }}/asr-qualification-run-${{ github.run_id }}.json
+          if-no-files-found: warn
+          retention-days: 30

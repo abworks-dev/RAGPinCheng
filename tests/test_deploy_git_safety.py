@@ -35,6 +35,12 @@ class TestDeployGitSafety(unittest.TestCase):
         cls.asr_release_repair_script = (
             ROOT / "scripts/repair-asr-release-closure.ps1"
         ).read_text(encoding="utf-8")
+        cls.asr_qualification_diagnostic_workflow = (
+            ROOT / ".github/workflows/diagnose-asr-qualification-run.yml"
+        ).read_text(encoding="utf-8")
+        cls.asr_qualification_diagnostic_script = (
+            ROOT / "scripts/diagnose-asr-qualification-run.ps1"
+        ).read_text(encoding="utf-8")
         cls.asr_start_script = (ROOT / "scripts/start-asr-service.ps1").read_text(
             encoding="utf-8"
         )
@@ -326,6 +332,37 @@ class TestDeployGitSafety(unittest.TestCase):
     def test_asr_release_start_never_writes_bytecode_into_the_release(self):
         self.assertIn("$env:PYTHONDONTWRITEBYTECODE = \"1\"", self.asr_start_script)
         self.assertIn("& $python -B -m uvicorn", self.asr_start_script)
+
+    def test_asr_qualification_run_diagnostic_is_read_only_and_redacted(self):
+        workflow = self.asr_qualification_diagnostic_workflow
+        script = self.asr_qualification_diagnostic_script
+
+        self.assertIn("name: Diagnose ASR Qualification Run", workflow)
+        self.assertIn("environment: production-asr", workflow)
+        self.assertIn("group: production-gpu-exclusive", workflow)
+        self.assertIn('"${{ github.ref }}" -ne "refs/heads/master"', workflow)
+        self.assertIn("confirm_diagnostic", workflow)
+        self.assertIn("asr-qualification-run-diagnostic-", workflow)
+        self.assertNotIn("Stop-ScheduledTask", workflow)
+        self.assertNotIn("Register-ScheduledTask", workflow)
+
+        self.assertIn("$approvedRunIds = @{", script)
+        self.assertIn("restricted to an approved failed run", script)
+        self.assertIn("must stay inside RUNNER_TEMP", script)
+        self.assertIn("read_only = $true", script)
+        self.assertIn("production_services_modified = $false", script)
+        self.assertIn("qualification-runner.stdout.log", script)
+        self.assertIn("qualification-runner.stderr.log", script)
+        self.assertIn("<redacted>", script)
+        for forbidden in (
+            "Stop-ScheduledTask",
+            "Register-ScheduledTask",
+            "Stop-Process",
+            "Move-Item",
+            "Remove-Item",
+            "Set-Content",
+        ):
+            self.assertNotIn(forbidden, script)
 
     def test_app_only_deployment_refuses_all_active_application_jobs_before_backup(self):
         workflow = self.app_only_workflow
