@@ -288,7 +288,10 @@ if ($Mode -eq 'Quarantine') {
             -ConfigPath ([string]$actual.config_path) `
             -AsrUrl 'http://127.0.0.1:8200' `
             -ExpectedProfiles @($actual.expected_profiles)
-        if ($LASTEXITCODE -ne 0) { throw 'ASR service verification failed after quarantine' }
+        # verify-asr-service.ps1 signals failure by throwing, so success is
+        # observed through the pipeline state; $LASTEXITCODE is never set by a
+        # PowerShell script and reading it under StrictMode would fail the run.
+        if (-not $?) { throw 'ASR service verification failed after quarantine' }
     } catch {
         Invoke-RestoreQuarantined | Out-Null
         throw
