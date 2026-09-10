@@ -61,7 +61,14 @@ function ConvertTo-SafeLine {
     return $safe
 }
 
-$runRoot = Join-Path $QualificationRoot $RunId
+$runRootCandidates = @(
+    (Join-Path (Join-Path $QualificationRoot "runs") $RunId),
+    (Join-Path $QualificationRoot $RunId)
+)
+$runRoot = $runRootCandidates[0]
+foreach ($candidate in $runRootCandidates) {
+    if (Test-Path -LiteralPath $candidate -PathType Container) { $runRoot = $candidate; break }
+}
 $logRoot = Join-Path $runRoot "logs"
 $reportRoot = Join-Path $runRoot "reports"
 $inventory = @()
@@ -106,6 +113,7 @@ $report = [ordered]@{
     commit_sha = $CommitSha.ToLowerInvariant()
     engine = $Engine
     run_id = $RunId
+    run_root = $runRoot
     run_root_present = (Test-Path -LiteralPath $runRoot -PathType Container)
     log_root_present = (Test-Path -LiteralPath $logRoot -PathType Container)
     report_root_present = (Test-Path -LiteralPath $reportRoot -PathType Container)
