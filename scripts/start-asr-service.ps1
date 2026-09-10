@@ -107,6 +107,11 @@ if (-not [string]::IsNullOrWhiteSpace($env:ASR_WHISPERX_MODEL_CACHE_ROOT)) {
     }
 }
 
+# The release tree is content-addressed: manifest validation compares the exact
+# file set under the release app root, so any bytecode cache written next to the
+# sources makes the release unreadable and the next start fail. Force
+# bytecode-free execution regardless of the ambient deployment environment.
+$env:PYTHONDONTWRITEBYTECODE = "1"
 $logDir = $env:ASR_LOG_DIR
 if ([string]::IsNullOrWhiteSpace($logDir)) {
     $logDir = Join-Path $DataRoot "logs"
@@ -118,7 +123,7 @@ Set-Location -LiteralPath $appRoot
 $savedErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 try {
-    & $python -m uvicorn $appModule --factory --host $env:ASR_SERVICE_HOST --port $env:ASR_SERVICE_PORT *>> $logFile
+    & $python -B -m uvicorn $appModule --factory --host $env:ASR_SERVICE_HOST --port $env:ASR_SERVICE_PORT *>> $logFile
     $uvicornExitCode = $LASTEXITCODE
 } finally {
     $ErrorActionPreference = $savedErrorActionPreference

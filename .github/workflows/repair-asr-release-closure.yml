@@ -1,0 +1,143 @@
+name: Repair ASR Release Closure
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character merged master SHA to execute"
+        required: true
+        type: string
+      candidate_id:
+        description: "Exact approved candidate ID"
+        required: true
+        default: "34283259608"
+        type: string
+      candidate_manifest_sha256:
+        description: "Exact approved candidate release manifest SHA-256"
+        required: true
+        default: "dcbe445a29cdcc0b2bf2c333a4f40bd73eabd1db2312c78cc6ef71c9b3a545d4"
+        type: string
+      operation:
+        description: "Generate the preview manifest or apply an approved preview"
+        required: true
+        default: preview
+        type: choice
+        options:
+          - preview
+          - apply
+      preview_run_id:
+        description: "Preview workflow run ID; required for apply"
+        required: false
+        type: string
+      manifest_sha256:
+        description: "Exact preview manifest SHA-256; required for apply"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    environment: production-asr
+    timeout-minutes: 30
+    env:
+      PRODUCTION_ASR_PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
+      PRODUCTION_ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+      PRODUCTION_ASR_BACKUP_ROOT: ${{ vars.PRODUCTION_ASR_BACKUP_ROOT }}
+      CANDIDATE_ID: ${{ inputs.candidate_id }}
+      CANDIDATE_MANIFEST_SHA256: ${{ inputs.candidate_manifest_sha256 }}
+      OPERATION: ${{ inputs.operation }}
+      EXPECTED_SHA256: ${{ inputs.manifest_sha256 }}
+    steps:
+      - name: Validate immutable revision and approved target
+        shell: powershell
+        run: |
+          if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') { throw "commit_sha must be a full SHA" }
+          if ("${{ inputs.commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) { throw "commit_sha must equal the dispatch revision" }
+          if ("${{ github.ref }}" -ne "refs/heads/master") { throw "release closure repair must run from master" }
+          if ($env:CANDIDATE_ID -ne "34283259608") { throw "candidate is outside the approved repair boundary" }
+          if ($env:CANDIDATE_MANIFEST_SHA256.ToLowerInvariant() -ne "dcbe445a29cdcc0b2bf2c333a4f40bd73eabd1db2312c78cc6ef71c9b3a545d4") { throw "manifest identity is outside the approved repair boundary" }
+          if ($env:OPERATION -eq "apply" -and ('${{ inputs.preview_run_id }}' -notmatch '^[0-9]{1,20}$' -or $env:EXPECTED_SHA256 -notmatch '^[0-9a-fA-F]{64}$')) {
+            throw "apply requires preview_run_id and manifest_sha256"
+          }
+          if ($env:OPERATION -ne "apply" -and (-not [string]::IsNullOrWhiteSpace('${{ inputs.preview_run_id }}') -or -not [string]::IsNullOrWhiteSpace($env:EXPECTED_SHA256))) {
+            throw "preview_run_id and manifest_sha256 are accepted only for apply"
+          }
+      - name: Check out requested revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+      - name: Download approved preview manifest
+        if: ${{ inputs.operation == 'apply' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: asr-release-closure-repair-${{ inputs.preview_run_id }}
+          path: ${{ runner.temp }}/asr-release-closure-repair
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.preview_run_id }}
+      - name: Preview or apply the release closure repair
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $reportRoot = Join-Path $env:RUNNER_TEMP "asr-release-closure-repair"
+          New-Item -ItemType Directory -Path $reportRoot -Force | Out-Null
+          $manifest = Join-Path $reportRoot "manifest.json"
+          $common = @{
+            CandidateId = $env:CANDIDATE_ID
+            ExpectedManifestSha256 = $env:CANDIDATE_MANIFEST_SHA256
+            DataRoot = $env:PRODUCTION_ASR_DATA_ROOT
+            ProgramRoot = $env:PRODUCTION_ASR_PROGRAM_ROOT
+            BackupRoot = $env:PRODUCTION_ASR_BACKUP_ROOT
+            ManifestPath = $manifest
+            OperationId = "${{ github.run_id }}"
+            SourceRoot = "${{ github.workspace }}"
+          }
+          if ($env:OPERATION -eq "preview") {
+            & "${{ github.workspace }}\scripts\repair-asr-release-closure.ps1" -Mode Preview @common
+            (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content (Join-Path $reportRoot "manifest.sha256") -Encoding ascii
+            return
+          }
+          try {
+            & "${{ github.workspace }}\scripts\repair-asr-release-closure.ps1" -Mode Quarantine @common -ExpectedPreviewManifestSha256 $env:EXPECTED_SHA256 -Confirm:$false
+            & "${{ github.workspace }}\scripts\repair-asr-release-closure.ps1" -Mode Finalize @common -Confirm:$false
+          } catch {
+            & "${{ github.workspace }}\scripts\repair-asr-release-closure.ps1" -Mode Restore @common -Confirm:$false
+            throw
+          }
+      - name: Publish sanitized summary
+        if: ${{ always() }}
+        shell: powershell
+        run: |
+          $reportRoot = Join-Path $env:RUNNER_TEMP "asr-release-closure-repair"
+          $manifest = Join-Path $reportRoot "manifest.json"
+          if (Test-Path -LiteralPath $manifest -PathType Leaf) {
+            $result = Get-Content -LiteralPath $manifest -Raw -Encoding UTF8 | ConvertFrom-Json
+            @(
+              "## ASR release closure repair",
+              "",
+              "- Operation: ``$env:OPERATION``",
+              "- Candidate: ``$($result.candidate_id)``",
+              "- Declared/actual files: ``$($result.declared_files)/$($result.actual_files)``",
+              "- Undeclared bytecode files: ``$($result.undeclared_files)``",
+              "- Undeclared bytes: ``$($result.undeclared_bytes)``",
+              "- Scheduled Task action kind unchanged: ``$($result.scheduled_task.state)``"
+            ) -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          } else {
+            "Release closure repair ended before a sanitized plan was written; no production mutation passed the preview gate." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          }
+      - name: Upload sanitized repair evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: asr-release-closure-repair-${{ github.run_id }}
+          path: ${{ runner.temp }}/asr-release-closure-repair
+          if-no-files-found: warn
+          retention-days: 30
