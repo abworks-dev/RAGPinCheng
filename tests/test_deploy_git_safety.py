@@ -29,6 +29,15 @@ class TestDeployGitSafety(unittest.TestCase):
         cls.asr_release_diagnostic_script = (
             ROOT / "scripts/diagnose-asr-release-manifest.ps1"
         ).read_text(encoding="utf-8")
+        cls.asr_release_repair_workflow = (
+            ROOT / ".github/workflows/repair-asr-release-closure.yml"
+        ).read_text(encoding="utf-8")
+        cls.asr_release_repair_script = (
+            ROOT / "scripts/repair-asr-release-closure.ps1"
+        ).read_text(encoding="utf-8")
+        cls.asr_start_script = (ROOT / "scripts/start-asr-service.ps1").read_text(
+            encoding="utf-8"
+        )
         cls.source_decoupled_compose = (
             ROOT / "docker/compose.source-decoupled.yml"
         ).read_text(encoding="utf-8")
@@ -272,6 +281,46 @@ class TestDeployGitSafety(unittest.TestCase):
             "Register-",
         ):
             self.assertNotIn(forbidden, script)
+
+    def test_asr_release_closure_repair_is_narrow_and_reversible(self):
+        workflow = self.asr_release_repair_workflow
+        script = self.asr_release_repair_script
+
+        self.assertIn("name: Repair ASR Release Closure", workflow)
+        self.assertIn("environment: production-asr", workflow)
+        self.assertIn("group: production-gpu-exclusive", workflow)
+        self.assertIn('"${{ github.ref }}" -ne "refs/heads/master"', workflow)
+        self.assertIn("apply requires preview_run_id and manifest_sha256", workflow)
+        self.assertIn("asr-release-closure-repair-", workflow)
+        self.assertIn("-Mode Quarantine", workflow)
+        self.assertIn("-Mode Finalize", workflow)
+        self.assertIn("-Mode Restore", workflow)
+
+        self.assertIn("$approvedCandidateId = '34283259608'", script)
+        self.assertIn(
+            "$approvedManifestSha256 = 'dcbe445a29cdcc0b2bf2c333a4f40bd73eabd1db2312c78cc6ef71c9b3a545d4'",
+            script,
+        )
+        self.assertIn("Release manifest-listed bytes drifted; quarantine repair is not applicable", script)
+        self.assertIn(r"__pycache__/[^/]+\.pyc$", script)
+        self.assertIn("Undeclared release file is outside the approved bytecode-cache class", script)
+        self.assertIn("Release manifest still does not validate after quarantine", script)
+        self.assertIn("ASR service verification failed after quarantine", script)
+        self.assertIn("Active ASR release state does not match the approved repair target", script)
+        # The repair must never stop or re-register the running service, and it
+        # must never touch the release configuration or the declared app bytes.
+        for forbidden in (
+            "Stop-ScheduledTask",
+            "Register-ScheduledTask",
+            "Stop-Process",
+            "Unregister-ScheduledTask",
+            "Copy-Item -LiteralPath $layout.config_path",
+        ):
+            self.assertNotIn(forbidden, script)
+
+    def test_asr_release_start_never_writes_bytecode_into_the_release(self):
+        self.assertIn("$env:PYTHONDONTWRITEBYTECODE = \"1\"", self.asr_start_script)
+        self.assertIn("& $python -B -m uvicorn", self.asr_start_script)
 
     def test_app_only_deployment_refuses_all_active_application_jobs_before_backup(self):
         workflow = self.app_only_workflow
