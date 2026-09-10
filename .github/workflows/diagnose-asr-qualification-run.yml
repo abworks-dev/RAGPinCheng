@@ -98,7 +98,11 @@ jobs:
               "",
               "``````",
               "$(@($result.runner_stdout.tail) -join "`n")",
-              "``````"
+              "``````",
+              "",
+              "### Qualification service logs",
+              "",
+              "@(foreach ($log in @($result.service_logs)) { @("**$($log.file)**", "", "``````", "$(@($log.tail) -join "`n")", "``````", "") }) -join "`n""
             ) -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
           } else {
             "Qualification run diagnostic ended before sanitized evidence was written; nothing was modified." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
