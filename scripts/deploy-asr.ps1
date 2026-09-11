@@ -271,12 +271,9 @@ function Get-VerifiedAsrListenerIds {
         throw "Unable to resolve the ASR venv base Python executable"
     }
     $basePython = (Resolve-Path -LiteralPath ([string]$basePythonOutput).Trim()).Path
-    $expectedCommandLines = @(
-        '"{0}" -m uvicorn services.asr_service.app:create_app --factory --host 0.0.0.0 --port 8200' -f $basePython,
-        # The release start path may add -B to keep bytecode out of the
-        # content-addressed release tree; both forms are owned.
-        '"{0}" -B -m uvicorn services.asr_service.app:create_app --factory --host 0.0.0.0 --port 8200' -f $basePython
-    )
+    $venvPython = (Resolve-Path -LiteralPath $venvPython).Path
+    $ownedExecutables = @($basePython, $venvPython)
+    $modulePattern = '(?i)-m\s+uvicorn\s+services\.asr_service\.app:create_app\s+--factory'
     $processIds = @(
         $connections |
             ForEach-Object { $_.OwningProcess } |
@@ -284,10 +281,14 @@ function Get-VerifiedAsrListenerIds {
     )
     foreach ($processId in $processIds) {
         $process = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $processId)
+        # Ownership is interpreter + module + port, not an exact argument string:
+        # the release start path may add flags such as -B.
+        $commandLine = [string]$process.CommandLine
         if (
             $null -eq $process -or
-            [string]$process.ExecutablePath -ne $basePython -or
-            [string]$process.CommandLine -notin $expectedCommandLines
+            [string]$process.ExecutablePath -notin $ownedExecutables -or
+            $commandLine -notmatch $modulePattern -or
+            $commandLine -notmatch '(?i)--port\s+8200'
         ) {
             throw "Refusing to stop an unexpected process listening on TCP 8200"
         }
