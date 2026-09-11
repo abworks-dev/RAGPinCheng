@@ -1,0 +1,128 @@
+name: Diagnose Transcription Version Echo
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character merged master SHA to inspect"
+        required: true
+        type: string
+      media_title_like:
+        description: "Media title substring to inspect"
+        required: true
+        default: "2.4.10"
+        type: string
+      confirm_diagnostic:
+        description: "Confirm read-only transcription version echo diagnostic"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-app-manual-v1
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    if: ${{ inputs.confirm_diagnostic == true }}
+    environment: production-asr
+    runs-on: [self-hosted, linux, ubuntu, production, app]
+    timeout-minutes: 10
+    env:
+      COMPOSE_OVERRIDE: ${{ vars.PRODUCTION_APP_COMPOSE_OVERRIDE }}
+      COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
+      REPO_PATH: ${{ vars.PRODUCTION_APP_REPO_PATH }}
+      TITLE_LIKE: ${{ inputs.media_title_like }}
+    steps:
+      - name: Validate immutable revision and diagnostic gate
+        run: |
+          if [[ ! "${{ inputs.commit_sha }}" =~ ^[0-9a-fA-F]{40}$ ]]; then echo "commit_sha must be a full SHA"; exit 1; fi
+          if [[ "${{ inputs.commit_sha }}" != "${{ github.sha }}" ]]; then echo "commit_sha must equal the dispatch revision"; exit 1; fi
+          if [[ "${{ github.ref }}" != "refs/heads/master" ]]; then echo "diagnostic must run from master"; exit 1; fi
+
+      - name: Check out requested revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Collect read-only version echo evidence
+        run: |
+          set -euo pipefail
+          COMPOSE=(docker compose -p ragpincheng-prod \
+            -f "${REPO_PATH}/docker/docker-compose.yml" \
+            -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
+          "${COMPOSE[@]}" ps -q backend | grep -q . || {
+            echo "production backend container is not running"
+            exit 1
+          }
+          "${COMPOSE[@]}" exec -T -e TITLE_LIKE="${TITLE_LIKE}" backend python - <<'PY'
+          import json
+          import os
+          import sqlite3
+
+          from src.config import APP_DB_PATH
+
+          MARKERS = ("请准确识别", "要准确识别")
+          TERMS = ("Revit", "Navisworks", "AutoCAD", "BIM-", "GB ", "12.5", "208", "95%")
+
+          like = f"%{os.environ.get('TITLE_LIKE', '2.4.10')}%"
+          connection = sqlite3.connect(f"file:{APP_DB_PATH}?mode=ro", uri=True)
+          connection.row_factory = sqlite3.Row
+          media = connection.execute(
+              "SELECT media_id,title,status,error FROM media_assets WHERE title LIKE ? ORDER BY updated_at DESC LIMIT 3",
+              (like,),
+          ).fetchall()
+          print(json.dumps({"media_count": len(media), "titles": [row["title"] for row in media]}, ensure_ascii=False))
+          for row in media:
+              media_id = row["media_id"]
+              print("== media:", row["title"], "status:", row["status"])
+              jobs = connection.execute(
+                  """SELECT attempt_number,status,failure_classification,failure_error_code,
+                            total_ms,processed_ms,created_at,finished_at,scheme_id
+                     FROM transcription_jobs WHERE media_id=? ORDER BY created_at DESC LIMIT 6""",
+                  (media_id,),
+              ).fetchall()
+              for job in jobs:
+                  print("  job", dict(job))
+              versions = connection.execute(
+                  """SELECT id,created_at,review_status,publication_status,scheme_id,
+                            length(canonical_json) AS canonical_len,canonical_sha256
+                     FROM transcript_versions WHERE media_id=? ORDER BY created_at DESC,id DESC LIMIT 6""",
+                  (media_id,),
+              ).fetchall()
+              for index, version in enumerate(versions):
+                  info = dict(version)
+                  info.pop("canonical_json", None)
+                  print("  version", info)
+                  if index >= 3:
+                      continue
+                  payload = connection.execute(
+                      "SELECT canonical_json FROM transcript_versions WHERE id=?", (version["id"],)
+                  ).fetchone()
+                  try:
+                      canonical = json.loads(payload["canonical_json"])
+                  except Exception as exc:  # pragma: no cover - diagnostic only
+                      print("    canonical parse failed:", type(exc).__name__)
+                      continue
+                  segments = canonical.get("segments") or []
+                  echoed = []
+                  for segment in segments:
+                      text = str(segment.get("text", ""))
+                      if any(marker in text for marker in MARKERS) and sum(
+                          term.casefold() in text.casefold() for term in TERMS
+                      ) >= 3:
+                          echoed.append(text[:120])
+                  print("    segments:", len(segments), "prompt_echo_segments:", len(echoed))
+                  for sample in echoed[:3]:
+                      print("    echo sample:", sample)
+          connection.close()
+          PY
+
+      - name: Publish sanitized summary
+        if: ${{ always() }}
+        run: |
+          echo "Diagnostic complete; evidence is in the job log. No production state was modified." >> "$GITHUB_STEP_SUMMARY"
