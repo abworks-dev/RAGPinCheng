@@ -287,7 +287,10 @@ describe("TranscriptionVersionPanel", () => {
     expect(grid?.className).toContain("lg:grid-cols-[minmax(14rem,18rem)_minmax(0,1fr)]");
     const details = screen.getByTestId("version-list-region");
     expect(details.className).toContain("lg:contents");
-    expect(details).not.toHaveAttribute("open");
+    // A closed <details> hides its children in every viewport, including the
+    // `lg:contents` desktop layout, so the rail must start open or desktop loses
+    // the version list entirely (caught by the CI browser suite).
+    expect(details).toHaveAttribute("open");
     const list = screen.getByRole("region", { name: "转录版本列表" });
     expect(list.className).toContain("lg:sticky");
     expect(list.className).toContain("lg:max-h-[calc(100vh-12rem)]");

@@ -105,7 +105,9 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
   const [batchConfirmLabels, setBatchConfirmLabels] = useState<Record<string, string>>({});
   const [batchError, setBatchError] = useState<string | null>(null);
   const [batchResult, setBatchResult] = useState<TranscriptVersionBulkDeleteResult | null>(null);
-  const [listOpen, setListOpen] = useState(false);
+  // Open by default: a closed <details> hides its content in every viewport,
+  // including the `lg:contents` desktop layout, so the rail would disappear.
+  const [listOpen, setListOpen] = useState(true);
   const { job: publicationJob, error: publicationError } = useTranscriptPublicationJob(publicationJobId);
   const initialOpenKeyRef = useRef<string | null>(null);
   const rowRefs = useRef<Record<string, HTMLElement | null>>({});
