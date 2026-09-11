@@ -177,8 +177,13 @@ def test_media_transcription_action_projection_for_start_and_re_transcribe():
         publication_status=None,
         publication_index_status=None,
     )
-    assert "re_transcribe" not in permanent
-    assert permanent_disabled["re_transcribe"] == "该转录任务属于永久失败，不能重新转录"
+    # A permanent failure must stay re-transcribable: re-transcription starts a
+    # new attempt with an explicitly chosen scheme and never overwrites an
+    # existing version, so it is the operator's recovery path after a
+    # service-side fix. Only retry_transcription stays blocked for permanent
+    # failures, because that resumes the terminal job itself.
+    assert "re_transcribe" in permanent
+    assert "retry_transcription" not in permanent
 
     no_request, no_request_disabled = _media_action_state(
         status="uploaded",
