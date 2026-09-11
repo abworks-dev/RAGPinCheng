@@ -118,7 +118,10 @@ def main() -> int:
 
     from src.transcription.candidate import CandidateSegment  # noqa: F401
     from src.transcription.provider_protocol import ProviderFailure
-    from src.transcription.service_profiles import WHISPERX_V2_SERVICE_CONFIG
+    from src.transcription.service_profiles import (
+        WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG,
+        WHISPERX_V2_SERVICE_CONFIG,
+    )
     from services.asr_service.engine_protocol import PreparedAudioChunk
     from services.asr_service.model_cache import (
         validate_whisperx_align_cache,
@@ -159,27 +162,50 @@ def main() -> int:
         align_model_path=align_cache.model_path,
         unavailable_reason_code="probe",
     )
-    chunk = PreparedAudioChunk(0, args.window_start_ms, args.window_end_ms, window)
-    probe: dict[str, object] = {}
-    try:
-        result = engine.transcribe_chunk(chunk, WHISPERX_V2_SERVICE_CONFIG)
-    except Exception as exc:  # pragma: no cover - diagnostic only
-        probe["unexpected_exception"] = type(exc).__name__
-        probe["unexpected_message"] = str(exc)[:300]
-        report["engine_probe"] = probe
-        Path(args.report).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-        print(json.dumps(report, ensure_ascii=False))
-        return 0
-    probe["result_type"] = type(result).__name__
-    probe["last_failure_stage"] = getattr(engine, "last_failure_stage", None)
-    probe["last_failure_type"] = getattr(engine, "last_failure_type", None)
-    if type(result) is ProviderFailure:
-        probe["error_code"] = result.error_code.value
-        probe["classification"] = result.classification.value
-    else:
-        probe["segment_count"] = len(result.segments)
-        probe["duration_ms"] = result.duration_ms
-    report["engine_probe"] = probe
+
+    def run_case(label: str, config: object, end_ms: int) -> dict[str, object]:
+        bounded = min(end_ms, int(round(array.size * 1000 / 16000)))
+        case_window = audio_module.encode_wav_window(
+            array, start_ms=args.window_start_ms, end_ms=bounded
+        )
+        chunk = PreparedAudioChunk(
+            0, args.window_start_ms, bounded, case_window
+        )
+        outcome: dict[str, object] = {"window_end_ms": bounded}
+        try:
+            case_result = engine.transcribe_chunk(chunk, config)
+        except Exception as exc:  # pragma: no cover - diagnostic only
+            outcome["unexpected_exception"] = type(exc).__name__
+            outcome["unexpected_message"] = str(exc)[:300]
+            return outcome
+        outcome["result_type"] = type(case_result).__name__
+        outcome["last_failure_stage"] = getattr(engine, "last_failure_stage", None)
+        outcome["last_failure_type"] = getattr(engine, "last_failure_type", None)
+        if type(case_result) is ProviderFailure:
+            outcome["error_code"] = case_result.error_code.value
+            outcome["classification"] = case_result.classification.value
+        else:
+            outcome["segment_count"] = len(case_result.segments)
+            outcome["duration_ms"] = case_result.duration_ms
+        return outcome
+
+    cases: dict[str, object] = {}
+    cases["full_decode_30500"] = run_case(
+        "full_decode_30500", WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG, 30500
+    )
+    cases["full_decode_60000"] = run_case(
+        "full_decode_60000", WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG, 60000
+    )
+    cases["full_decode_120000"] = run_case(
+        "full_decode_120000", WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG, 120000
+    )
+    cases["full_decode_300000"] = run_case(
+        "full_decode_300000", WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG, 300000
+    )
+    cases["plain_30500"] = run_case(
+        "plain_30500", WHISPERX_V2_SERVICE_CONFIG, 30500
+    )
+    report["engine_probe"] = cases
 
     Path(args.report).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False))
