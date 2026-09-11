@@ -71,6 +71,7 @@ from .schemas import (
     TranscriptionSchemeOptionDTO,
 )
 from .transcription_schemes import available_schemes, resolve_scheme_runtime
+from .transcript_prompt_echo_guard import PromptEchoPublicationBlocked
 from .media_storage import MediaStorageError, require_mutable_media_source, resolve_media_path
 from .transcription_artifacts import LocalTranscriptionArtifactStore
 from .transcription_publication import TranscriptionPublicationApplicationService
@@ -979,6 +980,12 @@ def bulk_publish_transcripts(
                     status="failed",
                     message="发布命令发生并发冲突，请刷新列表后重试",
                 ))
+            except PromptEchoPublicationBlocked as exc:
+                items.append(TranscriptionActionItemDTO(
+                    media_id=media_id,
+                    status="failed",
+                    message=exc.message,
+                ))
             except ContractValidationError:
                 items.append(TranscriptionActionItemDTO(
                     media_id=media_id,
@@ -1386,6 +1393,8 @@ def publish_transcript_version(
         )
     except KeyError:
         raise HTTPException(status_code=404, detail="转录版本不存在")
+    except PromptEchoPublicationBlocked as exc:
+        raise HTTPException(status_code=409, detail=exc.message)
     except StoreConflictError:
         raise HTTPException(status_code=409, detail="发布命令发生并发冲突")
     except ContractValidationError:
