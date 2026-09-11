@@ -1,0 +1,118 @@
+name: Probe ASR Window Pipeline Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character merged master SHA to inspect"
+        required: true
+        type: string
+      job_dir:
+        description: "Exact failed spool job directory name under the release spool"
+        required: true
+        type: string
+      window_start_ms:
+        description: "Window start in milliseconds"
+        required: true
+        default: "0"
+        type: string
+      window_end_ms:
+        description: "Window end in milliseconds"
+        required: true
+        default: "30500"
+        type: string
+      confirm_probe:
+        description: "Confirm read-only window pipeline probe"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    if: ${{ inputs.confirm_probe == true }}
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 20
+    env:
+      PRODUCTION_ASR_PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
+      PRODUCTION_ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+      JOB_DIR: ${{ inputs.job_dir }}
+      WINDOW_START_MS: ${{ inputs.window_start_ms }}
+      WINDOW_END_MS: ${{ inputs.window_end_ms }}
+    steps:
+      - name: Validate immutable revision and probe gate
+        shell: powershell
+        run: |
+          if ("${{ inputs.commit_sha }}" -notmatch '^[0-9a-fA-F]{40}$') { throw "commit_sha must be a full SHA" }
+          if ("${{ inputs.commit_sha }}".ToLowerInvariant() -ne "${{ github.sha }}".ToLowerInvariant()) { throw "commit_sha must equal the dispatch revision" }
+          if ("${{ github.ref }}" -ne "refs/heads/master") { throw "window probe must run from master" }
+          if (-not [Convert]::ToBoolean("${{ inputs.confirm_probe }}")) { throw "confirm_probe must be enabled" }
+          if ($env:JOB_DIR -notmatch '^[0-9a-fA-F-]{36}$') { throw "job_dir must be a spool directory name" }
+          if ($env:WINDOW_START_MS -notmatch '^\d{1,9}$' -or $env:WINDOW_END_MS -notmatch '^\d{1,9}$') { throw "window bounds are invalid" }
+      - name: Check out requested revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+      - name: Run read-only window pipeline probe
+        shell: powershell
+        run: |
+          $activePath = Join-Path $env:PRODUCTION_ASR_DATA_ROOT 'release-state\active.json'
+          if (-not (Test-Path -LiteralPath $activePath -PathType Leaf)) { throw "active release state is missing" }
+          $active = Get-Content -LiteralPath $activePath -Raw -Encoding UTF8 | ConvertFrom-Json
+          $candidate = [string]$active.candidate_id
+          if ($candidate -notmatch '^[0-9]{1,20}$') { throw "active candidate id is invalid" }
+          $appRoot = Join-Path $env:PRODUCTION_ASR_PROGRAM_ROOT ("releases\$candidate\app")
+          $venvPython = Join-Path $env:PRODUCTION_ASR_PROGRAM_ROOT ("releases\$candidate\venv\Scripts\python.exe")
+          $configPath = Join-Path $env:PRODUCTION_ASR_DATA_ROOT ("config\releases\$candidate\asr.env")
+          $spoolRoot = Join-Path $env:PRODUCTION_ASR_DATA_ROOT 'spool'
+          foreach ($path in @($appRoot, $venvPython, $configPath)) {
+            if (-not (Test-Path -LiteralPath $path)) { throw "release path is missing: $path" }
+          }
+          $jobPath = Join-Path $spoolRoot $env:JOB_DIR
+          if (-not (Test-Path -LiteralPath $jobPath -PathType Container)) { throw "spool job directory is missing" }
+          $report = Join-Path $env:RUNNER_TEMP "asr-window-probe-${{ github.run_id }}.json"
+          & $venvPython "${{ github.workspace }}\scripts\probe_asr_window_pipeline.py" `
+            --app-root $appRoot `
+            --config-path $configPath `
+            --job-dir $jobPath `
+            --window-start-ms $env:WINDOW_START_MS `
+            --window-end-ms $env:WINDOW_END_MS `
+            --report $report
+          if ($LASTEXITCODE -ne 0) { throw "window pipeline probe failed" }
+      - name: Publish sanitized summary
+        if: ${{ always() }}
+        shell: powershell
+        run: |
+          $path = Join-Path $env:RUNNER_TEMP "asr-window-probe-${{ github.run_id }}.json"
+          if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $r = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+            @(
+              "## ASR window pipeline probe",
+              "",
+              "- Job: ``$($r.job_dir)``",
+              "- Content bytes: ``$($r.content_bytes)``",
+              "- Decoded samples: ``$($r.decoded_samples)`` (``$($r.decoded_seconds)`` s)",
+              "- Window bytes: ``$($r.window_bytes)``; header ok: ``$($r.window_header_ok)``; samples: ``$($r.window_samples)``",
+              "- Window abs mean/max: ``$($r.window_abs_mean)`` / ``$($r.window_abs_max)``; nonzero ratio: ``$($r.window_nonzero_ratio)``",
+              "- GPU free MiB: ``$($r.gpu_free_mib)``",
+              "- Engine probe: ``$($r.engine_probe | ConvertTo-Json -Compress)``"
+            ) -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          } else {
+            "Window probe ended before sanitized evidence was written; nothing was modified." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          }
+      - name: Upload sanitized probe evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: asr-window-probe-${{ github.run_id }}
+          path: ${{ runner.temp }}/asr-window-probe-${{ github.run_id }}.json
+          if-no-files-found: warn
+          retention-days: 30
