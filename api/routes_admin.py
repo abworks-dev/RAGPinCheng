@@ -237,7 +237,6 @@ def _media_action_state(
         transcription_retry_available
         and has_job_record
         and not has_active_job
-        and not (job_status == "failed" and job_failure_classification == "permanent")
     ):
         available.append("re_transcribe")
     else:
@@ -248,8 +247,6 @@ def _media_action_state(
                 disabled["re_transcribe"] = "尚未创建转录任务"
         elif has_active_job:
             disabled["re_transcribe"] = "已有正在运行的转录任务，完成后可重新转录"
-        elif job_status == "failed" and job_failure_classification == "permanent":
-            disabled["re_transcribe"] = "该转录任务属于永久失败，不能重新转录"
         elif not transcription_retry_available:
             disabled["re_transcribe"] = "自动转录当前不可用"
         else:
