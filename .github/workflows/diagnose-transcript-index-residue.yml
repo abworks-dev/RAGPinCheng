@@ -1,0 +1,193 @@
+name: Diagnose Transcript Index Residue
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character merged master SHA to inspect"
+        required: true
+        type: string
+      purge_run_id:
+        description: "Purge run id whose snapshot names the removed index targets"
+        required: true
+        type: string
+      confirm_diagnostic:
+        description: "Confirm the read-only index residue inventory"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-app-manual-v1
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    if: ${{ inputs.confirm_diagnostic == true }}
+    environment: production-asr
+    runs-on: [self-hosted, linux, ubuntu, production, app]
+    timeout-minutes: 20
+    env:
+      COMPOSE_OVERRIDE: ${{ vars.PRODUCTION_APP_COMPOSE_OVERRIDE }}
+      COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
+      REPO_PATH: ${{ vars.PRODUCTION_APP_REPO_PATH }}
+      PURGE_RUN_ID: ${{ inputs.purge_run_id }}
+    steps:
+      - name: Validate immutable revision and diagnostic gate
+        run: |
+          if [[ ! "${{ inputs.commit_sha }}" =~ ^[0-9a-fA-F]{40}$ ]]; then echo "commit_sha must be a full SHA"; exit 1; fi
+          if [[ "${{ inputs.commit_sha }}" != "${{ github.sha }}" ]]; then echo "commit_sha must equal the dispatch revision"; exit 1; fi
+          if [[ "${{ github.ref }}" != "refs/heads/master" ]]; then echo "diagnostic must run from master"; exit 1; fi
+          if [[ ! "$PURGE_RUN_ID" =~ ^[0-9]{1,20}$ ]]; then echo "purge_run_id is invalid"; exit 1; fi
+
+      - name: Check out requested revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Collect read-only index residue evidence
+        run: |
+          set -euo pipefail
+          COMPOSE=(docker compose -p ragpincheng-prod \
+            -f "${REPO_PATH}/docker/docker-compose.yml" \
+            -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
+          "${COMPOSE[@]}" ps -q backend | grep -q . || { echo "production backend container is not running"; exit 1; }
+          "${COMPOSE[@]}" exec -T -e PURGE_RUN_ID="${PURGE_RUN_ID}" backend python - <<'PY'
+          import json
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          from src.config import APP_DB_PATH, COLLECTION, PARENTS_DB, QDRANT_URL
+
+          report = {"schema_version": "transcript-index-residue/1", "read_only": True}
+          data_dir = Path(APP_DB_PATH).parent
+          snapshot_path = data_dir / f"transcript-versions-purge-{os.environ['PURGE_RUN_ID']}.jsonl"
+          report["snapshot_present"] = snapshot_path.is_file()
+
+          targets = []
+          media_ids = set()
+          version_ids = set()
+          if snapshot_path.is_file():
+              with snapshot_path.open(encoding="utf-8") as handle:
+                  for line in handle:
+                      try:
+                          entry = json.loads(line)
+                      except json.JSONDecodeError:
+                          continue
+                      row = entry.get("row") or {}
+                      table = entry.get("table")
+                      if table == "transcript_publication_index_jobs":
+                          if row.get("target_index_id"):
+                              targets.append(str(row["target_index_id"]))
+                          if row.get("transcript_version_id"):
+                              version_ids.add(str(row["transcript_version_id"]))
+                      if table == "transcript_versions":
+                          if row.get("id"):
+                              version_ids.add(str(row["id"]))
+                          if row.get("media_id"):
+                              media_ids.add(str(row["media_id"]))
+          report["removed_publication_jobs"] = len(targets)
+          report["target_index_ids"] = sorted(targets)
+          report["removed_version_ids"] = sorted(version_ids)
+          report["affected_media"] = len(media_ids)
+          report["affected_media_ids"] = sorted(media_ids)
+
+          connection = sqlite3.connect(f"file:{APP_DB_PATH}?mode=ro", uri=True)
+          connection.row_factory = sqlite3.Row
+          report["remaining_versions"] = connection.execute(
+              "SELECT count(*) FROM transcript_versions"
+          ).fetchone()[0]
+          report["published_content_items"] = connection.execute(
+              "SELECT count(*) FROM content_items WHERE content_kind='media_transcript'"
+          ).fetchone()[0]
+          report["video_content_items"] = [
+              {"item_id": row["id"], "title": row["title"]}
+              for row in connection.execute(
+                  "SELECT id,title FROM content_items WHERE content_kind='media_transcript' ORDER BY title LIMIT 40"
+              )
+          ]
+          connection.close()
+
+          report["qdrant_url"] = QDRANT_URL
+          report["collection"] = COLLECTION
+          identity_fields = {
+              "publication_target_id": report["target_index_ids"],
+              "transcript_version_id": report["removed_version_ids"],
+              "media_id": report["affected_media_ids"],
+          }
+          try:
+              from qdrant_client import QdrantClient
+              from qdrant_client.http import models as qmodels
+
+              client = QdrantClient(url=QDRANT_URL)
+              info = client.get_collection(COLLECTION)
+              report["points_total"] = int(info.points_count or 0)
+              sample, _ = client.scroll(
+                  collection_name=COLLECTION, limit=2, with_payload=True, with_vectors=False
+              )
+              keys = sorted({key for point in sample for key in (point.payload or {}).keys()})
+              report["payload_keys"] = keys
+              report["payload_samples"] = [
+                  {key: str((point.payload or {}).get(key))[:100] for key in keys} for point in sample
+              ]
+              matches = {}
+              for field, values in identity_fields.items():
+                  if field not in keys or not values:
+                      continue
+                  matched = 0
+                  for value in values:
+                      result = client.count(
+                          collection_name=COLLECTION,
+                          count_filter=qmodels.Filter(
+                              must=[qmodels.FieldCondition(key=field, match=qmodels.MatchValue(value=value))]
+                          ),
+                          exact=True,
+                      )
+                      matched += int(getattr(result, "count", 0) or 0)
+                  matches[field] = matched
+              report["qdrant_identity_matches"] = matches
+          except Exception as exc:  # pragma: no cover - diagnostic only
+              report["qdrant_error"] = f"{type(exc).__name__}: {exc}"[:300]
+
+          report["parents_db_present"] = Path(PARENTS_DB).is_file()
+          try:
+              parents = sqlite3.connect(f"file:{PARENTS_DB}?mode=ro", uri=True)
+              parents.row_factory = sqlite3.Row
+              tables = [
+                  row["name"]
+                  for row in parents.execute(
+                      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+                  )
+              ]
+              report["parents_tables"] = tables
+              report["parents_counts"] = {
+                  table: parents.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in tables
+              }
+              residue = {}
+              for table in tables:
+                  columns = {row["name"] for row in parents.execute(f"PRAGMA table_info({table})")}
+                  for column in ("publication_target_id", "transcript_version_id", "media_id"):
+                      values = identity_fields.get(column) or []
+                      if column not in columns or not values:
+                          continue
+                      placeholders = ",".join("?" for _ in values)
+                      residue[f"{table}.{column}"] = parents.execute(
+                          f"SELECT count(*) FROM {table} WHERE {column} IN ({placeholders})", values
+                      ).fetchone()[0]
+              report["parents_identity_matches"] = residue
+              parents.close()
+          except Exception as exc:  # pragma: no cover - diagnostic only
+              report["parents_error"] = f"{type(exc).__name__}: {exc}"[:300]
+
+          print("INDEX_RESIDUE " + json.dumps(report, ensure_ascii=False, sort_keys=True))
+          PY
+
+      - name: Publish sanitized summary
+        if: ${{ always() }}
+        run: |
+          echo "Read-only index residue inventory; see the job log line prefixed INDEX_RESIDUE. No production state was modified." >> "$GITHUB_STEP_SUMMARY"
