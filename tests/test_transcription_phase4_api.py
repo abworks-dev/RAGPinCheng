@@ -2124,7 +2124,11 @@ def test_bulk_delete_removes_deletable_version_row_and_artifact(tmp_path, monkey
         (PUBLISHED_VERSION_ID, "head", "当前正式版本不能删除，请先发布其它版本替换后再试。"),
         ("55555555-5555-4555-8555-555555555556", "published", "已发布或正在发布的转录版本不能删除。"),
         (AWAITING_VERSION_ID, "awaiting_review", "待审核的转录版本不能删除，请先完成审核。"),
-        (REFERENCING_VERSION_ID, "referenced", "该转录版本仍被其它版本引用，不能删除。"),
+        (
+            REFERENCING_VERSION_ID,
+            "derived_from",
+            "该转录版本是人工校对稿的来源版本，不能删除。",
+        ),
     ],
 )
 def test_bulk_delete_refuses_protected_versions(
@@ -2147,6 +2151,8 @@ def test_bulk_delete_refuses_protected_versions(
     elif seed == "awaiting_review":
         _seed_transcript_version(conn, version_id, review_status="awaiting_review")
     else:
+        # `derived_from_version_id` marks a manual revision that keeps deriving
+        # from this version, so the reference must keep refusing the delete.
         _seed_transcript_version(conn, version_id, created_at=13)
         _seed_transcript_version(
             conn,
@@ -2175,6 +2181,61 @@ def test_bulk_delete_refuses_protected_versions(
         assert artifact.exists()
     finally:
         conn.close()
+
+
+def test_bulk_delete_removes_a_superseded_version_and_clears_the_reference(
+    tmp_path, monkeypatch
+):
+    """A version only referenced through `supersedes_version_id` is deletable.
+
+    Every version in a normal chain supersedes the previous one, so keeping that
+    reference as a blocker made the whole feature unusable. The deleting
+    transaction clears the newer version's reference instead.
+    """
+    import api.routes_transcription as routes_transcription
+
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    seed_admin_user(conn)
+    artifact = _write_managed_artifact(tmp_path, f"markdown/{DELETABLE_VERSION_ID}.md")
+    _seed_transcript_version(conn, DELETABLE_VERSION_ID, created_at=12)
+    _seed_transcript_version(
+        conn,
+        REFERENCING_VERSION_ID,
+        created_at=13,
+        supersedes=DELETABLE_VERSION_ID,
+    )
+    db_path = _transcript_version_delete_connect(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        routes_transcription,
+        "TRANSCRIPTION_ARTIFACT_DIR",
+        (tmp_path / "artifacts").resolve(),
+    )
+    try:
+        result = routes_transcription.bulk_delete_transcript_versions(
+            MEDIA_ID, _bulk_delete_request([DELETABLE_VERSION_ID]), ADMIN
+        )
+
+        assert (result.deleted_count, result.skipped_count) == (1, 0)
+        assert [(item.status, item.reason) for item in result.items] == [("deleted", None)]
+        assert not artifact.exists()
+    finally:
+        conn.close()
+
+    check = sqlite3.connect(db_path)
+    check.row_factory = sqlite3.Row
+    try:
+        assert check.execute(
+            "SELECT 1 FROM transcript_versions WHERE id=?", (DELETABLE_VERSION_ID,)
+        ).fetchone() is None
+        newer = check.execute(
+            "SELECT supersedes_version_id FROM transcript_versions WHERE id=?",
+            (REFERENCING_VERSION_ID,),
+        ).fetchone()
+        assert newer is not None
+        # The newer version survives; only its now-dangling history pointer is gone.
+        assert newer["supersedes_version_id"] is None
+    finally:
+        check.close()
 
 
 def test_bulk_delete_reports_unknown_and_foreign_versions_independently(tmp_path, monkeypatch):

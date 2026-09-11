@@ -384,24 +384,93 @@ describe("TranscriptionVersionPanel", () => {
   });
 
   it("enables batch selection and disables versions that must be kept", async () => {
-    mocks.listTranscriptVersions.mockResolvedValue([awaitingVersion, deletableVersion, revisedVersion, publishedVersion, currentHeadVersion]);
+    // 版本 3 supersedes 版本 2: a superseded version stays deletable, because the
+    // backend clears that reference while deleting it.
+    const supersedingVersion = {
+      ...deletableVersion,
+      version_id: "77777777-7777-4777-8777-777777777777",
+      supersedes_version_id: deletableVersion.version_id,
+    };
+    mocks.listTranscriptVersions.mockResolvedValue([awaitingVersion, deletableVersion, supersedingVersion, revisedVersion, publishedVersion, currentHeadVersion]);
     render(<TranscriptionVersionPanel mediaId="media-1" embedded />);
 
     fireEvent.click(await screen.findByRole("button", { name: "批量选择" }));
 
-    // 版本 1 awaits review and is referenced by 版本 3; 版本 2 is a plain deletable draft.
+    // 版本 1 awaits review; 版本 2 is superseded (still deletable); 版本 3 is the
+    // newer version of that chain; 版本 4 is the source of a manual revision;
+    // 版本 5 is published; 版本 6 is the current head.
     expect(await screen.findByRole("checkbox", { name: "选择版本 1" })).toBeDisabled();
     expect(screen.getByRole("checkbox", { name: "选择版本 2" })).toBeEnabled();
-    expect(screen.getByRole("checkbox", { name: "选择版本 3" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "选择版本 3" })).toBeEnabled();
     expect(screen.getByRole("checkbox", { name: "选择版本 4" })).toBeDisabled();
     expect(screen.getByRole("checkbox", { name: "选择版本 5" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "选择版本 6" })).toBeDisabled();
     expect(screen.getByRole("checkbox", { name: "全选可删除版本" })).toBeEnabled();
     expect(screen.getByText("已选 0 个")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "删除所选" })).toBeDisabled();
     expect(screen.getByText("不能删除：正在等待审核，不能删除")).toBeInTheDocument();
     expect(screen.getByText("不能删除：已发布到知识库，不能删除")).toBeInTheDocument();
     expect(screen.getByText("不能删除：当前正式检索版本，不能删除")).toBeInTheDocument();
-    expect(screen.getByText("不能删除：已被其他版本引用，不能删除")).toBeInTheDocument();
+    expect(screen.getByText("不能删除：该转录版本是人工校对稿的来源版本，不能删除")).toBeInTheDocument();
+    // The superseded version is no longer explained away as un-deletable.
+    expect(screen.queryByText("不能删除：已被其他版本引用，不能删除")).not.toBeInTheDocument();
+  });
+
+  it("keeps only the derived_from source of a manual revision out of bulk selection", async () => {
+    // 版本 2 is a managed manual revision that derives from 版本 1, so 版本 1 is the
+    // only row refused by the derived_from rule (版本 2 awaits review).
+    const revisionSource = {
+      ...deletableVersion,
+      version_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      derived_from_version_id: null,
+    };
+    const revisionOfSource = {
+      ...revisedVersion,
+      version_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      derived_from_version_id: revisionSource.version_id,
+    };
+    mocks.listTranscriptVersions.mockResolvedValue([revisionSource, revisionOfSource]);
+    render(<TranscriptionVersionPanel mediaId="media-1" embedded />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "批量选择" }));
+
+    expect(screen.getByRole("checkbox", { name: "选择版本 1" })).toBeDisabled();
+    expect(screen.getByText("不能删除：该转录版本是人工校对稿的来源版本，不能删除")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "选择版本 2" })).toBeDisabled();
+    expect(screen.getByText("不能删除：正在等待审核，不能删除")).toBeInTheDocument();
+  });
+
+  it("deletes a superseded old version and sends only the selected id", async () => {
+    const supersedingVersion = {
+      ...deletableVersion,
+      version_id: "77777777-7777-4777-8777-777777777777",
+      supersedes_version_id: deletableVersion.version_id,
+    };
+    mocks.listTranscriptVersions
+      .mockResolvedValueOnce([deletableVersion, supersedingVersion])
+      .mockResolvedValue([supersedingVersion]);
+    mocks.bulkDeleteTranscriptVersions.mockResolvedValue({
+      items: [{ version_id: deletableVersion.version_id, status: "deleted", reason: null }],
+      deleted_count: 1,
+      skipped_count: 0,
+    });
+    render(<TranscriptionVersionPanel mediaId="media-1" embedded />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "批量选择" }));
+    const supersededCheckbox = screen.getByRole("checkbox", { name: "选择版本 1" });
+    expect(supersededCheckbox).toBeEnabled();
+    fireEvent.click(supersededCheckbox);
+    fireEvent.click(screen.getByRole("button", { name: "删除所选" }));
+
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认删除 1 个版本" }));
+
+    await waitFor(() => expect(mocks.bulkDeleteTranscriptVersions).toHaveBeenCalledWith(
+      "media-1",
+      [deletableVersion.version_id],
+      expect.stringMatching(/^[0-9a-f-]{36}$/),
+    ));
+    expect(await screen.findByTestId("version-bulk-delete-result")).toHaveTextContent("成功 1 · 跳过 0");
   });
 
   it("keeps awaiting-review versions out of bulk selection with an explanation", async () => {
@@ -428,14 +497,20 @@ describe("TranscriptionVersionPanel", () => {
     expect(screen.getByRole("button", { name: "删除所选" })).toBeDisabled();
   });
 
-  it("confirms deletion of only the selected versions and renders partial success", async () => {
+  it("confirms deletion of a superseded version and renders partial success", async () => {
+    // 版本 2 supersedes 版本 1, which must not block deleting the older version.
+    const supersedingVersion = {
+      ...deletableVersion,
+      version_id: "77777777-7777-4777-8777-777777777777",
+      supersedes_version_id: deletableVersion.version_id,
+    };
     mocks.listTranscriptVersions
-      .mockResolvedValueOnce([deletableVersion, revisedVersion, publishedVersion, currentHeadVersion])
+      .mockResolvedValueOnce([deletableVersion, supersedingVersion, publishedVersion, currentHeadVersion])
       .mockResolvedValue([publishedVersion, currentHeadVersion]);
     mocks.bulkDeleteTranscriptVersions.mockResolvedValue({
       items: [
         { version_id: deletableVersion.version_id, status: "deleted", reason: null },
-        { version_id: revisedVersion.version_id, status: "deleted", reason: null },
+        { version_id: supersedingVersion.version_id, status: "deleted", reason: null },
         { version_id: publishedVersion.version_id, status: "unavailable", reason: "已发布到知识库，不能删除" },
         { version_id: currentHeadVersion.version_id, status: "conflict", reason: "当前正式检索版本，不能删除" },
       ],
@@ -456,7 +531,7 @@ describe("TranscriptionVersionPanel", () => {
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent("删除后无法恢复");
     expect(dialog).toHaveTextContent("版本 1 · 人工转录");
-    expect(dialog).toHaveTextContent("版本 2 · 人工修订");
+    expect(dialog).toHaveTextContent("版本 2 · 人工转录");
     expect(dialog).toHaveTextContent("转写正文、时间轴及系统保存的转写产物文件都会被永久删除");
     expect(dialog).not.toHaveTextContent("版本 3");
 
@@ -464,7 +539,7 @@ describe("TranscriptionVersionPanel", () => {
 
     await waitFor(() => expect(mocks.bulkDeleteTranscriptVersions).toHaveBeenCalledWith(
       "media-1",
-      [deletableVersion.version_id, revisedVersion.version_id],
+      [deletableVersion.version_id, supersedingVersion.version_id],
       expect.stringMatching(/^[0-9a-f-]{36}$/),
     ));
 
