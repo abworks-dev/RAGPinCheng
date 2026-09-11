@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, CheckCircle2, Pencil, Rocket, Trash2, X } from "lucide-react";
 import { adminMediaApi } from "../api/admin/media";
 import { useTranscriptPublicationJob } from "../hooks/useTranscriptionJobs";
 import type { MediaTranscript, TranscriptVersion, TranscriptVersionBulkDeleteResult } from "../types";
@@ -449,15 +449,15 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
         ) : null}
       </div>
       {batchMode ? (
-        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-surface-muted/30 px-3 py-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-surface-muted/30 px-3 py-2">
           <Checkbox
             aria-label="全选可删除版本"
             checked={deletableVersionIds.length > 0 && deletableVersionIds.every((id) => batchSelectedSet.has(id))}
             disabled={deletableVersionIds.length === 0 || batchBusy}
             onChange={(event) => (event.target.checked ? selectAllDeletable() : setBatchSelectedIds([]))}
           />
-          <span className="min-w-0 flex-1 text-ui-xs text-muted-foreground">全选可删除版本</span>
-          <Button size="sm" variant="ghost" type="button" onClick={cancelBatch} disabled={batchBusy}>取消</Button>
+          <span className="min-w-0 flex-1 break-words text-ui-xs text-muted-foreground">全选可删除版本</span>
+          <Button size="sm" variant="ghost" type="button" className="h-8 shrink-0" onClick={cancelBatch} disabled={batchBusy}>取消</Button>
         </div>
       ) : null}
       <div className="min-h-0 max-h-[18rem] flex-1 overflow-y-auto lg:max-h-none">
@@ -470,11 +470,6 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
           const itemResult = batchResultByVersionId.get(version.version_id);
           const managedManualRevision = version.source === "manual" && version.markdown_storage_kind === "managed_artifact" && Boolean(version.derived_from_version_id);
           const canPublish = (version.source === "automatic" || managedManualRevision) && version.review_status === "review_approved" && (version.publication_status === "not_published" || version.publication_status === "publication_failed");
-          const publishLabel = version.publication_status === "published"
-            ? "已发布"
-            : version.publication_status === "publishing"
-              ? "发布中"
-              : "发布到知识库";
           const publishHint = version.publication_status === "published"
             ? "当前版本已发布"
             : version.publication_status === "publishing"
@@ -507,34 +502,68 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
                 <button
                   type="button"
                   aria-pressed={isEditing}
-                  className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="flex min-w-[9rem] flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   onClick={() => void previewVersion(version.version_id)}
                 >
                   <span className="shrink-0 text-ui-sm font-semibold text-foreground">版本 {index + 1}</span>
                   <Badge variant={version.is_current ? "success" : "secondary"}>{version.is_current ? "当前正式版本" : statusLabel(version.publication_status)}</Badge>
                   <Badge variant="secondary">{statusLabel(version.review_status)}</Badge>
-                  <span className="text-ui-xs text-muted-foreground">{sourceLabel(version)}</span>
+                  <span className="min-w-0 break-words text-ui-xs text-muted-foreground">{sourceLabel(version)}</span>
                 </button>
-                <Button
-                  size="sm"
-                  variant={isEditing ? "secondary" : "outline"}
+                {/* Icon-only is allowed here because the entry/exit action is
+                    repeated by the row button above and by 收起校对 in the
+                    workspace header; the accessible name stays the visible label
+                    the specs and screen readers rely on. */}
+                <IconButton
+                  className={isEditing ? "bg-secondary text-foreground" : undefined}
+                  label={isEditing ? "收起校对" : "校对内容"}
+                  tooltip={isEditing ? "收起校对工作区" : "打开校对工作区"}
                   disabled={busy}
                   aria-expanded={isEditing}
                   onClick={() => isEditing ? closeEditor() : void previewVersion(version.version_id)}
                 >
-                  {isEditing ? "收起校对" : "校对内容"}
-                </Button>
+                  <Pencil className="size-4" aria-hidden="true" />
+                </IconButton>
               </div>
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-ui-xs text-muted-foreground">
-                <span>审核：{statusLabel(version.review_status)}</span>
-                {version.review_note && <span className="max-w-full truncate" title={version.review_note}>· {version.review_note}</span>}
-                {(version.scheme_name || version.scheme_deleted) && <div className="flex flex-wrap items-center gap-1.5" data-testid="version-scheme-line"><span>转录方案：{version.scheme_name || "原转录配置已删除"}</span>{version.scheme_name && version.scheme_deleted && <Badge variant="secondary">原转录配置已删除</Badge>}</div>}
-                <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+              <div className="mt-1.5 flex flex-wrap items-center justify-end gap-x-2 gap-y-1.5 text-ui-xs text-muted-foreground">
+                <div className="flex min-w-[13rem] flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="shrink-0">审核：{statusLabel(version.review_status)}</span>
+                  {version.review_note && <span className="min-w-0 max-w-full truncate" title={version.review_note}>· {version.review_note}</span>}
+                  {(version.scheme_name || version.scheme_deleted) && <div className="flex min-w-0 flex-wrap items-center gap-1.5" data-testid="version-scheme-line"><span className="break-words">转录方案：{version.scheme_name || "原转录配置已删除"}</span>{version.scheme_name && version.scheme_deleted && <Badge variant="secondary">原转录配置已删除</Badge>}</div>}
+                </div>
+                {/* Review and publish are business-critical, so they keep a short
+                    visible label next to the icon (docs/design/admin-ui-visual-contract.md:
+                    an icon must not be the only entry point). aria-label stays
+                    byte-identical to the label the specs and screen readers already
+                    use; only the visible wording is shortened. */}
+                <div className="flex flex-wrap items-center justify-end gap-1">
                   {version.review_status === "awaiting_review" && <>
-                    <Button size="sm" className="h-8" disabled={busy} onClick={() => void reviewVersion(version.version_id, true)}>审核通过</Button>
-                    <Button size="sm" variant="outline" className="h-8" disabled={busy} onClick={() => void reviewVersion(version.version_id, false)}>拒绝</Button>
+                    <Button size="sm" className="shrink-0" aria-label="审核通过" title="审核通过并进入可发布状态" disabled={busy} onClick={() => void reviewVersion(version.version_id, true)}>
+                      <Check className="size-4" aria-hidden="true" />
+                      通过
+                    </Button>
+                    <Button size="sm" variant="outline" className="shrink-0" aria-label="拒绝" title="拒绝该版本并记录审核备注" disabled={busy} onClick={() => void reviewVersion(version.version_id, false)}>
+                      <X className="size-4" aria-hidden="true" />
+                      拒绝
+                    </Button>
                   </>}
-                  <Button size="sm" className="h-8" disabled={busy || !canPublish} aria-describedby={!canPublish ? publishHintId : undefined} onClick={() => void publishVersion(version.version_id)}>{publishLabel}</Button>
+                  {/* aria-label stays 发布到知识库 in every state: the specs locate this
+                      control by that name, and the state is carried by the tooltip,
+                      the icon and the version badge instead. */}
+                  <Button
+                    size="sm"
+                    className="shrink-0"
+                    aria-label="发布到知识库"
+                    title={publishHint ?? "发布该版本到知识库"}
+                    disabled={busy || !canPublish}
+                    aria-describedby={!canPublish ? publishHintId : undefined}
+                    onClick={() => void publishVersion(version.version_id)}
+                  >
+                    {version.publication_status === "published"
+                      ? <CheckCircle2 className="size-4 text-success" aria-hidden="true" />
+                      : <Rocket className="size-4" aria-hidden="true" />}
+                    发布
+                  </Button>
                 </div>
               </div>
               {version.review_status === "awaiting_review" && <div className="mt-2 max-w-xl">
@@ -604,7 +633,7 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
                   <Badge variant="secondary">{sourceLabel(selectedVersion)}</Badge>
                 </h4>
               </div>
-              <Button size="sm" variant="outline" onClick={closeEditor}>收起校对</Button>
+              <Button size="sm" variant="outline" className="shrink-0" onClick={closeEditor}>收起校对</Button>
             </div>
             <details className="mt-3 text-ui-xs text-muted-foreground">
               <summary className="cursor-pointer select-none font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">查看技术详情</summary>
