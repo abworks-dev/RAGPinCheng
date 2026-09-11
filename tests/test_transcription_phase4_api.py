@@ -2060,6 +2060,34 @@ def _seed_published_head(conn, *, head_id=None):
     return head_id
 
 
+def _seed_metadata_revision(conn, *, revision_id, version_id, base_version_id):
+    """Seed the `media_metadata_revisions` row a version is created with.
+
+    `register_metadata_revision` inserts the version and this row in one
+    transaction, so every real editing attempt has one; its FK onto
+    `transcript_versions` is RESTRICT and must be cleared before the version row
+    can go.
+    """
+    conn.execute(
+        """INSERT INTO media_metadata_revisions(
+               id,media_id,transcript_version_id,base_version_id,proposed_title,
+               proposed_original_filename,requested_by,request_idempotency_key,status,
+               created_at,activated_at,updated_at
+           ) VALUES (?,?,?,?,?,?,?,?,'pending',12,NULL,12)""",
+        (
+            revision_id,
+            MEDIA_ID,
+            version_id,
+            base_version_id,
+            "Proposed title",
+            "proposed.mp4",
+            1,
+            revision_id,
+        ),
+    )
+    conn.commit()
+
+
 def _bulk_delete_request(version_ids, key=IDEMPOTENCY_KEY):
     return BulkDeleteTranscriptVersionsRequest(
         version_ids=list(version_ids), request_idempotency_key=key
@@ -2123,7 +2151,6 @@ def test_bulk_delete_removes_deletable_version_row_and_artifact(tmp_path, monkey
     [
         (PUBLISHED_VERSION_ID, "head", "当前正式版本不能删除，请先发布其它版本替换后再试。"),
         ("55555555-5555-4555-8555-555555555556", "published", "已发布或正在发布的转录版本不能删除。"),
-        (AWAITING_VERSION_ID, "awaiting_review", "待审核的转录版本不能删除，请先完成审核。"),
         (
             REFERENCING_VERSION_ID,
             "derived_from",
@@ -2148,8 +2175,6 @@ def test_bulk_delete_refuses_protected_versions(
         _seed_transcript_version(
             conn, version_id, publication_status="published", created_at=13
         )
-    elif seed == "awaiting_review":
-        _seed_transcript_version(conn, version_id, review_status="awaiting_review")
     else:
         # `derived_from_version_id` marks a manual revision that keeps deriving
         # from this version, so the reference must keep refusing the delete.
@@ -2181,6 +2206,72 @@ def test_bulk_delete_refuses_protected_versions(
         assert artifact.exists()
     finally:
         conn.close()
+
+
+def test_bulk_delete_removes_an_awaiting_review_version_and_its_metadata_revision(
+    tmp_path, monkeypatch
+):
+    """An unreviewed attempt is deletable, including its own metadata revision row.
+
+    `register_metadata_revision` stores the version in `awaiting_review` together
+    with a `media_metadata_revisions` row whose FK onto `transcript_versions` is
+    RESTRICT, so deleting the version has to clear that owner row in the same
+    transaction. The newer version in `derived_from_version_id` keeps refusing
+    (covered above); this version is only awaiting review.
+    """
+    import api.routes_transcription as routes_transcription
+
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    seed_admin_user(conn)
+    head_id = _seed_published_head(conn)
+    artifact = _write_managed_artifact(tmp_path, f"markdown/{AWAITING_VERSION_ID}.md")
+    _seed_transcript_version(conn, AWAITING_VERSION_ID, review_status="awaiting_review")
+    _seed_metadata_revision(
+        conn,
+        revision_id="aaaaaaaa-2222-4222-8222-222222222222",
+        version_id=AWAITING_VERSION_ID,
+        base_version_id=head_id,
+    )
+    db_path = _transcript_version_delete_connect(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        routes_transcription,
+        "TRANSCRIPTION_ARTIFACT_DIR",
+        (tmp_path / "artifacts").resolve(),
+    )
+    try:
+        result = routes_transcription.bulk_delete_transcript_versions(
+            MEDIA_ID, _bulk_delete_request([AWAITING_VERSION_ID]), ADMIN
+        )
+
+        assert (result.deleted_count, result.skipped_count) == (1, 0)
+        assert [item.model_dump() for item in result.items] == [
+            {"version_id": AWAITING_VERSION_ID, "status": "deleted", "reason": None}
+        ]
+        assert not artifact.exists()
+    finally:
+        conn.close()
+
+    check = sqlite3.connect(db_path)
+    check.row_factory = sqlite3.Row
+    try:
+        assert check.execute(
+            "SELECT 1 FROM transcript_versions WHERE id=?", (AWAITING_VERSION_ID,)
+        ).fetchone() is None
+        # The owner row is gone too, so no dangling RESTRICT reference is left.
+        assert check.execute(
+            "SELECT 1 FROM media_metadata_revisions WHERE transcript_version_id=?",
+            (AWAITING_VERSION_ID,),
+        ).fetchone() is None
+        # The published head and its rows are untouched.
+        assert check.execute(
+            "SELECT current_version_id FROM media_transcript_heads WHERE media_id=?",
+            (MEDIA_ID,),
+        ).fetchone()[0] == head_id
+        assert check.execute(
+            "SELECT 1 FROM transcript_versions WHERE id=?", (head_id,)
+        ).fetchone() is not None
+    finally:
+        check.close()
 
 
 def test_bulk_delete_removes_a_superseded_version_and_clears_the_reference(

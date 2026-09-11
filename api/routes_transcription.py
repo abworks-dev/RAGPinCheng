@@ -1306,7 +1306,6 @@ _TRANSCRIPT_VERSION_DELETE_REASONS = {
     "not_in_media": "该转录版本不属于当前视频。",
     "current_head": "当前正式版本不能删除，请先发布其它版本替换后再试。",
     "published": "已发布或正在发布的转录版本不能删除。",
-    "awaiting_review": "待审核的转录版本不能删除，请先完成审核。",
     "referenced_derived_from": "该转录版本是人工校对稿的来源版本，不能删除。",
     "legacy_manual": "手工上传的历史转录稿不能在此删除。",
 }
@@ -1343,11 +1342,14 @@ def _transcript_version_unavailable_reason(
     normal chain supersedes the previous one, so treating that reference as a
     blocker made the whole batch-delete feature unusable. The caller clears
     those references in the same transaction before deleting the row.
+    A version *awaiting review* is deletable too: an unreviewed attempt is
+    disposable, and the product decision is that deleting it withdraws the
+    attempt rather than forcing the reviewer to finish the review first.
     A `derived_from_version_id` reference still refuses the delete, because a
     manual revision keeps deriving from its source version.
     """
     row = conn.execute(
-        """SELECT media_id,publication_status,review_status FROM transcript_versions WHERE id=?""",
+        """SELECT media_id,publication_status FROM transcript_versions WHERE id=?""",
         (version_id,),
     ).fetchone()
     if row is None:
@@ -1356,8 +1358,6 @@ def _transcript_version_unavailable_reason(
         return "not_in_media"
     if str(row["publication_status"]) != "not_published":
         return "published"
-    if str(row["review_status"]) == "awaiting_review":
-        return "awaiting_review"
     if conn.execute(
         "SELECT 1 FROM media_transcript_heads WHERE media_id=? AND current_version_id=?",
         (media_id, version_id),
@@ -1424,6 +1424,15 @@ def _delete_transcript_version_row(
             (version_id,),
         )
         conn.execute("DELETE FROM transcript_version_artifacts WHERE version_id=?", (version_id,))
+        # A metadata revision is owned by the version it proposes: the row is
+        # inserted for that version's id in the same transaction that creates it
+        # (always in `awaiting_review`), and `activate_metadata_revision` refuses
+        # to activate it once this version is gone. Its FK is RESTRICT, so the
+        # owner has to remove it here or the version row cannot be deleted at all.
+        conn.execute(
+            "DELETE FROM media_metadata_revisions WHERE transcript_version_id=?",
+            (version_id,),
+        )
         deleted = conn.execute(
             "DELETE FROM transcript_versions WHERE id=? AND media_id=?",
             (version_id, media_id),
@@ -1544,10 +1553,11 @@ def bulk_delete_transcript_versions(
     """Permanently delete never-published old transcript versions of one video.
 
     Every item is validated and committed on its own, so a version that is the
-    current head, published, awaiting review or still referenced through
+    current head, published, or still referenced through
     `derived_from_version_id` only refuses itself. A version that is merely
     superseded by newer versions is deletable: those `supersedes_version_id`
-    references are cleared in the same transaction. The same
+    references are cleared in the same transaction. So is a version that is
+    still awaiting review: deleting it withdraws the unreviewed attempt. The same
     `request_idempotency_key` replays the first result instead of deleting twice.
     """
     if not body.version_ids or len(body.version_ids) > _TRANSCRIPT_VERSIONS_DELETE_LIMIT:
