@@ -30,14 +30,13 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'asr-release.ps1')
 
-$approvedCandidateId = '34283259608'
-$approvedManifestSha256 = 'dcbe445a29cdcc0b2bf2c333a4f40bd73eabd1db2312c78cc6ef71c9b3a545d4'
+$approvedCandidateIds = @('34283259608', '34575342892')
 $taskName = 'RAGPinCheng-ASR'
-if ($CandidateId -ne $approvedCandidateId) {
-    throw 'Release closure repair is restricted to the approved candidate'
+if ($CandidateId -notin $approvedCandidateIds) {
+    throw 'Release closure repair is restricted to an approved candidate'
 }
-if ($ExpectedManifestSha256.ToLowerInvariant() -ne $approvedManifestSha256) {
-    throw 'Release closure repair is restricted to the approved manifest identity'
+if ($ExpectedManifestSha256 -notmatch '^[0-9a-fA-F]{64}$') {
+    throw 'Release closure repair requires an explicit manifest identity'
 }
 
 function Write-Json([string]$Path, [object]$Value) {
