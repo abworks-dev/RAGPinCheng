@@ -1,6 +1,7 @@
 """FIFO, single-active, fail-closed ASR scheduler."""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from enum import Enum
 from threading import Event, Lock, RLock
@@ -33,6 +34,50 @@ class BgePriorityDecision(Enum):
     pause_probe_unavailable = "pause_probe_unavailable"
 
 
+DEFAULT_CHUNK_DURATION_MS = 30_000
+DEFAULT_CHUNK_OVERLAP_MS = 500
+
+
+def _positive_env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not str(raw).strip():
+        return default
+    try:
+        value = int(str(raw).strip())
+    except ValueError as exc:
+        raise ContractValidationError("invalid_chunk_configuration", name) from exc
+    if value <= 0:
+        raise ContractValidationError("invalid_chunk_configuration", name)
+    return value
+
+
+def _non_negative_env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not str(raw).strip():
+        return default
+    try:
+        value = int(str(raw).strip())
+    except ValueError as exc:
+        raise ContractValidationError("invalid_chunk_configuration", name) from exc
+    if value < 0:
+        raise ContractValidationError("invalid_chunk_configuration", name)
+    return value
+
+
+def resolve_chunk_window_configuration() -> tuple[int, int]:
+    """Read the chunk window configuration from the service environment.
+
+    The window configuration lives here rather than in ``config.py`` on purpose:
+    both engine runtime contracts include ``config.py``, and the chunk window is
+    pure scheduler behaviour that must not invalidate engine qualification.
+    """
+    duration_ms = _positive_env_int("ASR_CHUNK_DURATION_MS", DEFAULT_CHUNK_DURATION_MS)
+    overlap_ms = _non_negative_env_int("ASR_CHUNK_OVERLAP_MS", DEFAULT_CHUNK_OVERLAP_MS)
+    if overlap_ms >= duration_ms:
+        raise ContractValidationError("invalid_chunk_configuration", "ASR_CHUNK_OVERLAP_MS")
+    return duration_ms, overlap_ms
+
+
 class BgePriorityProbe(Protocol):
     def allow_next_asr_chunk(self) -> BgePriorityDecision: ...
 
@@ -54,9 +99,9 @@ class Scheduler:
     failure_limit: int = 3
     enabled: bool = False
     disk_allows: Callable[[], bool] = lambda: True
-    chunk_duration_ms: int = 30_000
-    chunk_overlap_ms: int = 1_000
-    audio_window_extractor: Callable[..., bytes] = lambda content, **_: content
+    chunk_duration_ms: int | None = None
+    chunk_overlap_ms: int | None = None
+    audio_window_extractor: Callable[..., bytes] = extract_audio_window
     _queue: list[str] = field(default_factory=list, init=False)
     _active_lock: Lock = field(default_factory=Lock, init=False)
     _state_lock: RLock = field(default_factory=RLock, init=False)
@@ -67,6 +112,14 @@ class Scheduler:
     def __post_init__(self) -> None:
         if self.queue_limit <= 0 or self.failure_limit <= 0:
             raise ContractValidationError("integer_out_of_range", "scheduler")
+        if self.chunk_duration_ms is None or self.chunk_overlap_ms is None:
+            duration_ms, overlap_ms = resolve_chunk_window_configuration()
+            if self.chunk_duration_ms is None:
+                self.chunk_duration_ms = duration_ms
+            if self.chunk_overlap_ms is None:
+                self.chunk_overlap_ms = overlap_ms
+        if self.chunk_duration_ms <= 0 or self.chunk_overlap_ms < 0 or self.chunk_overlap_ms >= self.chunk_duration_ms:
+            raise ContractValidationError("invalid_chunk_configuration", "scheduler")
         for job in self.repo.recover():
             if job.state is ServiceJobState.paused:
                 job = job.transition(ServiceJobState.queued)

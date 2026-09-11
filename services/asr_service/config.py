@@ -51,7 +51,6 @@ class AsrServiceSettings:
     whisperx_align_model_manifest_path: Path | None = None
     qwen3_language_policy: str = "forced-chinese"
     qwen3_timing_diagnostics: bool = False
-    chunk_overlap_ms: int = 500
 
     @classmethod
     def from_env(cls) -> "AsrServiceSettings":
@@ -64,7 +63,7 @@ class AsrServiceSettings:
             int(os.getenv("ASR_MAX_INPUT_BYTES", str(2 * 1024**3))),
             int(os.getenv("ASR_UPLOAD_PART_BYTES", str(8 * 1024**2))),
             int(os.getenv("ASR_MAX_QUEUE_LENGTH", "8")),
-            int(os.getenv("ASR_CHUNK_DURATION_MS", "30000")),
+            int(os.getenv("ASR_CHUNK_DURATION_MS", "300000")),
             int(os.getenv("ASR_CONSECUTIVE_FAILURE_LIMIT", "3")),
             os.getenv("BGE_PRIORITY_PROBE_URL", ""),
             os.getenv("BGE_PRIORITY_PROBE_TOKEN", ""),
@@ -86,7 +85,6 @@ class AsrServiceSettings:
             _optional_path("ASR_WHISPERX_ALIGN_MODEL_MANIFEST_PATH"),
             os.getenv("ASR_QWEN3_LANGUAGE_POLICY", "forced-chinese").strip(),
             _enabled("ASR_QWEN3_TIMING_DIAGNOSTICS"),
-            int(os.getenv("ASR_CHUNK_OVERLAP_MS", "500")),
         )
 
     def validate_for_startup(self) -> None:
@@ -166,8 +164,6 @@ class AsrServiceSettings:
             not self.host or self.port <= 0 or self.port > 65535
             or self.max_input_bytes <= 0 or self.max_upload_part_bytes <= 0
             or self.max_queue_length <= 0 or self.chunk_duration_ms <= 0
-            or self.chunk_overlap_ms < 0
-            or self.chunk_overlap_ms >= self.chunk_duration_ms
             or self.consecutive_failure_limit <= 0
             or self.bge_probe_connect_timeout_seconds <= 0
             or self.bge_probe_request_timeout_seconds <= 0

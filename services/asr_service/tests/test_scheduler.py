@@ -20,6 +20,11 @@ from src.transcription.runtime_ports import InputPart
 from src.transcription.types import ContractValidationError, TranscriptionInputRef
 
 
+def identity_window_extractor(content, **kwargs):
+    """Test seam: fake engines consume synthetic bytes, not real audio."""
+    return content
+
+
 def queued_job(repo, *, request_id="1" * 64, data=b"hello"):
     ref = TranscriptionInputRef(
         "11111111-1111-4111-8111-111111111111",
@@ -51,6 +56,9 @@ def scheduler(tmp_path, *, mode="success", decision=BgePriorityDecision.allow, e
         FixedBgePriorityProbe(decision),
         enabled=enabled,
         disk_allows=lambda: disk,
+        # Fake engines consume synthetic bytes, so the scheduler must not run the
+        # production PyAV window decoder in unit tests.
+        audio_window_extractor=lambda content, **_: content,
     )
     return repo, value
 
@@ -175,6 +183,7 @@ def test_restart_requeues_running_job_through_gate(tmp_path):
         EngineRegistry((EngineRegistration(FakeEngine(), SENSEVOICE_SERVICE_CONFIG),)),
         FixedBgePriorityProbe(BgePriorityDecision.allow),
         enabled=True,
+        audio_window_extractor=identity_window_extractor,
     )
     assert repo.get(job.job_id).state is ServiceJobState.queued
     assert service._queue == [job.job_id]
@@ -197,6 +206,7 @@ def test_consecutive_failure_limit_pauses_following_job(tmp_path):
         FixedBgePriorityProbe(BgePriorityDecision.allow),
         failure_limit=1,
         enabled=True,
+        audio_window_extractor=identity_window_extractor,
     )
     assert service.run_next().state is ServiceJobState.failed
     paused = service.run_next()
@@ -246,6 +256,7 @@ def test_cancel_during_engine_execution_never_writes_result_or_success(tmp_path)
         ),
         FixedBgePriorityProbe(BgePriorityDecision.allow),
         enabled=True,
+        audio_window_extractor=identity_window_extractor,
     )
     completed = service.run_next()
     assert completed.state is ServiceJobState.cancelled

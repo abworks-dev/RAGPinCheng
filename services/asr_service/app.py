@@ -18,7 +18,6 @@ from src.transcription.runtime_ports import InputPart
 from src.transcription.types import ContractValidationError
 
 from .auth import require_bearer
-from .audio import extract_audio_window
 from .bge_priority_probe import HttpBgePriorityProbe
 from .config import AsrServiceSettings
 from .engine_protocol import (
@@ -187,9 +186,6 @@ def create_app(
             queue_limit=settings.max_queue_length,
             failure_limit=settings.consecutive_failure_limit,
             enabled=settings.enabled,
-            chunk_duration_ms=settings.chunk_duration_ms,
-            chunk_overlap_ms=settings.chunk_overlap_ms,
-            audio_window_extractor=extract_audio_window,
         )
     stop_event = Event()
 

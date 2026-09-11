@@ -40,6 +40,7 @@ def test_health_is_minimal_and_v1_routes_require_bearer(tmp_path):
         EngineRegistry((EngineRegistration(FakeEngine(), SENSEVOICE_SERVICE_CONFIG),)),
         FixedBgePriorityProbe(BgePriorityDecision.allow),
         enabled=True,
+        audio_window_extractor=lambda content, **_: content,
     )
     client = TestClient(create_app(config, scheduler))
     health = client.get("/health")
