@@ -25,6 +25,11 @@ def identity_window_extractor(content, **kwargs):
     return content
 
 
+def identity_audio_decoder(content):
+    """Test seam: synthetic job payloads are already the decoded stand-in."""
+    return content
+
+
 def queued_job(repo, *, request_id="1" * 64, data=b"hello"):
     ref = TranscriptionInputRef(
         "11111111-1111-4111-8111-111111111111",
@@ -59,6 +64,7 @@ def scheduler(tmp_path, *, mode="success", decision=BgePriorityDecision.allow, e
         # Fake engines consume synthetic bytes, so the scheduler must not run the
         # production PyAV window decoder in unit tests.
         audio_window_extractor=lambda content, **_: content,
+        audio_decoder=identity_audio_decoder,
     )
     return repo, value
 
@@ -66,6 +72,11 @@ def scheduler(tmp_path, *, mode="success", decision=BgePriorityDecision.allow, e
 def test_scheduler_splits_audio_windows_and_checkpoints_each_core_range(tmp_path):
     repo = LocalJobRepository(tmp_path, 1024)
     calls = []
+    decode_calls = []
+
+    def decoder(content):
+        decode_calls.append(content)
+        return content
 
     def extractor(content, *, start_ms, end_ms):
         calls.append((start_ms, end_ms))
@@ -79,6 +90,7 @@ def test_scheduler_splits_audio_windows_and_checkpoints_each_core_range(tmp_path
         enabled=True,
         chunk_duration_ms=400,
         chunk_overlap_ms=100,
+        audio_decoder=decoder,
         audio_window_extractor=extractor,
     )
     service.enqueue(job.job_id)
@@ -87,6 +99,8 @@ def test_scheduler_splits_audio_windows_and_checkpoints_each_core_range(tmp_path
 
     assert completed.state is ServiceJobState.succeeded
     assert calls == [(0, 500), (300, 900), (700, 1000)]
+    # The upload must be decoded exactly once per job, then sliced per window.
+    assert len(decode_calls) == 1
     checkpoint = repo.checkpoint(job.job_id)
     assert checkpoint is not None
     assert checkpoint.next_chunk_index == 3
@@ -184,6 +198,7 @@ def test_restart_requeues_running_job_through_gate(tmp_path):
         FixedBgePriorityProbe(BgePriorityDecision.allow),
         enabled=True,
         audio_window_extractor=identity_window_extractor,
+        audio_decoder=identity_audio_decoder,
     )
     assert repo.get(job.job_id).state is ServiceJobState.queued
     assert service._queue == [job.job_id]
@@ -207,6 +222,7 @@ def test_consecutive_failure_limit_pauses_following_job(tmp_path):
         failure_limit=1,
         enabled=True,
         audio_window_extractor=identity_window_extractor,
+        audio_decoder=identity_audio_decoder,
     )
     assert service.run_next().state is ServiceJobState.failed
     paused = service.run_next()
@@ -257,6 +273,7 @@ def test_cancel_during_engine_execution_never_writes_result_or_success(tmp_path)
         FixedBgePriorityProbe(BgePriorityDecision.allow),
         enabled=True,
         audio_window_extractor=identity_window_extractor,
+        audio_decoder=identity_audio_decoder,
     )
     completed = service.run_next()
     assert completed.state is ServiceJobState.cancelled
