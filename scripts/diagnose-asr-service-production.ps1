@@ -161,8 +161,16 @@ $startupPreflightStatus = if (
 
 $connections = @(Get-NetTCPConnection -LocalPort 8200 -State Listen -ErrorAction SilentlyContinue)
 $listenerOwned = $connections.Count -gt 0
+$listenerCommandLine = ""
+$listenerExecutableName = ""
 foreach ($processId in @($connections | Select-Object -ExpandProperty OwningProcess -Unique)) {
     $process = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $processId) -ErrorAction SilentlyContinue
+    if ($null -ne $process) {
+        $listenerExecutableName = [IO.Path]::GetFileName([string]$process.ExecutablePath)
+        $rawCommandLine = [string]$process.CommandLine
+        if ($rawCommandLine.Length -gt 300) { $rawCommandLine = $rawCommandLine.Substring(0, 300) }
+        $listenerCommandLine = $rawCommandLine
+    }
     if (
         $null -eq $process -or
         [IO.Path]::GetFileName([string]$process.ExecutablePath) -ne "python.exe" -or
@@ -351,6 +359,8 @@ $report = [ordered]@{
     task_last_run_age_seconds = if ($null -ne $taskInfo) { [int64]([DateTime]::Now - $taskInfo.LastRunTime).TotalSeconds } else { $null }
     listener_count = $connections.Count
     listener_owned = [bool]$listenerOwned
+    listener_executable_name = $listenerExecutableName
+    listener_command_line = $listenerCommandLine
     health_outcome = $healthOutcome
     health_status = $healthStatus
     health_api_version = $healthApiVersion

@@ -208,21 +208,24 @@ function Stop-VerifiedListeners {
         throw "Unable to resolve the ASR venv base Python executable"
     }
     $basePython = (Resolve-Path -LiteralPath ([string]$baseOutput).Trim()).Path
-    $expectedCommandLines = @(
-        '"{0}" -m uvicorn {1} --factory --host 0.0.0.0 --port 8200' -f $basePython, $AppModule,
-        # The release start path may add -B to keep bytecode out of the
-        # content-addressed release tree; both forms are owned.
-        '"{0}" -B -m uvicorn {1} --factory --host 0.0.0.0 --port 8200' -f $basePython, $AppModule
-    )
+    $venvPython = (Resolve-Path -LiteralPath $python).Path
+    $ownedExecutables = @($basePython, $venvPython)
+    $modulePattern = '(?i)-m\s+uvicorn\s+{0}\s+--factory' -f [regex]::Escape($AppModule)
     foreach ($processId in @(
         Get-NetTCPConnection -LocalPort 8200 -State Listen -ErrorAction SilentlyContinue |
             Select-Object -ExpandProperty OwningProcess -Unique
     )) {
         $process = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $processId)
+        # Ownership is interpreter + module + port, not an exact argument string:
+        # the release start path may add flags such as -B, and a previous failed
+        # rollback may start the same release with extra arguments. Enumerating
+        # exact command lines made every stop, promote and rollback refuse.
+        $commandLine = [string]$process.CommandLine
         if (
             $null -eq $process -or
-            [string]$process.ExecutablePath -ne $basePython -or
-            [string]$process.CommandLine -notin $expectedCommandLines
+            [string]$process.ExecutablePath -notin $ownedExecutables -or
+            $commandLine -notmatch $modulePattern -or
+            $commandLine -notmatch '(?i)--port\s+8200'
         ) {
             throw "Refusing to stop an unexpected process listening on TCP 8200"
         }

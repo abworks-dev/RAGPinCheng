@@ -634,12 +634,14 @@ def test_running_asr_is_verified_and_stopped_before_application_swap():
     assert listener_guard < hot_update < swap
     assert '[string]$Task.Principal.UserId -ne "Administrator"' in deploy
     assert '[string]$Task.Principal.LogonType -ne "S4U"' in deploy
-    assert '[string]$process.ExecutablePath -ne $basePython' in deploy
-    # Both owned uvicorn invocation forms are accepted: the release start path
-    # may add -B to keep bytecode out of the content-addressed release tree, and
-    # a mismatch here previously made every stop and rollback refuse to run.
-    assert '[string]$process.CommandLine -notin $expectedCommandLines' in deploy
-    assert '" -B -m uvicorn services.asr_service.app:create_app ' in deploy
+    # Ownership is interpreter + module + port rather than one exact argument
+    # string: the release start path may add flags such as -B, and a previous
+    # failed rollback can start the same release with extra arguments. Enumerating
+    # exact command lines previously made every stop, promote and rollback refuse.
+    assert '[string]$process.ExecutablePath -notin $ownedExecutables' in deploy
+    assert "'(?i)-m\\s+uvicorn\\s+services\\.asr_service\\.app:create_app\\s+--factory'" in deploy
+    assert "$commandLine -notmatch '(?i)--port\\s+8200'" in deploy
+    assert "& $python -B -m uvicorn" in read("scripts/start-asr-service.ps1")
     assert "Refusing to stop an unexpected process listening on TCP 8200" in deploy
     assert deploy.index("Assert-TaskIsOurs -Task $task", task_guard) < deploy.index(
         "Stop-ScheduledTask -TaskName $taskName", task_guard

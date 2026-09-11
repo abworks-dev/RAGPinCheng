@@ -70,16 +70,20 @@ function Get-OwnedListenerIds {
     $baseOutput = & $venvPython -c "import sys; print(sys._base_executable)"
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($baseOutput)) { throw "Unable to resolve active ASR base Python" }
     $basePython = (Resolve-Path -LiteralPath ([string]$baseOutput).Trim()).Path
-    $expected = @(
-        '"{0}" -m uvicorn {1} --factory --host 0.0.0.0 --port 8200' -f $basePython, $Context.module,
-        # The release start path may add -B to keep bytecode out of the
-        # content-addressed release tree; both forms are owned.
-        '"{0}" -B -m uvicorn {1} --factory --host 0.0.0.0 --port 8200' -f $basePython, $Context.module
-    )
+    $venvPython = (Resolve-Path -LiteralPath $venvPython).Path
+    $ownedExecutables = @($basePython, $venvPython)
+    $modulePattern = '(?i)-m\s+uvicorn\s+{0}\s+--factory' -f [regex]::Escape($Context.module)
     $ids = @()
     foreach ($processId in @(Get-NetTCPConnection -LocalPort 8200 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)) {
         $process = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $processId)
-        if ($null -eq $process -or [string]$process.ExecutablePath -ne $basePython -or [string]$process.CommandLine -notin $expected) {
+        # Ownership is interpreter + module + port, not an exact argument string.
+        $commandLine = [string]$process.CommandLine
+        if (
+            $null -eq $process -or
+            [string]$process.ExecutablePath -notin $ownedExecutables -or
+            $commandLine -notmatch $modulePattern -or
+            $commandLine -notmatch '(?i)--port\s+8200'
+        ) {
             throw "Refusing to modify an unexpected process listening on TCP 8200"
         }
         $ids += $processId
