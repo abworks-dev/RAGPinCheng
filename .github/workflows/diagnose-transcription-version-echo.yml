@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       media_title_like:
-        description: "Media title substring to inspect"
+        description: "Media title substring, or '-' to scan the most recent versions of every media"
         required: true
         default: "2.4.10"
         type: string
@@ -94,7 +94,46 @@ jobs:
           like = f"%{os.environ.get('TITLE_LIKE', '2.4.10')}%"
           connection = sqlite3.connect(f"file:{APP_DB_PATH}?mode=ro", uri=True)
           connection.row_factory = sqlite3.Row
-          media = connection.execute(
+          if os.environ.get("TITLE_LIKE", "").strip() in {"-", "*", ""}:
+              # Global sweep: find every recent version whose stored text contains
+              # the prompt-echo pattern, so the reported artefact can be located.
+              rows = connection.execute(
+                  """SELECT v.id AS version_id, v.created_at, v.scheme_id, m.title,
+                            v.canonical_json, v.markdown_rel_path
+                     FROM transcript_versions v JOIN media_assets m ON m.media_id=v.media_id
+                     ORDER BY v.created_at DESC LIMIT 300"""
+              ).fetchall()
+              print(json.dumps({"scan": "global", "versions_scanned": len(rows)}, ensure_ascii=False))
+              offenders = 0
+              for row in rows:
+                  hits = 0
+                  samples = []
+                  try:
+                      canonical = json.loads(row["canonical_json"])
+                      for segment in canonical.get("segments") or []:
+                          text = str(segment.get("text", ""))
+                          if any(marker in text for marker in MARKERS) and sum(
+                              term.casefold() in text.casefold() for term in TERMS
+                          ) >= 3:
+                              hits += 1
+                              if len(samples) < 2:
+                                  samples.append(text[:100])
+                  except Exception:
+                      pass
+                  markdown_hits, markdown_samples = scan(read_artifact(row["markdown_rel_path"]))
+                  if hits or markdown_hits:
+                      offenders += 1
+                      print(
+                          "  ECHO version", row["version_id"], "media:", row["title"],
+                          "scheme:", row["scheme_id"], "created_at:", row["created_at"],
+                          "canonical_hits:", hits, "markdown_hits:", markdown_hits,
+                      )
+                      for sample in samples[:2]:
+                          print("    canonical echo:", sample)
+                      for sample in markdown_samples[:2]:
+                          print("    markdown echo:", sample)
+              print(json.dumps({"offending_versions": offenders}, ensure_ascii=False))
+          media = [] if os.environ.get("TITLE_LIKE", "").strip() in {"-", "*", ""} else connection.execute(
               "SELECT media_id,title,status,error FROM media_assets WHERE title LIKE ? ORDER BY updated_at DESC LIMIT 3",
               (like,),
           ).fetchall()
