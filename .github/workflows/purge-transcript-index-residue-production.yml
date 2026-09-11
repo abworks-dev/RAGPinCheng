@@ -1,0 +1,510 @@
+name: Purge Transcript Index Residue Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character merged master SHA to execute"
+        required: true
+        type: string
+      purge_run_id:
+        description: "Transcript version purge run id whose snapshot names the removed index targets"
+        required: true
+        default: "34652290722"
+        type: string
+      operation:
+        description: "Inventory the retrieval residue, apply the approved cleanup, or restore the captured points and parent rows"
+        required: true
+        default: preview
+        type: choice
+        options:
+          - preview
+          - apply
+          - restore
+      preview_manifest_sha256:
+        description: "Exact preview manifest SHA-256; required for apply"
+        required: false
+        type: string
+      backup_file:
+        description: "Residue backup JSONL file name inside the app data directory; required for restore"
+        required: false
+        type: string
+      confirm_purge:
+        description: "Confirm the destructive retrieval index residue purge"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-app-manual-v1
+  cancel-in-progress: false
+
+jobs:
+  purge:
+    if: ${{ inputs.confirm_purge == true }}
+    environment: production-asr
+    runs-on: [self-hosted, linux, ubuntu, production, app]
+    timeout-minutes: 30
+    env:
+      COMPOSE_OVERRIDE: ${{ vars.PRODUCTION_APP_COMPOSE_OVERRIDE }}
+      COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
+      REPO_PATH: ${{ vars.PRODUCTION_APP_REPO_PATH }}
+      OPERATION: ${{ inputs.operation }}
+      PURGE_RUN_ID: ${{ inputs.purge_run_id }}
+      EXPECTED_MANIFEST_SHA256: ${{ inputs.preview_manifest_sha256 }}
+      BACKUP_FILE: ${{ inputs.backup_file }}
+      RUN_ID: ${{ github.run_id }}
+    steps:
+      - name: Validate immutable revision and cleanup gate
+        run: |
+          if [[ ! "${{ inputs.commit_sha }}" =~ ^[0-9a-fA-F]{40}$ ]]; then echo "commit_sha must be a full SHA"; exit 1; fi
+          if [[ "${{ inputs.commit_sha }}" != "${{ github.sha }}" ]]; then echo "commit_sha must equal the dispatch revision"; exit 1; fi
+          if [[ "${{ github.ref }}" != "refs/heads/master" ]]; then echo "cleanup must run from master"; exit 1; fi
+          if [[ ! "$PURGE_RUN_ID" =~ ^[0-9]{1,20}$ ]]; then echo "purge_run_id is invalid"; exit 1; fi
+          if [[ "$OPERATION" == "apply" && ! "$EXPECTED_MANIFEST_SHA256" =~ ^[0-9a-fA-F]{64}$ ]]; then echo "apply requires preview_manifest_sha256"; exit 1; fi
+          if [[ "$OPERATION" == "restore" && ! "$BACKUP_FILE" =~ ^[A-Za-z0-9._-]+$ ]]; then echo "restore requires backup_file"; exit 1; fi
+
+      - name: Check out requested revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Run the residue inventory, or apply the approved cleanup
+        if: ${{ inputs.operation != 'restore' }}
+        run: |
+          set -euo pipefail
+          COMPOSE=(docker compose -p ragpincheng-prod \
+            -f "${REPO_PATH}/docker/docker-compose.yml" \
+            -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
+          "${COMPOSE[@]}" ps -q backend | grep -q . || { echo "production backend container is not running"; exit 1; }
+          "${COMPOSE[@]}" exec -T -e OPERATION="${OPERATION}" -e PURGE_RUN_ID="${PURGE_RUN_ID}" \
+            -e EXPECTED_MANIFEST_SHA256="${EXPECTED_MANIFEST_SHA256}" -e RUN_ID="${RUN_ID}" \
+            backend python - <<'PY' | tee "$RUNNER_TEMP/index-residue.txt"
+          import hashlib
+          import json
+          import os
+          import re
+          import sqlite3
+          import time
+          from pathlib import Path
+
+          from src.config import APP_DB_PATH, COLLECTION, PARENTS_DB, QDRANT_URL
+          from qdrant_client import QdrantClient
+          from qdrant_client.http import models as qmodels
+
+          OPERATION = os.environ["OPERATION"]
+          DATA_DIR = Path(APP_DB_PATH).parent
+          SNAPSHOT_PATH = DATA_DIR / f"transcript-versions-purge-{os.environ['PURGE_RUN_ID']}.jsonl"
+
+
+          TARGET_PATTERN = re.compile(r"^transcript-candidate-(?P<version>.+)-a(?P<attempt>[0-9]+)$")
+
+
+          def load_removed_identities():
+              """Recover the index identities of the purged transcript versions."""
+              if not SNAPSHOT_PATH.is_file():
+                  raise SystemExit(f"purge snapshot not found: {SNAPSHOT_PATH.name}")
+              targets: set[str] = set()
+              version_media: dict[str, str] = {}
+              with SNAPSHOT_PATH.open(encoding="utf-8") as handle:
+                  for line in handle:
+                      try:
+                          entry = json.loads(line)
+                      except json.JSONDecodeError:
+                          continue
+                      row = entry.get("row") or {}
+                      if entry.get("table") == "transcript_publication_index_jobs" and row.get("target_index_id"):
+                          targets.add(str(row["target_index_id"]))
+                      if entry.get("table") == "transcript_versions" and row.get("id") and row.get("media_id"):
+                          version_media[str(row["id"])] = str(row["media_id"])
+              if not targets:
+                  raise SystemExit("no removed publication index targets found in the snapshot")
+              media_ids = set()
+              for target in targets:
+                  match = TARGET_PATTERN.match(target)
+                  if match is None:
+                      raise SystemExit(f"unexpected publication target identity: {target}")
+                  media_id = version_media.get(match.group("version"))
+                  if media_id is None:
+                      raise SystemExit(f"publication target has no purged transcript version: {target}")
+                  media_ids.add(media_id)
+              return sorted(targets), sorted(media_ids)
+
+
+          def count_parents():
+              connection = sqlite3.connect(f"file:{PARENTS_DB}?mode=ro", uri=True)
+              try:
+                  return connection.execute("SELECT count(*) FROM parents").fetchone()[0]
+              finally:
+                  connection.close()
+
+
+          def identity_filter(targets, media_ids):
+              """OR over both identities so legacy points without a target are covered."""
+              should = [
+                  qmodels.FieldCondition(key="publication_target_id", match=qmodels.MatchValue(value=value))
+                  for value in targets
+              ]
+              should += [
+                  qmodels.FieldCondition(key="content_item_id", match=qmodels.MatchValue(value=f"media-transcript-{value}"))
+                  for value in media_ids
+              ]
+              return qmodels.Filter(should=should)
+
+
+          def collect_points(client, target_filter, media_filter):
+              """Return the residue points keyed by id, and the two match sets."""
+              by_target, by_media, points = set(), set(), {}
+              for selector, bucket in ((target_filter, by_target), (media_filter, by_media)):
+                  offset = None
+                  while True:
+                      batch, offset = client.scroll(
+                          collection_name=COLLECTION,
+                          scroll_filter=selector,
+                          limit=256,
+                          offset=offset,
+                          with_payload=True,
+                          with_vectors=True,
+                      )
+                      for point in batch:
+                          bucket.add(str(point.id))
+                          points[str(point.id)] = point
+                      if offset is None:
+                          break
+              return by_target, by_media, points
+
+
+          def serialize_vector(vector):
+              if isinstance(vector, dict):
+                  encoded = {}
+                  for name, value in vector.items():
+                      indices = getattr(value, "indices", None)
+                      values = getattr(value, "values", None)
+                      if indices is None and isinstance(value, dict):
+                          indices, values = value.get("indices"), value.get("values")
+                      encoded[name] = {"indices": list(indices), "values": list(values)} if indices is not None \
+                          else {"dense": list(value)}
+                  return encoded
+              return {"dense": list(vector)}
+
+
+          def deserialize_vector(encoded):
+              if set(encoded) == {"dense"}:
+                  return encoded["dense"]
+              restored = {}
+              for name, value in encoded.items():
+                  if "indices" in value:
+                      restored[name] = qmodels.SparseVector(indices=value["indices"], values=value["values"])
+                  else:
+                      restored[name] = value["dense"]
+              return restored
+
+
+          def collect_parent_rows(media_ids, targets):
+              connection = sqlite3.connect(f"file:{PARENTS_DB}?mode=ro", uri=True)
+              connection.row_factory = sqlite3.Row
+              media_placeholders = ",".join("?" for _ in media_ids)
+              target_placeholders = ",".join("?" for _ in targets)
+              by_media = {
+                  row["parent_id"]: dict(row)
+                  for row in connection.execute(
+                      f"SELECT * FROM parents WHERE media_id IN ({media_placeholders})", media_ids
+                  )
+              }
+              by_target = {
+                  row["parent_id"]: dict(row)
+                  for row in connection.execute(
+                      f"SELECT * FROM parents WHERE publication_target_id IN ({target_placeholders})", targets
+                  )
+              }
+              titles = {}
+              if media_ids:
+                  titles = {
+                      row["media_id"]: row["title"]
+                      for row in connection.execute(
+                          f"SELECT media_id,title FROM media_assets WHERE media_id IN ({media_placeholders})",
+                          media_ids,
+                      )
+                  }
+              connection.close()
+              union = dict(by_media)
+              union.update(by_target)
+              return by_target, by_media, union, titles
+
+
+          def digest_of(values):
+              joined = "\n".join(sorted(values))
+              return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+
+          targets, media_ids = load_removed_identities()
+          client = QdrantClient(url=QDRANT_URL)
+          collection_info = client.get_collection(COLLECTION)
+          by_target, by_media, points = collect_points(
+              client,
+              identity_filter(targets, []),
+              identity_filter([], media_ids),
+          )
+          parents_by_target, parents_by_media, parents_rows, titles = collect_parent_rows(media_ids, targets)
+
+          manifest = {
+              "schema_version": "transcript-index-residue-purge/1",
+              "purge_run_id": os.environ["PURGE_RUN_ID"],
+              "collection": COLLECTION,
+              "points_total": int(collection_info.points_count or 0),
+              "target_index_ids": targets,
+              "media_ids": media_ids,
+              "media_titles": [titles.get(media_id, media_id) for media_id in media_ids],
+              "points_by_target": len(by_target),
+              "points_by_media": len(by_media),
+              "points_union": len(points),
+              "points_media_only": len(by_media - by_target),
+              "point_ids_sha256": digest_of(points),
+              "parents_by_target": len(parents_by_target),
+              "parents_by_media": len(parents_by_media),
+              "parents_union": len(parents_rows),
+              "parent_ids_sha256": digest_of(parents_rows),
+              "parents_total": count_parents(),
+          }
+          canonical = json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+          digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+          print("RESIDUE_MANIFEST_JSON:" + canonical)
+          print("RESIDUE_MANIFEST_SHA256:" + digest)
+
+          if OPERATION == "preview":
+              print(json.dumps({"operation": "preview", "point_ids_sample": sorted(points)[:10]}, ensure_ascii=False))
+              raise SystemExit(0)
+
+          if digest != os.environ["EXPECTED_MANIFEST_SHA256"].lower():
+              raise SystemExit("retrieval residue changed since the approved preview; refusing to purge")
+
+          stamp = time.strftime("%Y%m%d-%H%M%S")
+          backup_path = DATA_DIR / f"transcript-index-residue-{os.environ['RUN_ID']}.jsonl"
+          parents_backup_path = DATA_DIR / f"parents.sqlite.pre-index-residue-{os.environ['RUN_ID']}"
+
+          with sqlite3.connect(f"file:{PARENTS_DB}?mode=ro", uri=True) as source:
+              with sqlite3.connect(parents_backup_path) as target:
+                  source.backup(target)
+                  integrity = target.execute("PRAGMA integrity_check").fetchone()[0]
+                  if integrity != "ok":
+                      raise SystemExit(f"parents backup integrity failed: {integrity}")
+
+          with open(backup_path, "w", encoding="utf-8") as handle:
+              handle.write(json.dumps({
+                  "schema_version": "transcript-index-residue-backup/1",
+                  "manifest_sha256": digest,
+                  "collection": COLLECTION,
+                  "created_at": stamp,
+                  "points": len(points),
+                  "parents": len(parents_rows),
+                  "parents_backup_file": parents_backup_path.name,
+              }, ensure_ascii=False) + "\n")
+              for point_id in sorted(points):
+                  point = points[point_id]
+                  handle.write(json.dumps({
+                      "kind": "qdrant_point",
+                      "id": point.id,
+                      "vector": serialize_vector(point.vector),
+                      "payload": point.payload,
+                  }, ensure_ascii=False, default=str) + "\n")
+              for parent_id in sorted(parents_rows):
+                  handle.write(json.dumps({
+                      "kind": "parents_row",
+                      "row": parents_rows[parent_id],
+                  }, ensure_ascii=False, default=str) + "\n")
+
+          with open(backup_path, encoding="utf-8") as handle:
+              captured_points = sum(1 for line in handle if '"qdrant_point"' in line)
+          if captured_points != len(points):
+              raise SystemExit("residue backup is incomplete; refusing to purge")
+
+          selection = identity_filter(targets, media_ids)
+          remover = getattr(client, "delete_points", None) or client.delete
+          remover(collection_name=COLLECTION, points_selector=qmodels.FilterSelector(filter=selection), wait=True)
+
+          connection = sqlite3.connect(PARENTS_DB)
+          try:
+              connection.execute("BEGIN IMMEDIATE")
+              deleted_parents = 0
+              parent_ids = sorted(parents_rows)
+              for start in range(0, len(parent_ids), 500):
+                  chunk = parent_ids[start:start + 500]
+                  deleted_parents += connection.execute(
+                      f"DELETE FROM parents WHERE parent_id IN ({','.join('?' for _ in chunk)})",
+                      chunk,
+                  ).rowcount
+              connection.commit()
+          except Exception:
+              connection.rollback()
+              raise
+          if media_ids:
+              parents_remaining = connection.execute(
+                  f"SELECT count(*) FROM parents WHERE media_id IN ({','.join('?' for _ in media_ids)})",
+                  media_ids,
+              ).fetchone()[0]
+          else:
+              parents_remaining = 0
+          parents_integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
+          connection.close()
+
+          remaining_target, remaining_media, remaining_points = collect_points(
+              client,
+              identity_filter(targets, []),
+              identity_filter([], media_ids),
+          )
+          print(json.dumps({
+              "operation": "apply",
+              "deleted_points": len(points),
+              "deleted_parents": deleted_parents,
+              "remaining_points_by_target": len(remaining_target),
+              "remaining_points_by_media": len(remaining_media),
+              "remaining_points_union": len(remaining_points),
+              "remaining_parents_for_media": parents_remaining,
+              "parents_integrity": parents_integrity,
+              "backup_file": backup_path.name,
+              "parents_backup_file": parents_backup_path.name,
+              "backup_bytes": backup_path.stat().st_size,
+              "parents_backup_bytes": parents_backup_path.stat().st_size,
+          }, ensure_ascii=False))
+          PY
+
+      - name: Extract the approved residue manifest
+        if: ${{ inputs.operation == 'preview' }}
+        run: |
+          set -euo pipefail
+          sed -n 's/^RESIDUE_MANIFEST_JSON://p' "$RUNNER_TEMP/index-residue.txt" | head -n 1 > "$RUNNER_TEMP/residue-manifest.json"
+          manifest_sha="$(sha256sum "$RUNNER_TEMP/residue-manifest.json" | cut -d' ' -f1)"
+          echo "approved_preview_manifest_sha256=$manifest_sha" >> "$GITHUB_STEP_SUMMARY"
+          echo "RESIDUE_MANIFEST_FILE_SHA256:$manifest_sha"
+          python3 - "$RUNNER_TEMP/residue-manifest.json" <<'PY'
+          import json
+          import sys
+
+          manifest = json.load(open(sys.argv[1], encoding="utf-8"))
+          print(json.dumps({
+              "collection": manifest["collection"],
+              "points_total": manifest["points_total"],
+              "points_union": manifest["points_union"],
+              "points_by_target": manifest["points_by_target"],
+              "points_by_media": manifest["points_by_media"],
+              "points_media_only": manifest["points_media_only"],
+              "parents_union": manifest["parents_union"],
+              "parents_total": manifest["parents_total"],
+              "media_titles": manifest["media_titles"],
+              "target_index_ids": manifest["target_index_ids"],
+          }, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Restore the captured points and parent rows
+        if: ${{ inputs.operation == 'restore' }}
+        run: |
+          set -euo pipefail
+          COMPOSE=(docker compose -p ragpincheng-prod \
+            -f "${REPO_PATH}/docker/docker-compose.yml" \
+            -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
+          "${COMPOSE[@]}" ps -q backend | grep -q . || { echo "production backend container is not running"; exit 1; }
+          "${COMPOSE[@]}" exec -T -e BACKUP_FILE="${BACKUP_FILE}" backend python - <<'PY'
+          import json
+          import sqlite3
+          from pathlib import Path
+
+          from src.config import APP_DB_PATH, COLLECTION, PARENTS_DB, QDRANT_URL
+          from qdrant_client import QdrantClient
+          from qdrant_client.http import models as qmodels
+
+          backup_path = Path(APP_DB_PATH).parent / os.environ["BACKUP_FILE"]
+          if not backup_path.is_file():
+              raise SystemExit(f"residue backup not found: {backup_path.name}")
+
+          def deserialize_vector(encoded):
+              if set(encoded) == {"dense"}:
+                  return encoded["dense"]
+              restored = {}
+              for name, value in encoded.items():
+                  if "indices" in value:
+                      restored[name] = qmodels.SparseVector(indices=value["indices"], values=value["values"])
+                  else:
+                      restored[name] = value["dense"]
+              return restored
+
+          header = None
+          points = []
+          rows = []
+          with backup_path.open(encoding="utf-8") as handle:
+              for line in handle:
+                  entry = json.loads(line)
+                  if "schema_version" in entry:
+                      header = entry
+                      continue
+                  if entry.get("kind") == "qdrant_point":
+                      points.append(qmodels.PointStruct(
+                          id=entry["id"],
+                          vector=deserialize_vector(entry["vector"]),
+                          payload=entry["payload"],
+                      ))
+                  elif entry.get("kind") == "parents_row":
+                      rows.append(entry["row"])
+          if header is None:
+              raise SystemExit("residue backup has no header")
+
+          client = QdrantClient(url=QDRANT_URL)
+          if points:
+              client.upsert(collection_name=COLLECTION, points=points, wait=True)
+
+          target_values = sorted({
+              str(point.payload["publication_target_id"])
+              for point in points
+              if point.payload and point.payload.get("publication_target_id")
+          })
+          restored_points = 0
+          for value in target_values:
+              restored_points += client.count(
+                  collection_name=COLLECTION,
+                  count_filter=qmodels.Filter(must=[
+                      qmodels.FieldCondition(key="publication_target_id", match=qmodels.MatchValue(value=value))
+                  ]),
+                  exact=True,
+              ).count
+
+          restored_rows = 0
+          if rows:
+              connection = sqlite3.connect(PARENTS_DB)
+              columns = [row[1] for row in connection.execute("PRAGMA table_info(parents)")]
+              insertable = [column for column in columns if any(column in row for row in rows)]
+              statement = (
+                  f"INSERT OR REPLACE INTO parents ({','.join(insertable)}) "
+                  f"VALUES ({','.join('?' for _ in insertable)})"
+              )
+              try:
+                  connection.execute("BEGIN IMMEDIATE")
+                  for row in rows:
+                      connection.execute(statement, [row.get(column) for column in insertable])
+                  connection.commit()
+                  restored_rows = len(rows)
+              except Exception:
+                  connection.rollback()
+                  raise
+              connection.close()
+
+          print(json.dumps({
+              "operation": "restore",
+              "restored_points": len(points),
+              "verified_points_by_target": restored_points,
+              "restored_parents": restored_rows,
+              "backup_file": backup_path.name,
+          }, ensure_ascii=False))
+          PY
+
+      - name: Publish sanitized summary
+        if: ${{ always() }}
+        run: |
+          {
+            echo "## Transcript retrieval index residue"
+            echo ""
+            echo "- Operation: \`$OPERATION\`"
+            echo "- See the job log for the residue manifest, deleted counts, verification counts, and backup file names."
+          } >> "$GITHUB_STEP_SUMMARY"
