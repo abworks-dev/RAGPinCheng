@@ -24,6 +24,7 @@ from src.transcription.types import ContractValidationError, PublicationIndexSta
 from src.transcription.workflow import TranscriptionPersistenceWorkflow
 
 from .transcription_artifacts import LocalTranscriptionArtifactStore
+from .transcript_prompt_echo_guard import assert_publishable
 from .transcription_markdown import validate_editable_transcript_markdown
 from .transcription_store import SQLiteTranscriptionStore, StoreConflictError
 
@@ -218,6 +219,11 @@ class TranscriptionPublicationApplicationService:
             return {"version": version, "job": self.store.latest_publication_job(version.id), "reused": True}
         if version.publication_status is PublicationStatus.publishing:
             return {"version": version, "job": self.store.latest_publication_job(version.id), "reused": True}
+        # Refuse to publish a version whose canonical text still echoes the ASR
+        # prompt: such spans are decoder artefacts, not speech, and must not
+        # reach the published head or the index. Reuse paths above stay
+        # untouched so an already-published version remains idempotent.
+        assert_publishable(version.canonical)
         managed_manual = (
             version.source is TranscriptSource.manual
             and version.markdown_storage_kind is MarkdownStorageKind.managed_artifact

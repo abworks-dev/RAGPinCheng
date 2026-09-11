@@ -218,6 +218,7 @@ from .schemas import (
     UpdateContentPermissionGroupRequest,
 )
 from .transcription_artifacts import LocalTranscriptionArtifactStore
+from .transcript_prompt_echo_guard import PromptEchoPublicationBlocked
 
 
 router = APIRouter(prefix="/admin/content", tags=["managed-content"])
@@ -4125,6 +4126,9 @@ def retry_unified_publication_job(
         payload = dict(new_row); payload.update(task_type="video_transcript", task_type_label="视频转录稿", status="processing", version_id=payload["transcript_version_id"], publication_id=None, category_id=None, category_label=None, category_path=None, source_origin="transcription", attempt_count=1, retryable=False, is_archived=False, is_current_head=False, is_latest_attempt=True, doc_type="transcript", version_number=None, file_size=None, parent_count=None, preview_parent_id=None)
         payload.pop("transcript_version_id", None)
         return UnifiedPublicationJobDTO(**payload)
+    except PromptEchoPublicationBlocked as exc:
+        conn.rollback()
+        raise HTTPException(status_code=409, detail=exc.message) from exc
     except Exception as exc:
         conn.rollback()
         raise HTTPException(status_code=409, detail="视频发布任务重试失败") from exc
