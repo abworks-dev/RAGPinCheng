@@ -271,9 +271,11 @@ function Get-VerifiedAsrListenerIds {
         throw "Unable to resolve the ASR venv base Python executable"
     }
     $basePython = (Resolve-Path -LiteralPath ([string]$basePythonOutput).Trim()).Path
-    $expectedCommandLine = (
-        '"{0}" -m uvicorn services.asr_service.app:create_app --factory --host 0.0.0.0 --port 8200' -f
-        $basePython
+    $expectedCommandLines = @(
+        '"{0}" -m uvicorn services.asr_service.app:create_app --factory --host 0.0.0.0 --port 8200' -f $basePython,
+        # The release start path may add -B to keep bytecode out of the
+        # content-addressed release tree; both forms are owned.
+        '"{0}" -B -m uvicorn services.asr_service.app:create_app --factory --host 0.0.0.0 --port 8200' -f $basePython
     )
     $processIds = @(
         $connections |
@@ -285,7 +287,7 @@ function Get-VerifiedAsrListenerIds {
         if (
             $null -eq $process -or
             [string]$process.ExecutablePath -ne $basePython -or
-            [string]$process.CommandLine -ne $expectedCommandLine
+            [string]$process.CommandLine -notin $expectedCommandLines
         ) {
             throw "Refusing to stop an unexpected process listening on TCP 8200"
         }
