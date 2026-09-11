@@ -36,6 +36,22 @@ test.describe("资料管理", () => {
     await expect(sharedEntry).toContainText("共享培训导论.mp4");
     await expect(sharedEntry.getByText("共享", { exact: true })).toBeVisible();
     await expectNoBodyOverflow(page);
+    // 地址栏：共享根层级的按钮带“共享”标记，普通分类不带
+    const addressBar = page.getByRole("navigation", { name: "资料路径" });
+    await expect(addressBar.getByRole("button", { name: "05 共享培训资料 共享" })).toBeVisible();
+    await expect(addressBar.getByRole("button", { name: "03 公司内部标准 共享" })).toHaveCount(0);
+    // 进入远程子目录后，地址栏继续显示每一层共享层级（含远程层）
+    const drillFolder = page.viewportSize()!.width < 1024
+      ? page.getByTestId("shared-library-mobile-shared-folder-course").getByRole("button").first()
+      : page.getByTestId("shared-library-row-shared-folder-course");
+    await drillFolder.click();
+    const level2Entry = page.viewportSize()!.width < 1024
+      ? page.getByTestId("shared-library-mobile-shared-video-level2")
+      : page.getByTestId("shared-library-row-shared-video-level2");
+    await expect(level2Entry).toContainText("建模准备.mp4");
+    await expect(addressBar.getByRole("button", { name: "一级课程 共享" })).toBeVisible();
+    await expect(addressBar.getByRole("button", { name: "05 共享培训资料 共享" })).toBeVisible();
+    await expectNoBodyOverflow(page);
 
     if (page.viewportSize()!.width < 1024) {
       await page.getByRole("button", { name: "展开管理功能" }).click();

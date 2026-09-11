@@ -8,6 +8,7 @@ import { Checkbox } from "../ui/checkbox";
 import { EmptyState } from "../ui/empty-state";
 import { LoadingState } from "../ui/loading-state";
 import { ManagedItemType } from "./ManagedItemType";
+import { MANAGED_COLUMN_CLASS, ManagedTableHeader, managedTableClass } from "./ManagedContentTable";
 
 type SharedSortKey = "docType" | "title" | "updatedAt" | "status" | "source";
 
@@ -210,41 +211,24 @@ export function ExternalFolderBrowser({
   const openEntry = (entry: ExternalMediaEntry) => updateParent(entry.relative_path);
   return <section aria-label={title}>
     {loading ? <LoadingState className="min-h-48" label="正在读取共享目录…" /> : error ? <p className="p-4 text-ui-sm text-destructive" role="alert">{error}</p> : visibleEntries.length === 0 ? <EmptyState title="当前目录暂无资料" description="共享目录扫描后会在这里显示直属文件夹和文件。" /> : <>
-      <div className="hidden overflow-x-auto border-t border-border lg:block"><table className="w-full min-w-[72rem] text-ui-sm">
-        <thead className="border-b border-border bg-surface-muted text-left text-muted-foreground"><tr>
-          <th className="w-8 px-1.5 py-3"><Checkbox aria-label="选择当前页资料" checked={allSelected} onChange={toggleAll} disabled={selectableRows.length === 0} /></th>
-          {([
-            ["docType", "类型"],
-            ["title", "资料"],
-            ["updatedAt", "更新时间"],
-            ["status", "状态"],
-            ["source", "来源"],
-          ] as [SharedSortKey, string][]).map(([key, label]) => (
-            <th
-              key={key}
-              aria-sort={sort?.key === key ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}
-              className={key === "docType" ? "w-16 px-1 py-3 text-center font-medium" : key === "title" ? "px-1.5 py-3 font-medium" : "px-3 py-3 font-medium"}
-            >
-              <button
-                type="button"
-                className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                onClick={() => toggleSort(key)}
-              >
-                {label}
-                {sortIcon(key)}
-              </button>
-            </th>
-          ))}
-          <th className="px-3 py-3 text-right font-medium">操作</th>
-        </tr></thead>
+      <div className="hidden overflow-x-auto border-t border-border lg:block"><table className={managedTableClass}>
+        <ManagedTableHeader
+          selectAllLabel="选择当前页资料"
+          selectAllChecked={allSelected}
+          onToggleSelectAll={toggleAll}
+          selectAllDisabled={selectableRows.length === 0}
+          sort={sort}
+          onToggleSort={toggleSort}
+          renderSortIcon={sortIcon}
+        />
         <tbody className="divide-y divide-border">{visibleEntries.map((entry) => {
           const managedItem = entryManagedItem(entry);
           return <tr key={entry.id} data-testid={`shared-library-row-${entry.id}`} className={`transition-colors duration-normal hover:bg-surface-muted/60 ${entry.kind === "folder" ? "cursor-pointer" : ""}`} onClick={() => entry.kind === "folder" && openEntry(entry)}>
-          <td className="px-1.5 py-3"><Checkbox aria-label={managedItem ? `选择${managedItem.title}` : `共享资料${entry.name}不可选择`} checked={Boolean(managedItem && selectedVersionIds.includes(managedItem.version_id))} disabled={!managedItem || !onToggleItem} onChange={() => managedItem && onToggleItem?.(managedItem)} /></td>
-          <td className="px-1 py-3"><ManagedItemType folder={entry.kind === "folder"} sharedFolder={entry.kind === "folder"} docType={entry.kind === "video" ? "video" : undefined} compact /></td>
-          <td className="max-w-xs px-1.5 py-3"><button type="button" className="block max-w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" disabled={entry.kind !== "folder"} onClick={() => entry.kind === "folder" && openEntry(entry)}><span className="flex flex-wrap items-center gap-2"><span className="break-words font-medium">{managedItem?.title || entry.name}</span><Badge variant="secondary">共享</Badge></span><span className="mt-0.5 block break-all text-ui-xs text-muted-foreground">{entry.relative_path}</span></button></td>
-          <td className="whitespace-nowrap px-3 py-3 tabular-nums">{managedItem ? managedUpdatedAt(managedItem.updated_at) : externalUpdatedAt(entry)}</td><td className="px-3 py-3">{managedItem && renderItemStatus ? renderItemStatus(managedItem) : <span className="text-muted-foreground">{availabilityLabel(entry)}</span>}</td><td className="px-3 py-3">共享目录</td>
-          <td className="px-3 py-3 text-right">{entry.kind === "folder" ? renderFolderActions ? renderFolderActions(entry, () => openEntry(entry)) : <Button size="sm" variant="outline" aria-label={`打开${entry.name}`} onClick={() => openEntry(entry)}>打开</Button> : managedItem && renderItemActions ? renderItemActions(managedItem) : <span className="text-ui-xs text-muted-foreground">资料状态加载中</span>}</td>
+          <td className={MANAGED_COLUMN_CLASS.checkboxTd}><Checkbox aria-label={managedItem ? `选择${managedItem.title}` : `共享资料${entry.name}不可选择`} checked={Boolean(managedItem && selectedVersionIds.includes(managedItem.version_id))} disabled={!managedItem || !onToggleItem} onChange={() => managedItem && onToggleItem?.(managedItem)} /></td>
+          <td className={MANAGED_COLUMN_CLASS.typeTd}><ManagedItemType folder={entry.kind === "folder"} sharedFolder={entry.kind === "folder"} docType={entry.kind === "video" ? "video" : undefined} compact /></td>
+          <td className={MANAGED_COLUMN_CLASS.titleTd}><button type="button" className="block max-w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" disabled={entry.kind !== "folder"} onClick={() => entry.kind === "folder" && openEntry(entry)}><span className="flex flex-wrap items-center gap-2"><span className="break-words font-medium">{managedItem?.title || entry.name}</span><Badge variant="secondary">共享</Badge></span><span className="mt-0.5 block break-all text-ui-xs text-muted-foreground">{entry.relative_path}</span></button></td>
+          <td className={MANAGED_COLUMN_CLASS.updatedAtTd}>{managedItem ? managedUpdatedAt(managedItem.updated_at) : externalUpdatedAt(entry)}</td><td className={MANAGED_COLUMN_CLASS.statusTd}>{managedItem && renderItemStatus ? renderItemStatus(managedItem) : <span className="text-muted-foreground">{availabilityLabel(entry)}</span>}</td><td className={MANAGED_COLUMN_CLASS.sourceTd}>共享目录</td>
+          <td className={MANAGED_COLUMN_CLASS.actionsTd}>{entry.kind === "folder" ? renderFolderActions ? renderFolderActions(entry, () => openEntry(entry)) : <Button size="sm" variant="outline" aria-label={`打开${entry.name}`} onClick={() => openEntry(entry)}>打开</Button> : managedItem && renderItemActions ? renderItemActions(managedItem) : <span className="text-ui-xs text-muted-foreground">资料状态加载中</span>}</td>
         </tr>;})}</tbody>
       </table></div>
       <ul className="divide-y divide-border border-t border-border lg:hidden" aria-label="共享目录内容">{visibleEntries.map((entry) => {

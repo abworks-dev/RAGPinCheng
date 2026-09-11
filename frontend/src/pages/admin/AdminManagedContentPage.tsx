@@ -117,6 +117,7 @@ import { CategoryDestinationPicker } from "../../components/admin/CategoryDestin
 import { ManagedContentBulkOperationDialog } from "../../components/admin/ManagedContentBulkOperationDialog";
 import { ManagedItemType } from "../../components/admin/ManagedItemType";
 import { ExternalFolderBrowser } from "../../components/admin/ExternalFolderBrowser";
+import { MANAGED_COLUMN_CLASS, ManagedTableHeader, managedTableClass } from "../../components/admin/ManagedContentTable";
 import { compareManagedCategories } from "../../lib/category-tree";
 import { AdminTranscriptionTasksPage } from "./AdminTranscriptionTasksPage";
 import { useManagedContentLiveRefresh } from "../../hooks/useManagedContentLiveRefresh";
@@ -6887,37 +6888,45 @@ export function AdminManagedContentPage() {
                   <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
                   <button
                     type="button"
-                    className="max-w-56 truncate rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="flex max-w-56 min-w-0 items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     onClick={() => navigateToFolder(folder.id)}
                   >
-                    {folder.display_code} {folder.display_name}
+                    <span className="truncate">
+                      {folder.display_code} {folder.display_name}
+                    </span>
+                    {folder.category_kind === "shared_folder" && (
+                      <span
+                        className="inline-flex shrink-0 items-center rounded-full bg-primary/10 px-2 py-0.5 text-ui-xs font-medium leading-5 text-primary"
+                        title="共享目录"
+                      >
+                        共享
+                      </span>
+                    )}
                   </button>
                 </span>
               ))}
               {showSharedBrowser && (
-                <>
-                  {sharedRemoteParent.split("/").filter(Boolean).map((segment, index, all) => {
-                    const target = all.slice(0, index + 1).join("/");
-                    return (
-                      <span key={target} className="flex min-w-0 items-center gap-1">
-                        <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
-                        <button
-                          type="button"
-                          className="max-w-56 truncate rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          onClick={() => setSharedRemoteParent(target)}
+                sharedRemoteParent.split("/").filter(Boolean).map((segment, index, all) => {
+                  const target = all.slice(0, index + 1).join("/");
+                  return (
+                    <span key={target} className="flex min-w-0 items-center gap-1">
+                      <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                      <button
+                        type="button"
+                        className="flex max-w-56 min-w-0 items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={() => setSharedRemoteParent(target)}
+                      >
+                        <span className="truncate">{segment}</span>
+                        <span
+                          className="inline-flex shrink-0 items-center rounded-full bg-primary/10 px-2 py-0.5 text-ui-xs font-medium leading-5 text-primary"
+                          title="共享目录"
                         >
-                          {segment}
-                        </button>
-                      </span>
-                    );
-                  })}
-                  <span
-                    className="ml-1 inline-flex shrink-0 items-center rounded-full bg-primary/10 px-2 py-0.5 text-ui-xs font-medium leading-5 text-primary"
-                    title="共享目录"
-                  >
-                    共享
-                  </span>
-                </>
+                          共享
+                        </span>
+                      </button>
+                    </span>
+                  );
+                })
               )}
             </nav>
             <IconButton
@@ -7018,55 +7027,15 @@ export function AdminManagedContentPage() {
             !error && (
               <>
                 <div className="hidden overflow-x-auto lg:block">
-                  <table className="w-full text-ui-sm">
-                    <thead className="border-b border-border bg-surface-muted text-left text-muted-foreground">
-                      <tr>
-                        <th className="w-12 px-3 py-3">
-                          <Checkbox
-                            aria-label="选择当前页资料"
-                            checked={allSelected}
-                            onChange={toggleAll}
-                          />
-                        </th>
-                        {(
-        [
-                            ["docType", "类型"],
-                            ["title", "资料"],
-                            ["updatedAt", "更新时间"],
-                            ["status", "状态"],
-                            ["source", "来源"],
-                          ] as [SortKey, string][]
-                        ).map(([key, label]) => (
-                          <th
-                            key={key}
-                            aria-sort={
-                              sort?.key === key
-                                ? sort.direction === "asc"
-                                  ? "ascending"
-                                  : "descending"
-                                : "none"
-                            }
-                            className={
-                              key === "docType"
-                                ? "w-16 px-2 py-3 text-center font-medium"
-                                : "px-3 py-3 font-medium"
-                            }
-                          >
-                            <button
-                              type="button"
-                              className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                              onClick={() => toggleSort(key)}
-                            >
-                              {label}
-                              {sortIcon(key)}
-                            </button>
-                          </th>
-                        ))}
-                        <th className="px-3 py-3 text-right font-medium">
-                          操作
-                        </th>
-                      </tr>
-                    </thead>
+                  <table className={managedTableClass}>
+                    <ManagedTableHeader
+                      selectAllLabel="选择当前页资料"
+                      selectAllChecked={allSelected}
+                      onToggleSelectAll={toggleAll}
+                      sort={sort}
+                      onToggleSort={toggleSort}
+                      renderSortIcon={sortIcon}
+                    />
                     <tbody className="divide-y divide-border">
                       {sortedChildFolders.map((folder) => {
                         const folderLabel = `${folder.display_code} ${folder.display_name}`;
@@ -7089,7 +7058,7 @@ export function AdminManagedContentPage() {
                               void moveItemTo(draggedItem, folder.id);
                             }}
                           >
-                            <td className="w-12 px-3 py-3">
+                            <td className={MANAGED_COLUMN_CLASS.checkboxTd}>
                               <Checkbox
                                 aria-label={`选择文件夹${folderLabel}`}
                                 checked={selectedFolders.includes(folder.id)}
@@ -7100,10 +7069,10 @@ export function AdminManagedContentPage() {
                                 }
                               />
                             </td>
-                            <td className="w-16 px-2 py-3">
+                            <td className={MANAGED_COLUMN_CLASS.typeTd}>
                               <ManagedItemType folder sharedFolder={folder.category_kind === "shared_folder"} compact />
                             </td>
-                            <td className="max-w-xs px-3 py-3">
+                            <td className={MANAGED_COLUMN_CLASS.titleTd}>
                               <button
                                 type="button"
                                 className="block max-w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -7117,16 +7086,16 @@ export function AdminManagedContentPage() {
                                 </span>
                               </button>
                             </td>
-                            <td className="whitespace-nowrap px-3 py-3 tabular-nums">
+                            <td className={MANAGED_COLUMN_CLASS.updatedAtTd}>
                               {formatManagedUpdatedAt(folder.updated_at)}
                             </td>
-                            <td className="px-3 py-3 text-muted-foreground">
+                            <td className={`${MANAGED_COLUMN_CLASS.statusTd} text-muted-foreground`}>
                               —
                             </td>
-                            <td className="px-3 py-3 text-muted-foreground">
+                            <td className={`${MANAGED_COLUMN_CLASS.sourceTd} text-muted-foreground`}>
                               —
                             </td>
-                            <td className="px-3 py-3 text-right">
+                            <td className={MANAGED_COLUMN_CLASS.actionsTd}>
                               {renderFolderActions(folder)}
                             </td>
                           </tr>
@@ -7148,7 +7117,7 @@ export function AdminManagedContentPage() {
                             onDragEnd={() => setDraggedItem(null)}
                             className={`transition-colors duration-normal hover:bg-surface-muted/60 ${draggable ? "cursor-grab" : ""}`}
                           >
-                            <td className="w-12 px-3 py-3">
+                            <td className={MANAGED_COLUMN_CLASS.checkboxTd}>
                               <Checkbox
                                 aria-label={`选择${item.title}`}
                                 checked={selected.includes(item.version_id)}
@@ -7169,28 +7138,28 @@ export function AdminManagedContentPage() {
                                 }
                               />
                             </td>
-                            <td className="w-16 px-2 py-3">
+                            <td className={MANAGED_COLUMN_CLASS.typeTd}>
                               <ManagedItemType
                                 docType={item.doc_type}
                                 compact
                               />
                             </td>
-                            <td className="max-w-xs px-3 py-3">
+                            <td className={MANAGED_COLUMN_CLASS.titleTd}>
                               <ManagedItemIdentity
                                 item={item}
                                 showCategoryPath={showGlobalResults}
                               />
                             </td>
-                            <td className="whitespace-nowrap px-3 py-3 tabular-nums">
+                            <td className={MANAGED_COLUMN_CLASS.updatedAtTd}>
                               {formatManagedUpdatedAt(item.updated_at)}
                             </td>
-                            <td className="px-3 py-3">
+                            <td className={MANAGED_COLUMN_CLASS.statusTd}>
                               {renderItemStatus(item)}
                             </td>
-                            <td className="px-3 py-3">
+                            <td className={MANAGED_COLUMN_CLASS.sourceTd}>
                               {sourceLabel[item.source_origin] || "其他来源"}
                             </td>
-                            <td className="px-3 py-3 text-right">
+                            <td className={MANAGED_COLUMN_CLASS.actionsTd}>
                               {renderActions(item)}
                             </td>
                           </tr>
