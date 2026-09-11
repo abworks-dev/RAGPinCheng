@@ -221,19 +221,29 @@ jobs:
                       f"SELECT * FROM parents WHERE publication_target_id IN ({target_placeholders})", targets
                   )
               }
-              titles = {}
-              if media_ids:
-                  titles = {
-                      row["media_id"]: row["title"]
-                      for row in connection.execute(
-                          f"SELECT media_id,title FROM media_assets WHERE media_id IN ({media_placeholders})",
-                          media_ids,
-                      )
-                  }
               connection.close()
               union = dict(by_media)
               union.update(by_target)
-              return by_target, by_media, union, titles
+              return by_target, by_media, union
+
+
+          def load_media_titles(media_ids):
+              """media_assets lives in app.sqlite, not in parents.sqlite."""
+              if not media_ids:
+                  return {}
+              connection = sqlite3.connect(f"file:{APP_DB_PATH}?mode=ro", uri=True)
+              connection.row_factory = sqlite3.Row
+              try:
+                  return {
+                      row["media_id"]: row["title"]
+                      for row in connection.execute(
+                          f"SELECT media_id,title FROM media_assets "
+                          f"WHERE media_id IN ({','.join('?' for _ in media_ids)})",
+                          media_ids,
+                      )
+                  }
+              finally:
+                  connection.close()
 
 
           def digest_of(values):
@@ -249,7 +259,8 @@ jobs:
               identity_filter(targets, []),
               identity_filter([], media_ids),
           )
-          parents_by_target, parents_by_media, parents_rows, titles = collect_parent_rows(media_ids, targets)
+          parents_by_target, parents_by_media, parents_rows = collect_parent_rows(media_ids, targets)
+          titles = load_media_titles(media_ids)
 
           manifest = {
               "schema_version": "transcript-index-residue-purge/1",
