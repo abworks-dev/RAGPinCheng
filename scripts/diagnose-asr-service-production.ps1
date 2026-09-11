@@ -270,7 +270,8 @@ if ($activeCandidateId) {
     }
 }
 
-$logRoot = Join-Path $DataRoot "logs"$latestLog = if (Test-Path -LiteralPath $logRoot -PathType Container) {
+$logRoot = Join-Path $DataRoot "logs"
+$latestLog = if (Test-Path -LiteralPath $logRoot -PathType Container) {
     Get-ChildItem -LiteralPath $logRoot -Filter "asr-service-*.log" -File |
         Sort-Object LastWriteTimeUtc -Descending |
         Select-Object -First 1
