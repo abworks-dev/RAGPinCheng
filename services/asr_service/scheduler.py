@@ -34,8 +34,8 @@ class BgePriorityDecision(Enum):
     pause_probe_unavailable = "pause_probe_unavailable"
 
 
-DEFAULT_CHUNK_DURATION_MS = 30_000
-DEFAULT_CHUNK_OVERLAP_MS = 500
+DEFAULT_CHUNK_DURATION_MS = 120_000
+DEFAULT_CHUNK_OVERLAP_MS = 0
 
 
 def _positive_env_int(name: str, default: int) -> int:
@@ -70,6 +70,13 @@ def resolve_chunk_window_configuration() -> tuple[int, int]:
     The window configuration lives here rather than in ``config.py`` on purpose:
     both engine runtime contracts include ``config.py``, and the chunk window is
     pure scheduler behaviour that must not invalidate engine qualification.
+
+    The defaults are 120 s with no overlap: WhisperX decodes in 30 s blocks
+    internally, and a window only marginally longer than one block leaves a tiny
+    trailing block whose alignment fails the engine's own validation with a
+    permanent invalid-output failure. Probe evidence on production content:
+    30.5 s windows fail at the alignment stage while 60 s, 120 s and 300 s
+    windows all succeed.
     """
     duration_ms = _positive_env_int("ASR_CHUNK_DURATION_MS", DEFAULT_CHUNK_DURATION_MS)
     overlap_ms = _non_negative_env_int("ASR_CHUNK_OVERLAP_MS", DEFAULT_CHUNK_OVERLAP_MS)
