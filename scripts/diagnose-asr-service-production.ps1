@@ -255,8 +255,22 @@ if ($activeStatePresent) {
     }
 }
 
-$logRoot = Join-Path $DataRoot "logs"
-$latestLog = if (Test-Path -LiteralPath $logRoot -PathType Container) {
+$activeReleaseConfigPresent = $false
+$chunkDurationSetting = "unset"
+$chunkOverlapSetting = "unset"
+if ($activeCandidateId) {
+    $activeReleaseConfigPath = Join-Path $DataRoot ("config\releases\" + $activeCandidateId + "\asr.env")
+    if (Test-Path -LiteralPath $activeReleaseConfigPath -PathType Leaf) {
+        $activeReleaseConfigPresent = $true
+        foreach ($line in Get-Content -LiteralPath $activeReleaseConfigPath -Encoding UTF8) {
+            $trimmed = $line.Trim()
+            if ($trimmed -match '^ASR_CHUNK_DURATION_MS=(.*)$') { $chunkDurationSetting = $Matches[1] }
+            elseif ($trimmed -match '^ASR_CHUNK_OVERLAP_MS=(.*)$') { $chunkOverlapSetting = $Matches[1] }
+        }
+    }
+}
+
+$logRoot = Join-Path $DataRoot "logs"$latestLog = if (Test-Path -LiteralPath $logRoot -PathType Container) {
     Get-ChildItem -LiteralPath $logRoot -Filter "asr-service-*.log" -File |
         Sort-Object LastWriteTimeUtc -Descending |
         Select-Object -First 1
@@ -355,6 +369,10 @@ $report = [ordered]@{
     active_state_present = [bool]$activeStatePresent
     active_state_valid = [bool]$activeStateValid
     active_candidate_id = $activeCandidateId
+    active_release_config_present = [bool]$activeReleaseConfigPresent
+    chunk_duration_ms_setting = $chunkDurationSetting
+    chunk_overlap_ms_setting = $chunkOverlapSetting
+    chunk_window_code_defaults = "30000/500"
     startup_log_present = $null -ne $latestLog
     startup_log_updated_after_last_run = if ($null -ne $latestLog -and $null -ne $taskInfo) { $latestLog.LastWriteTimeUtc -ge $taskInfo.LastRunTime.ToUniversalTime() } else { $null }
     startup_log_age_seconds = if ($null -ne $latestLog) { [int64]([DateTime]::UtcNow - $latestLog.LastWriteTimeUtc).TotalSeconds } else { $null }
