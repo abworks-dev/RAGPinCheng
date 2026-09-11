@@ -91,6 +91,7 @@ jobs:
 
 
           def referencing_tables(connection):
+              """Return (table, column) pairs whose column references transcript_versions."""
               tables = []
               for row in connection.execute(
                   "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
@@ -100,7 +101,7 @@ jobs:
                       continue
                   for fk in connection.execute(f"PRAGMA foreign_key_list({name})"):
                       if fk["table"] == TARGET:
-                          tables.append(name)
+                          tables.append((name, fk["from"]))
                           break
               return tables
 
@@ -115,8 +116,13 @@ jobs:
               ).fetchone()["n"]
               heads = connection.execute("SELECT count(*) AS n FROM media_transcript_heads").fetchone()["n"]
               referencing = {}
-              for name in referencing_tables(connection):
-                  referencing[name] = connection.execute(f"SELECT count(*) AS n FROM {name}").fetchone()["n"]
+              referencing_columns = {}
+              for name, column in referencing_tables(connection):
+                  referencing[name] = connection.execute(
+                      f"SELECT count(*) AS n FROM {name} WHERE {column} IS NOT NULL"
+                      f" AND {column} IN (SELECT id FROM {TARGET})"
+                  ).fetchone()["n"]
+                  referencing_columns[name] = column
               per_media = [
                   {
                       "title": row["title"],
@@ -141,6 +147,7 @@ jobs:
                   "published_versions": published,
                   "head_rows": heads,
                   "referencing_tables": referencing,
+                  "referencing_columns": referencing_columns,
                   "per_media": per_media,
               }
 
@@ -205,6 +212,7 @@ jobs:
 
 
           def referencing_tables(connection):
+              """Return (table, column) pairs whose column references transcript_versions."""
               tables = []
               for row in connection.execute(
                   "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
@@ -214,7 +222,7 @@ jobs:
                       continue
                   for fk in connection.execute(f"PRAGMA foreign_key_list({name})"):
                       if fk["table"] == TARGET:
-                          tables.append(name)
+                          tables.append((name, fk["from"]))
                           break
               return tables
 
@@ -229,8 +237,13 @@ jobs:
               ).fetchone()["n"]
               heads = connection.execute("SELECT count(*) AS n FROM media_transcript_heads").fetchone()["n"]
               referencing = {}
-              for name in referencing_tables(connection):
-                  referencing[name] = connection.execute(f"SELECT count(*) AS n FROM {name}").fetchone()["n"]
+              referencing_columns = {}
+              for name, column in referencing_tables(connection):
+                  referencing[name] = connection.execute(
+                      f"SELECT count(*) AS n FROM {name} WHERE {column} IS NOT NULL"
+                      f" AND {column} IN (SELECT id FROM {TARGET})"
+                  ).fetchone()["n"]
+                  referencing_columns[name] = column
               per_media = [
                   {
                       "title": row["title"],
@@ -255,6 +268,7 @@ jobs:
                   "published_versions": published,
                   "head_rows": heads,
                   "referencing_tables": referencing,
+                  "referencing_columns": referencing_columns,
                   "per_media": per_media,
               }
 
@@ -264,7 +278,8 @@ jobs:
           canonical = json.dumps(current, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
           if hashlib.sha256(canonical.encode("utf-8")).hexdigest() != os.environ["EXPECTED_MANIFEST_SHA256"].lower():
               raise SystemExit("inventory changed since the approved preview; refusing to purge")
-          tables = list(current["referencing_tables"].items())
+          referencing = [(name, current["referencing_columns"][name], count)
+                         for name, count in current["referencing_tables"].items()]
           connection.close()
 
           data_dir = Path(APP_DB_PATH).parent
@@ -287,10 +302,12 @@ jobs:
               for row in snapshot.execute("SELECT * FROM media_transcript_heads"):
                   handle.write(json.dumps({"table": "media_transcript_heads", "row": dict(row)},
                                           ensure_ascii=False, default=str) + "\n")
-              for name, count in tables:
-                  if count == 0:
+              for name, column, _count in referencing:
+                  if name == "media_transcript_heads":
                       continue
-                  for row in snapshot.execute(f"SELECT * FROM {name}"):
+                  for row in snapshot.execute(
+                      f"SELECT * FROM {name} WHERE {column} IS NOT NULL AND {column} IN (SELECT id FROM {TARGET})"
+                  ):
                       handle.write(json.dumps({"table": name, "row": dict(row)},
                                               ensure_ascii=False, default=str) + "\n")
               for row in snapshot.execute(f"SELECT * FROM {TARGET}"):
@@ -305,10 +322,12 @@ jobs:
               connection.execute("BEGIN IMMEDIATE")
               cursor = connection.execute("DELETE FROM media_transcript_heads")
               deleted["media_transcript_heads"] = cursor.rowcount
-              for name, _count in tables:
+              for name, column, _count in referencing:
                   if name == "media_transcript_heads":
                       continue
-                  cursor = connection.execute(f"DELETE FROM {name}")
+                  cursor = connection.execute(
+                      f"DELETE FROM {name} WHERE {column} IS NOT NULL AND {column} IN (SELECT id FROM {TARGET})"
+                  )
                   deleted[name] = cursor.rowcount
               cursor = connection.execute(f"DELETE FROM {TARGET}")
               deleted[TARGET] = cursor.rowcount
