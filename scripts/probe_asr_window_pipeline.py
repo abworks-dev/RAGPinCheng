@@ -120,22 +120,59 @@ def main() -> int:
     from src.transcription.provider_protocol import ProviderFailure
     from src.transcription.service_profiles import WHISPERX_V2_SERVICE_CONFIG
     from services.asr_service.engine_protocol import PreparedAudioChunk
+    from services.asr_service.model_cache import (
+        validate_whisperx_align_cache,
+        validate_whisperx_cache,
+    )
+
+    def optional_path(name: str) -> Path | None:
+        raw = os.environ.get(name, "").strip()
+        return Path(raw) if raw else None
+
+    model_cache = validate_whisperx_cache(
+        optional_path("ASR_WHISPERX_MODEL_CACHE_ROOT"),
+        optional_path("ASR_WHISPERX_MODEL_MANIFEST_PATH"),
+    )
+    align_cache = validate_whisperx_align_cache(
+        optional_path("ASR_WHISPERX_ALIGN_MODEL_CACHE_ROOT"),
+        optional_path("ASR_WHISPERX_ALIGN_MODEL_MANIFEST_PATH"),
+    )
+    report["model_cache_available"] = bool(model_cache.available)
+    report["model_cache_reason"] = str(model_cache.reason_code)
+    report["align_cache_available"] = bool(align_cache.available)
+    report["align_cache_reason"] = str(align_cache.reason_code)
+    report["model_path_configured"] = model_cache.model_path is not None
+    report["align_model_path_configured"] = align_cache.model_path is not None
+    report["nltk_data_configured"] = bool(os.environ.get("NLTK_DATA", "").strip())
+    if not model_cache.available or not align_cache.available:
+        report["engine_probe"] = "skipped-model-cache-unavailable"
+        Path(args.report).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps(report, ensure_ascii=False))
+        return 0
+
     from services.asr_service.engines.whisperx import WhisperXEngine
 
     engine = WhisperXEngine(
         service_profile_id=args.profile_id,
         model_cache_ready=lambda: True,
-        model_path=Path(os.environ["ASR_WHISPERX_MODEL_CACHE_ROOT"]),
-        align_model_path=Path(os.environ["ASR_WHISPERX_ALIGN_MODEL_CACHE_ROOT"]),
+        model_path=model_cache.model_path,
+        align_model_path=align_cache.model_path,
         unavailable_reason_code="probe",
     )
     chunk = PreparedAudioChunk(0, args.window_start_ms, args.window_end_ms, window)
-    result = engine.transcribe_chunk(chunk, WHISPERX_V2_SERVICE_CONFIG)
-    probe: dict[str, object] = {
-        "result_type": type(result).__name__,
-        "last_failure_stage": getattr(engine, "last_failure_stage", None),
-        "last_failure_type": getattr(engine, "last_failure_type", None),
-    }
+    probe: dict[str, object] = {}
+    try:
+        result = engine.transcribe_chunk(chunk, WHISPERX_V2_SERVICE_CONFIG)
+    except Exception as exc:  # pragma: no cover - diagnostic only
+        probe["unexpected_exception"] = type(exc).__name__
+        probe["unexpected_message"] = str(exc)[:300]
+        report["engine_probe"] = probe
+        Path(args.report).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps(report, ensure_ascii=False))
+        return 0
+    probe["result_type"] = type(result).__name__
+    probe["last_failure_stage"] = getattr(engine, "last_failure_stage", None)
+    probe["last_failure_type"] = getattr(engine, "last_failure_type", None)
     if type(result) is ProviderFailure:
         probe["error_code"] = result.error_code.value
         probe["classification"] = result.classification.value
