@@ -192,6 +192,18 @@
 - 依赖：`_media_action_state` 新增 `start_transcription`/`re_transcribe` 动作键；媒体/任务/版本 DTO 返回 `scheme_name`/`scheme_deleted`；复用既有 `start` 转录接口。
 - 方案链接：`docs/features/transcript-pipeline.md`、`docs/features/managed-content-library.md`
 
+### 生产转录可靠性修复与旧稿清理
+
+- 状态：待用户验收
+- 目标：修复生产批量转录超时/转录稿不完整与 WhisperX 永久失败，制度上杜绝含 ASR 提示词回吐的旧稿被发布，并清理已删除转录版本的检索索引残留。
+- 下一步：
+  - [ ] 重新转录受影响的培训视频与 ASR 验收媒体，在工作台确认新版本内容、时长和引用完整。
+  - [ ] 抽查含回吐历史版本的视频，确认发布被拦截并提示重新转录生成新版本。
+  - [ ] 验收通过后清理应用数据目录中的清理备份：`app.sqlite.pre-purge-34652290722`、`transcript-versions-purge-34652290722.jsonl`、`transcript-index-residue-34659496645.jsonl`、`parents.sqlite.pre-index-residue-34659496645`。
+- 完成标准：批量转录不再超时且转录稿完整；WhisperX profile 可正常出稿；含回吐内容的版本无法发布；已删除版本的转录片段不再出现在检索结果中；用户确认验收通过。
+- 依赖：ASR active release `34575342892`（`ASR_CHUNK_DURATION_MS=120000`、`ASR_CHUNK_OVERLAP_MS=0`）与应用 master tip `52d3cf60`；引擎运行契约文件未修改，无需重新资格认证。
+- 方案链接：`docs/features/transcript-pipeline.md`
+
 ---
 
 ## 最近完成摘要
@@ -207,4 +219,4 @@
 7. faster-whisper 生产准入代码准备（2026-08-10）。
 8. 管理端资料管理工作流 PR1，用户验收通过（2026-08-05）。
 9. 多引擎视频自动转录架构决策与总体方案（2026-08-01）。
-10. 查询拆分 Phase A 评测协议与指标实现（2026-07-31）。
+10. 生产转录可靠性修复（转录分块窗口 120s、ASR 暂停任务重新入队、PyAV 音频解码）、ASR 提示词回吐发布门禁、转录版本清理与检索索引残留清理（2026-09-11，PR #730/#770/#771/#772/#773/#774/#775，workflow `34652290722`/`34659496645`）。
