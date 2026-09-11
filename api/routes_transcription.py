@@ -1,13 +1,17 @@
 """Admin application API for automatic transcription jobs."""
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import re
 import sqlite3
 import time
 import unicodedata
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -35,12 +39,13 @@ from src.transcription.profile_catalog import (
     WHISPERX_PROVIDER_KEY,
 )
 from src.transcription.profile import ProfileOperation
+from src.transcription.persistence import ManagedMarkdownRef
 from src.transcription.provider_registry import ProviderRegistry
 from src.transcription.scheme import SchemeValidationError
 from src.transcription.types import ContractValidationError, TranscriptionJobStatus
 
 from .auth import CurrentUser, require_admin, require_csrf_admin
-from .content_store import _category_path
+from .content_store import _category_path, audit_event
 from .db import connect
 from .external_media import resolve_shared_category_key
 from .schemas import (
@@ -56,6 +61,9 @@ from .schemas import (
     BulkTranscriptionItemDTO,
     BulkTranscriptionPreflightResponse,
     BulkTranscriptionResponse,
+    BulkDeleteTranscriptVersionItemDTO,
+    BulkDeleteTranscriptVersionsRequest,
+    BulkDeleteTranscriptVersionsResponse,
     PublishTranscriptVersionRequest,
     PublishTranscriptVersionResponse,
     ReviewTranscriptVersionRequest,
@@ -1288,6 +1296,357 @@ def preview_transcript_version_timeline(
         raise HTTPException(status_code=409, detail="转录稿时间轴不可用")
     finally:
         conn.close()
+
+
+_TRANSCRIPT_VERSIONS_BULK_DELETE_EVENT = "content.transcript_versions_bulk_deleted"
+_TRANSCRIPT_VERSION_DELETE_EVENT = "content.transcript_version_deleted"
+_TRANSCRIPT_VERSIONS_DELETE_LIMIT = 50
+_TRANSCRIPT_VERSION_DELETE_REASONS = {
+    "not_found": "该转录版本不存在或已被删除。",
+    "not_in_media": "该转录版本不属于当前视频。",
+    "current_head": "当前正式版本不能删除，请先发布其它版本替换后再试。",
+    "published": "已发布或正在发布的转录版本不能删除。",
+    "awaiting_review": "待审核的转录版本不能删除，请先完成审核。",
+    "referenced": "该转录版本仍被其它版本引用，不能删除。",
+    "legacy_manual": "手工上传的历史转录稿不能在此删除。",
+}
+_TRANSCRIPT_VERSION_DELETE_FAILURE_REASON = "删除转录版本时发生并发冲突，请刷新列表后重试。"
+
+
+class _TranscriptVersionUnavailable(Exception):
+    """Internal per-item rejection carrying a product-facing reason key."""
+
+    def __init__(self, reason_key: str) -> None:
+        self.reason_key = reason_key
+        super().__init__(reason_key)
+
+
+@contextmanager
+def _transcript_version_delete_transaction(conn: sqlite3.Connection) -> Iterator[None]:
+    """Serialize on the write lock so every rule is checked against a frozen state."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        yield
+    except Exception:
+        conn.rollback()
+        raise
+    else:
+        conn.commit()
+
+
+def _transcript_version_unavailable_reason(
+    conn: sqlite3.Connection, media_id: str, version_id: str
+) -> str:
+    """Return the safety rule that blocks deleting this version, or '' when allowed."""
+    row = conn.execute(
+        """SELECT media_id,publication_status,review_status FROM transcript_versions WHERE id=?""",
+        (version_id,),
+    ).fetchone()
+    if row is None:
+        return "not_found"
+    if str(row["media_id"]) != media_id:
+        return "not_in_media"
+    if str(row["publication_status"]) != "not_published":
+        return "published"
+    if str(row["review_status"]) == "awaiting_review":
+        return "awaiting_review"
+    if conn.execute(
+        "SELECT 1 FROM media_transcript_heads WHERE media_id=? AND current_version_id=?",
+        (media_id, version_id),
+    ).fetchone() is not None:
+        return "current_head"
+    if conn.execute(
+        """SELECT 1 FROM transcript_versions
+           WHERE id<>? AND (supersedes_version_id=? OR derived_from_version_id=?)
+           LIMIT 1""",
+        (version_id, version_id, version_id),
+    ).fetchone() is not None:
+        return "referenced"
+    return ""
+
+
+def _transcript_version_is_legacy_manual(conn: sqlite3.Connection, version_id: str) -> bool:
+    """A legacy manual row points at a hand-written file this endpoint does not own."""
+    row = conn.execute(
+        "SELECT markdown_storage_kind FROM transcript_versions WHERE id=?", (version_id,)
+    ).fetchone()
+    return row is not None and str(row["markdown_storage_kind"]) != "managed_artifact"
+
+
+def _delete_transcript_version_row(
+    conn: sqlite3.Connection,
+    media_id: str,
+    version_id: str,
+    *,
+    actor_user_id: int,
+) -> dict[str, object]:
+    """Delete one transcript version row inside its own transaction.
+
+    Returns the artifact location that the caller may unlink after the commit.
+    Raises `_TranscriptVersionUnavailable` when any safety rule blocks the
+    delete, so a rejected item never aborts the rest of the batch.
+    """
+    with _transcript_version_delete_transaction(conn):
+        row = conn.execute(
+            "SELECT markdown_rel_path FROM transcript_versions WHERE id=?", (version_id,)
+        ).fetchone()
+        if row is None:
+            raise _TranscriptVersionUnavailable("not_found")
+        reason = _transcript_version_unavailable_reason(conn, media_id, version_id)
+        if reason:
+            raise _TranscriptVersionUnavailable(reason)
+        if _transcript_version_is_legacy_manual(conn, version_id):
+            raise _TranscriptVersionUnavailable("legacy_manual")
+        markdown_rel_path = str(row["markdown_rel_path"])
+        # A content-addressed artifact can be shared with another version, so it
+        # may only be unlinked once no remaining row points at the same blob.
+        shared = conn.execute(
+            """SELECT 1 FROM transcript_versions
+               WHERE id<>? AND markdown_storage_kind='managed_artifact' AND markdown_rel_path=?
+               LIMIT 1""",
+            (version_id, markdown_rel_path),
+        ).fetchone() is not None
+        artifact_path: str | None = markdown_rel_path if not shared else None
+        conn.execute("DELETE FROM transcript_version_artifacts WHERE version_id=?", (version_id,))
+        deleted = conn.execute(
+            "DELETE FROM transcript_versions WHERE id=? AND media_id=?",
+            (version_id, media_id),
+        ).rowcount
+        if deleted != 1:
+            raise _TranscriptVersionUnavailable("not_found")
+        # `version_id` is NULL on purpose: content_audit_events.version_id
+        # references content_versions, while this is a transcript version.
+        audit_event(
+            conn,
+            _TRANSCRIPT_VERSION_DELETE_EVENT,
+            actor_user_id=actor_user_id,
+            item_id=_transcript_catalog_item_id(conn, media_id),
+            metadata={
+                "media_id": media_id,
+                "transcript_version_id": version_id,
+                "artifact_rel_path": artifact_path,
+            },
+        )
+    return {"artifact_rel_path": artifact_path}
+
+
+def _transcript_catalog_item_id(conn: sqlite3.Connection, media_id: str) -> str | None:
+    """Resolve the catalog item of this video so the audit event stays queryable."""
+    row = conn.execute(
+        """SELECT id FROM content_items
+           WHERE media_id=? AND content_kind='media_transcript'
+           ORDER BY created_at DESC,id DESC LIMIT 1""",
+        (media_id,),
+    ).fetchone()
+    return None if row is None else str(row["id"])
+
+
+def _delete_transcript_version_markdown(
+    artifacts: LocalTranscriptionArtifactStore,
+    result: dict[str, object],
+    version_id: str,
+) -> None:
+    """Unlink the version's managed artifact after its row is already gone."""
+    relative_path = result["artifact_rel_path"]
+    if not relative_path:
+        return
+    reference = ManagedMarkdownRef(relative_path, "0" * 64, 0)
+    try:
+        artifacts.delete_markdown(reference)
+    except (OSError, ValueError, ContractValidationError):
+        logger.exception("transcript artifact cleanup failed for %s", version_id)
+
+
+def _bulk_delete_transcript_versions_result(
+    items: list[BulkDeleteTranscriptVersionItemDTO],
+) -> BulkDeleteTranscriptVersionsResponse:
+    deleted = sum(item.status == "deleted" for item in items)
+    return BulkDeleteTranscriptVersionsResponse(
+        items=items,
+        deleted_count=deleted,
+        skipped_count=len(items) - deleted,
+    )
+
+
+def _replay_bulk_version_delete(
+    conn: sqlite3.Connection, media_id: str, fingerprint: str, idempotency_key: str
+) -> BulkDeleteTranscriptVersionsResponse | None:
+    """Return the first result of this request, or None when it is a new request.
+
+    The completion audit event is the idempotency ledger: an existing event for
+    the same key replays its stored per-item result instead of deleting again.
+    Candidate rows are matched in Python so the lookup does not depend on the
+    SQLite JSON1 extension being available.
+    """
+    rows = conn.execute(
+        """SELECT metadata_json FROM content_audit_events
+           WHERE event_type=? AND actor_user_id IS NOT NULL
+           ORDER BY created_at DESC,rowid DESC LIMIT 1000""",
+        (_TRANSCRIPT_VERSIONS_BULK_DELETE_EVENT,),
+    ).fetchall()
+    inconsistent = HTTPException(
+        status_code=409, detail="本次批量删除请求与已处理的请求不一致，请重新提交。"
+    )
+    for row in rows:
+        try:
+            metadata = json.loads(str(row["metadata_json"]))
+        except (TypeError, ValueError):
+            continue
+        if metadata.get("request_idempotency_key") != idempotency_key:
+            continue
+        if metadata.get("media_id") != media_id or metadata.get("request_fingerprint") != fingerprint:
+            raise inconsistent
+        try:
+            recorded_items = metadata["items"]
+            return BulkDeleteTranscriptVersionsResponse(
+                items=[
+                    BulkDeleteTranscriptVersionItemDTO(
+                        version_id=str(item["version_id"]),
+                        status=str(item["status"]),
+                        reason=None if item["reason"] is None else str(item["reason"]),
+                    )
+                    for item in recorded_items
+                ],
+                deleted_count=int(metadata["deleted_count"]),
+                skipped_count=int(metadata["skipped_count"]),
+            )
+        except (TypeError, ValueError, KeyError):
+            raise inconsistent
+    return None
+
+
+@router.post(
+    "/media/{media_id}/versions/bulk-delete",
+    response_model=BulkDeleteTranscriptVersionsResponse,
+    status_code=202,
+)
+def bulk_delete_transcript_versions(
+    media_id: str,
+    body: BulkDeleteTranscriptVersionsRequest,
+    admin: CurrentUser = Depends(require_csrf_admin),
+) -> BulkDeleteTranscriptVersionsResponse:
+    """Permanently delete never-published old transcript versions of one video.
+
+    Every item is validated and committed on its own, so a version that is the
+    current head, published, awaiting review or referenced by another version
+    only refuses itself. The same `request_idempotency_key` replays the first
+    result instead of deleting twice.
+    """
+    if not body.version_ids or len(body.version_ids) > _TRANSCRIPT_VERSIONS_DELETE_LIMIT:
+        raise HTTPException(status_code=400, detail="每次最多删除 50 个转录版本，且列表不能为空。")
+    try:
+        uuid.UUID(media_id)
+        uuid.UUID(body.request_idempotency_key)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="视频或幂等键不合法。")
+    version_ids = list(dict.fromkeys(body.version_ids))
+    if len(version_ids) > _TRANSCRIPT_VERSIONS_DELETE_LIMIT:
+        raise HTTPException(status_code=400, detail="每次最多删除 50 个转录版本，且列表不能为空。")
+    for version_id in version_ids:
+        try:
+            uuid.UUID(version_id)
+        except (ValueError, AttributeError):
+            raise HTTPException(status_code=400, detail="转录版本标识不合法。")
+    fingerprint = "sha256:" + hashlib.sha256(
+        json.dumps(
+            {"media_id": media_id, "version_ids": sorted(version_ids)},
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    artifacts = LocalTranscriptionArtifactStore(TRANSCRIPTION_ARTIFACT_DIR)
+    conn = connect()
+    try:
+        if conn.execute("SELECT 1 FROM media_assets WHERE media_id=?", (media_id,)).fetchone() is None:
+            raise HTTPException(status_code=404, detail="视频不存在。")
+        replayed = _replay_bulk_version_delete(conn, media_id, fingerprint, body.request_idempotency_key)
+        if replayed is not None:
+            return replayed
+    finally:
+        conn.close()
+
+    items: list[BulkDeleteTranscriptVersionItemDTO] = []
+    for version_id in version_ids:
+        item_conn = connect()
+        try:
+            result = _delete_transcript_version_row(
+                item_conn,
+                media_id,
+                version_id,
+                actor_user_id=admin.id,
+            )
+            items.append(BulkDeleteTranscriptVersionItemDTO(version_id=version_id, status="deleted"))
+        except _TranscriptVersionUnavailable as exc:
+            items.append(
+                BulkDeleteTranscriptVersionItemDTO(
+                    version_id=version_id,
+                    status="unavailable",
+                    reason=_TRANSCRIPT_VERSION_DELETE_REASONS.get(
+                        exc.reason_key, _TRANSCRIPT_VERSION_DELETE_REASONS["not_found"]
+                    ),
+                )
+            )
+            continue
+        except Exception:
+            logger.exception("bulk transcript version delete failed for %s", version_id)
+            items.append(
+                BulkDeleteTranscriptVersionItemDTO(
+                    version_id=version_id,
+                    status="conflict",
+                    reason=_TRANSCRIPT_VERSION_DELETE_FAILURE_REASON,
+                )
+            )
+            continue
+        finally:
+            item_conn.close()
+        _delete_transcript_version_markdown(artifacts, result, version_id)
+
+    response = _bulk_delete_transcript_versions_result(items)
+    ledger = connect()
+    try:
+        _record_bulk_version_delete(
+            ledger, media_id, fingerprint, body.request_idempotency_key, response, admin.id
+        )
+    finally:
+        ledger.close()
+    return response
+
+
+def _record_bulk_version_delete(
+    conn: sqlite3.Connection,
+    media_id: str,
+    fingerprint: str,
+    idempotency_key: str,
+    response: BulkDeleteTranscriptVersionsResponse,
+    actor_user_id: int,
+) -> None:
+    """Write the idempotency ledger event; a failure never invalidates the deletes."""
+    try:
+        audit_event(
+            conn,
+            _TRANSCRIPT_VERSIONS_BULK_DELETE_EVENT,
+            actor_user_id=actor_user_id,
+            item_id=_transcript_catalog_item_id(conn, media_id),
+            metadata={
+                "media_id": media_id,
+                "request_idempotency_key": idempotency_key,
+                "request_fingerprint": fingerprint,
+                "deleted_count": response.deleted_count,
+                "skipped_count": response.skipped_count,
+                "items": [
+                    {
+                        "version_id": item.version_id,
+                        "status": item.status,
+                        "reason": item.reason,
+                    }
+                    for item in response.items
+                ],
+            },
+        )
+        conn.commit()
+    except sqlite3.Error:
+        logger.exception("bulk transcript version delete ledger write failed for %s", media_id)
 
 
 @router.post(

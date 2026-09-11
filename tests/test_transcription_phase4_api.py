@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import json
 import sqlite3
 import threading
 from dataclasses import replace
@@ -33,7 +34,11 @@ from api.routes_transcription import (
     router as transcription_router,
 )
 from src.transcription.asr_service_contract import ASR_API_VERSION, ServiceCapabilities
-from api.schemas import BulkReviewTranscriptionRequest, RetryTranscriptionRequest
+from api.schemas import (
+    BulkDeleteTranscriptVersionsRequest,
+    BulkReviewTranscriptionRequest,
+    RetryTranscriptionRequest,
+)
 from api.transcription_store import SQLiteTranscriptionStore
 from src.transcription.persistence import ManagedMarkdownRef
 from src.transcription.provider_protocol import ProviderFailureClassification
@@ -1956,3 +1961,533 @@ def test_automatic_upload_defers_audio_preparation_to_the_worker(tmp_path, monke
         ).fetchone()[0] == "uploaded"
     finally:
         conn.close()
+
+
+# --- transcript version bulk delete -----------------------------------------
+
+BULK_DELETE_ROUTE = "/admin/transcription/media/{media_id}/versions/bulk-delete"
+BULK_DELETE_URL = "/api/admin/transcription/media/{media_id}/versions/bulk-delete"
+DELETABLE_VERSION_ID = "44444444-4444-4444-8444-444444444444"
+PUBLISHED_VERSION_ID = "55555555-5555-4555-8555-555555555555"
+AWAITING_VERSION_ID = "66666666-6666-4666-8666-666666666666"
+REFERENCING_VERSION_ID = "77777777-7777-4777-8777-777777777777"
+LEGACY_VERSION_ID = "88888888-8888-4888-8888-888888888888"
+IDEMPOTENCY_KEY = "99999999-9999-4999-8999-999999999991"
+
+
+def _transcript_version_delete_connect(tmp_path, monkeypatch):
+    """Point the route at a fresh connection per call, like a real request would."""
+    from api.db import connect as open_db
+
+    import api.routes_transcription as routes_transcription
+
+    db_path = tmp_path / "app.sqlite"
+    monkeypatch.setattr(routes_transcription, "connect", lambda: open_db(db_path))
+    return db_path
+
+
+def _seed_transcript_version(
+    conn,
+    version_id,
+    *,
+    media_id=MEDIA_ID,
+    markdown_path=None,
+    storage_kind="managed_artifact",
+    review_status="review_approved",
+    publication_status="not_published",
+    created_at=12,
+    supersedes=None,
+    derived_from=None,
+    artifact_rows=(),
+):
+    conn.execute(
+        """INSERT INTO transcript_versions(
+               id,media_id,source,markdown_storage_kind,markdown_rel_path,markdown_sha256,
+               markdown_size_bytes,review_status,publication_status,created_at,updated_at,
+               supersedes_version_id,derived_from_version_id
+           ) VALUES (?,?,'manual',?,?,?,?,?,?,?,?,?,?)""",
+        (
+            version_id,
+            media_id,
+            storage_kind,
+            markdown_path or f"markdown/{version_id}.md",
+            "a" * 64,
+            10,
+            review_status,
+            publication_status,
+            created_at,
+            created_at,
+            supersedes,
+            derived_from,
+        ),
+    )
+    for artifact_id in artifact_rows:
+        conn.execute(
+            """INSERT INTO transcript_version_artifacts(
+                   version_id,artifact_id,kind,content_sha256,size_bytes
+               ) VALUES (?,?,'provider_diagnostic',?,1)""",
+            (version_id, artifact_id, "b" * 64),
+        )
+    conn.commit()
+
+
+def _write_managed_artifact(tmp_path, relative_path, content=b"synthetic transcript\n"):
+    path = tmp_path / "artifacts" / Path(*relative_path.split("/"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    return path
+
+
+def _seed_published_head(conn, *, head_id=None):
+    """Seed a published head version, so non-head versions are deletable."""
+    head_id = head_id or "55555555-5555-4555-8555-555555555556"
+    if conn.execute(
+        "SELECT 1 FROM transcript_versions WHERE id=?", (head_id,)
+    ).fetchone() is None:
+        _seed_transcript_version(
+            conn,
+            head_id,
+            review_status="review_approved",
+            publication_status="published",
+            created_at=11,
+        )
+    conn.execute(
+        "INSERT OR REPLACE INTO media_transcript_heads(media_id,current_version_id,updated_at)"
+        " VALUES (?,?,?)",
+        (MEDIA_ID, head_id, 11),
+    )
+    conn.commit()
+    return head_id
+
+
+def _bulk_delete_request(version_ids, key=IDEMPOTENCY_KEY):
+    return BulkDeleteTranscriptVersionsRequest(
+        version_ids=list(version_ids), request_idempotency_key=key
+    )
+
+
+def test_bulk_version_delete_route_requires_csrf_admin_dependency():
+    route = route_for(transcription_router, BULK_DELETE_ROUTE, "POST")
+    assert require_csrf_admin in dependency_calls(route)
+    assert require_admin not in dependency_calls(route)
+
+
+def test_bulk_delete_removes_deletable_version_row_and_artifact(tmp_path, monkeypatch):
+    import api.routes_transcription as routes_transcription
+
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    seed_admin_user(conn)
+    artifact = _write_managed_artifact(tmp_path, f"markdown/{DELETABLE_VERSION_ID}.md")
+    _seed_transcript_version(conn, DELETABLE_VERSION_ID)
+    db_path = _transcript_version_delete_connect(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        routes_transcription,
+        "TRANSCRIPTION_ARTIFACT_DIR",
+        (tmp_path / "artifacts").resolve(),
+    )
+    try:
+        result = routes_transcription.bulk_delete_transcript_versions(
+            MEDIA_ID, _bulk_delete_request([DELETABLE_VERSION_ID]), ADMIN
+        )
+
+        assert result.deleted_count == 1
+        assert result.skipped_count == 0
+        assert [item.model_dump() for item in result.items] == [
+            {"version_id": DELETABLE_VERSION_ID, "status": "deleted", "reason": None}
+        ]
+        assert not artifact.exists()
+    finally:
+        conn.close()
+
+    check = sqlite3.connect(db_path)
+    check.row_factory = sqlite3.Row
+    try:
+        assert check.execute(
+            "SELECT 1 FROM transcript_versions WHERE id=?", (DELETABLE_VERSION_ID,)
+        ).fetchone() is None
+        event = check.execute(
+            """SELECT event_type,metadata_json FROM content_audit_events
+               WHERE event_type='content.transcript_version_deleted'"""
+        ).fetchone()
+        assert event is not None
+        metadata = json.loads(event["metadata_json"])
+        assert metadata["transcript_version_id"] == DELETABLE_VERSION_ID
+        assert metadata["media_id"] == MEDIA_ID
+        assert metadata["artifact_rel_path"] == f"markdown/{DELETABLE_VERSION_ID}.md"
+    finally:
+        check.close()
+
+
+@pytest.mark.parametrize(
+    ("version_id", "seed", "expected_reason"),
+    [
+        (PUBLISHED_VERSION_ID, "head", "当前正式版本不能删除，请先发布其它版本替换后再试。"),
+        ("55555555-5555-4555-8555-555555555556", "published", "已发布或正在发布的转录版本不能删除。"),
+        (AWAITING_VERSION_ID, "awaiting_review", "待审核的转录版本不能删除，请先完成审核。"),
+        (REFERENCING_VERSION_ID, "referenced", "该转录版本仍被其它版本引用，不能删除。"),
+    ],
+)
+def test_bulk_delete_refuses_protected_versions(
+    tmp_path, monkeypatch, version_id, seed, expected_reason
+):
+    import api.routes_transcription as routes_transcription
+
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    seed_admin_user(conn)
+    artifact = _write_managed_artifact(tmp_path, f"markdown/{version_id}.md")
+    if seed == "head":
+        # The head rule must be what refuses this version, so keep the row
+        # never-published and simply point the head at it.
+        _seed_transcript_version(conn, version_id, created_at=12)
+        _seed_published_head(conn, head_id=version_id)
+    elif seed == "published":
+        _seed_transcript_version(
+            conn, version_id, publication_status="published", created_at=13
+        )
+    elif seed == "awaiting_review":
+        _seed_transcript_version(conn, version_id, review_status="awaiting_review")
+    else:
+        _seed_transcript_version(conn, version_id, created_at=13)
+        _seed_transcript_version(
+            conn,
+            "77777777-7777-4777-8777-777777777778",
+            created_at=14,
+            derived_from=version_id,
+        )
+    _transcript_version_delete_connect(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        routes_transcription,
+        "TRANSCRIPTION_ARTIFACT_DIR",
+        (tmp_path / "artifacts").resolve(),
+    )
+    try:
+        result = routes_transcription.bulk_delete_transcript_versions(
+            MEDIA_ID, _bulk_delete_request([version_id]), ADMIN
+        )
+
+        assert (result.deleted_count, result.skipped_count) == (0, 1)
+        assert result.items[0].status == "unavailable"
+        assert result.items[0].reason == expected_reason
+        assert version_id not in result.items[0].reason
+        assert conn.execute(
+            "SELECT 1 FROM transcript_versions WHERE id=?", (version_id,)
+        ).fetchone() is not None
+        assert artifact.exists()
+    finally:
+        conn.close()
+
+
+def test_bulk_delete_reports_unknown_and_foreign_versions_independently(tmp_path, monkeypatch):
+    import api.routes_transcription as routes_transcription
+
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    seed_admin_user(conn)
+    foreign_media_id = "11111111-1111-4111-8111-111111111111"
+    conn.execute(
+        """INSERT INTO media_assets(
+               media_id,title,original_filename,storage_rel_path,mime_type,file_size,sha256,
+               transcript_source_path,transcript_origin,status,created_by,created_at,updated_at,error
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            foreign_media_id, "Other video", "other.mp4", "other/original.mp4", "video/mp4", 1,
+            "c" * 64, None, "generated", "uploaded", None, 1, 1, None,
+        ),
+    )
+    conn.commit()
+    _seed_transcript_version(conn, DELETABLE_VERSION_ID, created_at=12)
+    _seed_transcript_version(conn, AWAITING_VERSION_ID, media_id=foreign_media_id, created_at=13)
+    _transcript_version_delete_connect(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        routes_transcription,
+        "TRANSCRIPTION_ARTIFACT_DIR",
+        (tmp_path / "artifacts").resolve(),
+    )
+    try:
+        result = routes_transcription.bulk_delete_transcript_versions(
+            MEDIA_ID,
+            _bulk_delete_request(
+                [DELETABLE_VERSION_ID, "22222222-2222-4222-8222-222222222222", AWAITING_VERSION_ID]
+            ),
+            ADMIN,
+        )
+
+        assert (result.deleted_count, result.skipped_count) == (1, 2)
+        assert [(item.status, item.reason) for item in result.items] == [
+            ("deleted", None),
+            ("unavailable", "该转录版本不存在或已被删除。"),
+            ("unavailable", "该转录版本不属于当前视频。"),
+        ]
+    finally:
+        conn.close()
+
+
+def test_bulk_delete_keeps_partial_success_and_replays_idempotency_key(tmp_path, monkeypatch):
+    import api.routes_transcription as routes_transcription
+
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    seed_admin_user(conn)
+    _seed_published_head(conn)
+    artifact = _write_managed_artifact(tmp_path, f"markdown/{DELETABLE_VERSION_ID}.md")
+    _seed_transcript_version(conn, DELETABLE_VERSION_ID, created_at=12)
+    _transcript_version_delete_connect(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        routes_transcription,
+        "TRANSCRIPTION_ARTIFACT_DIR",
+        (tmp_path / "artifacts").resolve(),
+    )
+    ids = [DELETABLE_VERSION_ID, PUBLISHED_VERSION_ID]
+    try:
+        first = routes_transcription.bulk_delete_transcript_versions(
+            MEDIA_ID, _bulk_delete_request(ids), ADMIN
+        )
+        second = routes_transcription.bulk_delete_transcript_versions(
+            MEDIA_ID, _bulk_delete_request(ids), ADMIN
+        )
+
+        assert (first.deleted_count, first.skipped_count) == (1, 1)
+        assert first.model_dump() == second.model_dump()
+        assert second.items[0].status == "deleted"
+        assert second.items[1].status == "unavailable"
+        assert not artifact.exists()
+        assert conn.execute(
+            """SELECT count(*) FROM content_audit_events
+               WHERE event_type='content.transcript_versions_bulk_deleted'"""
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            """SELECT count(*) FROM content_audit_events
+               WHERE event_type='content.transcript_version_deleted'"""
+        ).fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_bulk_delete_idempotency_key_rejects_a_different_request(tmp_path, monkeypatch):
+    import api.routes_transcription as routes_transcription
+
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    seed_admin_user(conn)
+    _seed_transcript_version(conn, DELETABLE_VERSION_ID, created_at=12)
+    _seed_transcript_version(conn, AWAITING_VERSION_ID, created_at=13)
+    _transcript_version_delete_connect(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        routes_transcription,
+        "TRANSCRIPTION_ARTIFACT_DIR",
+        (tmp_path / "artifacts").resolve(),
+    )
+    try:
+        routes_transcription.bulk_delete_transcript_versions(
+            MEDIA_ID, _bulk_delete_request([DELETABLE_VERSION_ID]), ADMIN
+        )
+        with pytest.raises(HTTPException) as caught:
+            routes_transcription.bulk_delete_transcript_versions(
+                MEDIA_ID, _bulk_delete_request([DELETABLE_VERSION_ID, AWAITING_VERSION_ID]), ADMIN
+            )
+
+        assert caught.value.status_code == 409
+        assert caught.value.detail == "本次批量删除请求与已处理的请求不一致，请重新提交。"
+        assert conn.execute(
+            "SELECT 1 FROM transcript_versions WHERE id=?", (AWAITING_VERSION_ID,)
+        ).fetchone() is not None
+    finally:
+        conn.close()
+
+
+def test_bulk_delete_rejects_legacy_manual_versions_without_deleting_docs(tmp_path, monkeypatch):
+    import api.routes_transcription as routes_transcription
+
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    seed_admin_user(conn)
+    docs_root = tmp_path / "docs"
+    docs_file = docs_root / "教学视频" / "legacy.md"
+    docs_file.parent.mkdir(parents=True)
+    docs_file.write_bytes(b"# legacy\n")
+    _seed_transcript_version(
+        conn,
+        LEGACY_VERSION_ID,
+        markdown_path="docs/教学视频/legacy.md",
+        storage_kind="legacy_manual",
+    )
+    _transcript_version_delete_connect(tmp_path, monkeypatch)
+    monkeypatch.setattr(routes_transcription, "DOCS_DIR", docs_root)
+    monkeypatch.setattr(
+        routes_transcription,
+        "TRANSCRIPTION_ARTIFACT_DIR",
+        (tmp_path / "artifacts").resolve(),
+    )
+    try:
+        result = routes_transcription.bulk_delete_transcript_versions(
+            MEDIA_ID, _bulk_delete_request([LEGACY_VERSION_ID]), ADMIN
+        )
+
+        assert [(item.status, item.reason) for item in result.items] == [
+            ("unavailable", "手工上传的历史转录稿不能在此删除。")
+        ]
+        assert conn.execute(
+            "SELECT 1 FROM transcript_versions WHERE id=?", (LEGACY_VERSION_ID,)
+        ).fetchone() is not None
+        assert docs_file.read_bytes() == b"# legacy\n"
+    finally:
+        conn.close()
+
+
+def test_bulk_delete_keeps_a_shared_managed_artifact_file(tmp_path, monkeypatch):
+    import api.routes_transcription as routes_transcription
+
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    seed_admin_user(conn)
+    shared_path = "markdown/shared/synthetic.md"
+    artifact = _write_managed_artifact(tmp_path, shared_path)
+    _seed_transcript_version(conn, DELETABLE_VERSION_ID, markdown_path=shared_path, created_at=12)
+    _seed_transcript_version(conn, AWAITING_VERSION_ID, markdown_path=shared_path, created_at=13)
+    _transcript_version_delete_connect(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        routes_transcription,
+        "TRANSCRIPTION_ARTIFACT_DIR",
+        (tmp_path / "artifacts").resolve(),
+    )
+    try:
+        result = routes_transcription.bulk_delete_transcript_versions(
+            MEDIA_ID, _bulk_delete_request([DELETABLE_VERSION_ID]), ADMIN
+        )
+
+        assert result.deleted_count == 1
+        assert artifact.read_bytes() == b"synthetic transcript\n"
+    finally:
+        conn.close()
+
+
+def test_bulk_delete_removes_owned_artifact_reference_rows(tmp_path, monkeypatch):
+    import api.routes_transcription as routes_transcription
+
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    seed_admin_user(conn)
+    _seed_transcript_version(
+        conn, DELETABLE_VERSION_ID, created_at=12, artifact_rows=("provider-diagnostic-1",)
+    )
+    _transcript_version_delete_connect(tmp_path, monkeypatch)
+    try:
+        result = routes_transcription.bulk_delete_transcript_versions(
+            MEDIA_ID, _bulk_delete_request([DELETABLE_VERSION_ID]), ADMIN
+        )
+
+        assert result.deleted_count == 1
+        assert conn.execute(
+            "SELECT 1 FROM transcript_version_artifacts WHERE version_id=?",
+            (DELETABLE_VERSION_ID,),
+        ).fetchone() is None
+    finally:
+        conn.close()
+
+
+def test_bulk_delete_validates_the_request_body(tmp_path, monkeypatch):
+    import api.routes_transcription as routes_transcription
+
+    empty_body = BulkDeleteTranscriptVersionsRequest.model_construct(
+        version_ids=[], request_idempotency_key=IDEMPOTENCY_KEY
+    )
+    oversized_body = BulkDeleteTranscriptVersionsRequest.model_construct(
+        version_ids=[DELETABLE_VERSION_ID] * 51, request_idempotency_key=IDEMPOTENCY_KEY
+    )
+    malformed_body = BulkDeleteTranscriptVersionsRequest.model_construct(
+        version_ids=["not-a-uuid"], request_idempotency_key=IDEMPOTENCY_KEY
+    )
+    bad_key_body = BulkDeleteTranscriptVersionsRequest.model_construct(
+        version_ids=[DELETABLE_VERSION_ID], request_idempotency_key="not-a-uuid"
+    )
+    bad_media_body = _bulk_delete_request([DELETABLE_VERSION_ID])
+
+    # The 1..50 item rule is a route rule (HTTP 400), while the schema cap only
+    # stops absurd payloads from being materialized.
+    with pytest.raises(ValidationError):
+        BulkDeleteTranscriptVersionsRequest(
+            version_ids=[DELETABLE_VERSION_ID] * 201, request_idempotency_key=IDEMPOTENCY_KEY
+        )
+
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    seed_admin_user(conn)
+    _transcript_version_delete_connect(tmp_path, monkeypatch)
+    try:
+        for media_id, body in (
+            (MEDIA_ID, empty_body),
+            (MEDIA_ID, oversized_body),
+            (MEDIA_ID, malformed_body),
+            (MEDIA_ID, bad_key_body),
+        ):
+            with pytest.raises(HTTPException) as caught:
+                routes_transcription.bulk_delete_transcript_versions(media_id, body, ADMIN)
+            assert caught.value.status_code == 400
+            assert isinstance(caught.value.detail, str)
+
+        with pytest.raises(HTTPException) as bad_media:
+            routes_transcription.bulk_delete_transcript_versions(
+                "not-a-uuid", bad_media_body, ADMIN
+            )
+        assert bad_media.value.status_code == 400
+        assert bad_media.value.detail == "视频或幂等键不合法。"
+    finally:
+        conn.close()
+
+
+def test_bulk_delete_reports_missing_media_as_not_found(tmp_path, monkeypatch):
+    import api.routes_transcription as routes_transcription
+
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    seed_admin_user(conn)
+    _transcript_version_delete_connect(tmp_path, monkeypatch)
+    try:
+        with pytest.raises(HTTPException) as caught:
+            routes_transcription.bulk_delete_transcript_versions(
+                "11111111-1111-4111-8111-111111111111",
+                _bulk_delete_request([DELETABLE_VERSION_ID]),
+                ADMIN,
+            )
+
+        assert caught.value.status_code == 404
+        assert caught.value.detail == "视频不存在。"
+    finally:
+        conn.close()
+
+
+def test_bulk_delete_http_contract_returns_itemized_result(tmp_path, monkeypatch):
+    import api.routes_transcription as routes_transcription
+    from api.db import connect as open_db
+
+    conn, _store, _artifacts = make_phase2_store(tmp_path)
+    seed_admin_user(conn)
+    _seed_published_head(conn)
+    _seed_published_head(conn, head_id=PUBLISHED_VERSION_ID)
+    _seed_transcript_version(conn, DELETABLE_VERSION_ID, created_at=12)
+    conn.close()
+    db_path = tmp_path / "app.sqlite"
+    monkeypatch.setattr(routes_transcription, "connect", lambda: open_db(db_path))
+    monkeypatch.setattr(
+        routes_transcription,
+        "TRANSCRIPTION_ARTIFACT_DIR",
+        (tmp_path / "artifacts").resolve(),
+    )
+    app = FastAPI()
+    app.include_router(transcription_router, prefix="/api")
+    app.dependency_overrides[require_csrf_admin] = lambda: ADMIN
+
+    response = TestClient(app).post(
+        BULK_DELETE_URL.format(media_id=MEDIA_ID),
+        json={
+            "version_ids": [DELETABLE_VERSION_ID, PUBLISHED_VERSION_ID],
+            "request_idempotency_key": IDEMPOTENCY_KEY,
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "items": [
+            {"version_id": DELETABLE_VERSION_ID, "status": "deleted", "reason": None},
+            {
+                "version_id": PUBLISHED_VERSION_ID,
+                "status": "unavailable",
+                "reason": "已发布或正在发布的转录版本不能删除。",
+            },
+        ],
+        "deleted_count": 1,
+        "skipped_count": 1,
+    }
+

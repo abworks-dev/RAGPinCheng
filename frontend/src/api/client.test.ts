@@ -689,6 +689,29 @@ describe("Phase 4B transcription API contracts", () => {
       body: JSON.stringify({ media_ids: ["media-1"] }),
     }));
   });
+
+  it("sends the transcript version bulk delete with its idempotency key and CSRF", async () => {
+    setCsrfToken("csrf-version-bulk");
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({
+      items: [{ version_id: "version-1", status: "deleted", reason: null }],
+      deleted_count: 1,
+      skipped_count: 0,
+    }, 202));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await api.bulkDeleteTranscriptVersions("media-1", ["version-1"], "22222222-2222-4222-8222-222222222222");
+
+    expect(result).toMatchObject({ deleted_count: 1, skipped_count: 0 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/transcription/media/media-1/versions/bulk-delete",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-version-bulk" },
+        body: JSON.stringify({ version_ids: ["version-1"], request_idempotency_key: "22222222-2222-4222-8222-222222222222" }),
+      }),
+    );
+  });
 });
 
 
