@@ -63,11 +63,33 @@ jobs:
           import json
           import os
           import sqlite3
+          from pathlib import Path
 
-          from src.config import APP_DB_PATH
+          from src.config import APP_DB_PATH, TRANSCRIPTION_ARTIFACT_DIR
 
           MARKERS = ("请准确识别", "要准确识别")
           TERMS = ("Revit", "Navisworks", "AutoCAD", "BIM-", "GB ", "12.5", "208", "95%")
+
+          def scan(text):
+              hits = 0
+              samples = []
+              for line in text.splitlines():
+                  if any(marker in line for marker in MARKERS) and sum(
+                      term.casefold() in line.casefold() for term in TERMS
+                  ) >= 3:
+                      hits += 1
+                      if len(samples) < 2:
+                          samples.append(line.strip()[:100])
+              return hits, samples
+
+          def read_artifact(rel_path):
+              if not rel_path:
+                  return ""
+              path = Path(TRANSCRIPTION_ARTIFACT_DIR) / str(rel_path)
+              try:
+                  return path.read_text(encoding="utf-8", errors="replace")
+              except OSError:
+                  return ""
 
           like = f"%{os.environ.get('TITLE_LIKE', '2.4.10')}%"
           connection = sqlite3.connect(f"file:{APP_DB_PATH}?mode=ro", uri=True)
@@ -82,43 +104,55 @@ jobs:
               print("== media:", row["title"], "status:", row["status"])
               jobs = connection.execute(
                   """SELECT attempt_number,status,failure_classification,failure_error_code,
-                            total_ms,processed_ms,created_at,finished_at,scheme_id
+                            total_ms,processed_ms,created_at,finished_at,scheme_id,draft_markdown_rel_path
                      FROM transcription_jobs WHERE media_id=? ORDER BY created_at DESC LIMIT 6""",
                   (media_id,),
               ).fetchall()
               for job in jobs:
-                  print("  job", dict(job))
+                  job_info = dict(job)
+                  draft_rel = job_info.pop("draft_markdown_rel_path", None)
+                  print("  job", job_info)
+                  draft_hits, draft_samples = scan(read_artifact(draft_rel))
+                  print("    draft_markdown_echo_lines:", draft_hits, "| artifact:", bool(draft_rel))
+                  for sample in draft_samples:
+                      print("    draft echo:", sample)
               versions = connection.execute(
                   """SELECT id,created_at,review_status,publication_status,scheme_id,
-                            length(canonical_json) AS canonical_len,canonical_sha256
+                            length(canonical_json) AS canonical_len,canonical_sha256,markdown_rel_path
                      FROM transcript_versions WHERE media_id=? ORDER BY created_at DESC,id DESC LIMIT 6""",
                   (media_id,),
               ).fetchall()
               for index, version in enumerate(versions):
                   info = dict(version)
-                  info.pop("canonical_json", None)
-                  print("  version", info)
-                  if index >= 3:
-                      continue
+                  markdown_rel = info.pop("markdown_rel_path", None)
+                  canonical_hits = 0
+                  samples = []
                   payload = connection.execute(
                       "SELECT canonical_json FROM transcript_versions WHERE id=?", (version["id"],)
                   ).fetchone()
                   try:
                       canonical = json.loads(payload["canonical_json"])
+                      segments = canonical.get("segments") or []
+                      for segment in segments:
+                          text = str(segment.get("text", ""))
+                          if any(marker in text for marker in MARKERS) and sum(
+                              term.casefold() in text.casefold() for term in TERMS
+                          ) >= 3:
+                              canonical_hits += 1
+                              if len(samples) < 2:
+                                  samples.append(text[:100])
                   except Exception as exc:  # pragma: no cover - diagnostic only
                       print("    canonical parse failed:", type(exc).__name__)
-                      continue
-                  segments = canonical.get("segments") or []
-                  echoed = []
-                  for segment in segments:
-                      text = str(segment.get("text", ""))
-                      if any(marker in text for marker in MARKERS) and sum(
-                          term.casefold() in text.casefold() for term in TERMS
-                      ) >= 3:
-                          echoed.append(text[:120])
-                  print("    segments:", len(segments), "prompt_echo_segments:", len(echoed))
-                  for sample in echoed[:3]:
-                      print("    echo sample:", sample)
+                  markdown_hits, markdown_samples = scan(read_artifact(markdown_rel))
+                  print(
+                      "  version", info,
+                      "| canonical_echo_segments:", canonical_hits,
+                      "| markdown_echo_lines:", markdown_hits,
+                  )
+                  for sample in samples:
+                      print("    canonical echo:", sample)
+                  for sample in markdown_samples:
+                      print("    markdown echo:", sample)
           connection.close()
           PY
 
