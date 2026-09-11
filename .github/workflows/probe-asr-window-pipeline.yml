@@ -46,6 +46,10 @@ jobs:
       JOB_DIR: ${{ inputs.job_dir }}
       WINDOW_START_MS: ${{ inputs.window_start_ms }}
       WINDOW_END_MS: ${{ inputs.window_end_ms }}
+      # The probe imports modules straight out of the active release app root, so
+      # it must never leave bytecode caches there: a release tree whose file set
+      # stops matching its manifest cannot be restarted or promoted.
+      PYTHONDONTWRITEBYTECODE: "1"
     steps:
       - name: Validate immutable revision and probe gate
         shell: powershell

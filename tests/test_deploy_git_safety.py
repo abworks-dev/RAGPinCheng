@@ -302,11 +302,12 @@ class TestDeployGitSafety(unittest.TestCase):
         self.assertIn("-Mode Finalize", workflow)
         self.assertIn("-Mode Restore", workflow)
 
-        self.assertIn("$approvedCandidateId = '34283259608'", script)
-        self.assertIn(
-            "$approvedManifestSha256 = 'dcbe445a29cdcc0b2bf2c333a4f40bd73eabd1db2312c78cc6ef71c9b3a545d4'",
-            script,
-        )
+        # The repair stays pinned to an explicit candidate allowlist, and the
+        # manifest identity is bound to the active release state rather than a
+        # single hardcoded digest (the active candidate changes per release).
+        self.assertIn("$approvedCandidateIds = @('34283259608', '34575342892')", script)
+        self.assertIn("$CandidateId -notin $approvedCandidateIds", script)
+        self.assertIn("Release closure repair requires an explicit manifest identity", script)
         self.assertIn("Release manifest-listed bytes drifted; quarantine repair is not applicable", script)
         self.assertIn(r"__pycache__/[^/]+\.pyc$", script)
         self.assertIn("Undeclared release file is outside the approved bytecode-cache class", script)
