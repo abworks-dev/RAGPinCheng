@@ -107,24 +107,35 @@ if (Test-Path -LiteralPath $reportRoot -PathType Container) {
 
 $spoolResults = @()
 $spoolRoot = Join-Path $runRoot "spool"
+function Get-PropertyValue {
+    param([object]$Value, [string]$Name)
+    if ($null -eq $Value) { return "" }
+    $properties = @($Value.PSObject.Properties.Name)
+    if ($properties -notcontains $Name) { return "" }
+    $item = $Value.$Name
+    if ($null -eq $item) { return "" }
+    return [string]$item
+}
 if (Test-Path -LiteralPath $spoolRoot -PathType Container) {
     foreach ($resultPath in @(Get-ChildItem -LiteralPath $spoolRoot -Filter "result.json" -File -Recurse -Force)) {
         try {
-            $result = Get-Content -LiteralPath $resultPath.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+            $serviceResult = Get-Content -LiteralPath $resultPath.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
             $jobPath = Join-Path $resultPath.DirectoryName "job.json"
             $job = if (Test-Path -LiteralPath $jobPath -PathType Leaf) {
                 Get-Content -LiteralPath $jobPath -Raw -Encoding UTF8 | ConvertFrom-Json
             } else { $null }
+            $resultValue = if (@($serviceResult.PSObject.Properties.Name) -contains "result") { $serviceResult.result } else { $null }
             $spoolResults += [ordered]@{
-                job_id = [string]$result.job_id
-                job_state = if ($null -ne $job) { [string]$job.state } else { "" }
-                failure_code = if ($null -ne $job) { [string]$job.failure_code } else { "" }
-                result_type = [string]$result.result.type
-                error_code = [string]$result.result.error_code
-                classification = [string]$result.result.classification
+                job_state = Get-PropertyValue -Value $job -Name "state"
+                job_failure_code = Get-PropertyValue -Value $job -Name "failure_code"
+                job_processed_ms = Get-PropertyValue -Value $job -Name "processed_ms"
+                result_provider_key = Get-PropertyValue -Value $resultValue -Name "provider_key"
+                result_error_code = Get-PropertyValue -Value $resultValue -Name "error_code"
+                result_classification = Get-PropertyValue -Value $resultValue -Name "classification"
+                result_timeout_ms = Get-PropertyValue -Value $resultValue -Name "timeout_ms"
             }
         } catch {
-            $spoolResults += [ordered]@{ parse_error = $true }
+            $spoolResults += [ordered]@{ parse_error = $true; exception_type = $_.Exception.GetType().Name }
         }
     }
 }
