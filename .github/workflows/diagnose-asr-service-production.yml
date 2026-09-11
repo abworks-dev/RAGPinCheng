@@ -78,6 +78,10 @@ jobs:
               "- Scheduler OOM latch: ``$($result.scheduler_oom_latched)``",
               "- Scheduler failures: ``$($result.scheduler_consecutive_failures)/$($result.scheduler_failure_limit)``",
               "- Scheduler queue: ``$($result.scheduler_queue_depth)/$($result.scheduler_queue_limit)``",
+              "- Active release config present: ``$($result.active_release_config_present)``",
+              "- ASR_CHUNK_DURATION_MS: ``$($result.chunk_duration_ms_setting)``",
+              "- ASR_CHUNK_OVERLAP_MS: ``$($result.chunk_overlap_ms_setting)``",
+              "- Chunk window code defaults: ``$($result.chunk_window_code_defaults)``",
               "- Log updated after last run: ``$($result.startup_log_updated_after_last_run)``",
               "- Signals: ``$(@($result.signals) -join ',')``",
               "- Production services modified: ``$($result.production_services_modified)``"
