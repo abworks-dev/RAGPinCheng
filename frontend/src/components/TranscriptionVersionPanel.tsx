@@ -57,13 +57,19 @@ function newIdempotencyKey() {
 /**
  * Client-side mirror of the permanent-delete rules in the approved plan
  * (`docs/plans/transcript-version-batch-delete.md`): a version is deletable only
- * when it is not the current head, never published, not awaiting review, and not
- * referenced by another version. The backend stays the authority; this only
- * explains the rule to the user before they click.
+ * when it is not the current head, never published, not awaiting review, stored
+ * as a managed artifact, and not referenced through `derived_from_version_id` by
+ * another version.
+ *
+ * A version that is only *superseded* (`supersedes_version_id`) stays deletable:
+ * every version of a normal chain supersedes the previous one, so blocking that
+ * reference made the whole feature unusable. The backend clears those references
+ * in the deleting transaction and remains the authority; this only explains the
+ * rule to the user before they click.
  */
-function deleteBlockReason(version: TranscriptVersion, referenced: boolean): string | null {
+function deleteBlockReason(version: TranscriptVersion, derivedFromReferenced: boolean): string | null {
   if (version.is_current) return "当前正式检索版本，不能删除";
-  if (referenced) return "已被其他版本引用，不能删除";
+  if (derivedFromReferenced) return "该转录版本是人工校对稿的来源版本，不能删除";
   if (version.publication_status === "published") return "已发布到知识库，不能删除";
   if (version.publication_status === "publishing") return "正在发布，暂时不能删除";
   if (version.publication_status === "publication_failed") return "发布失败版本需保留排查，不能删除";
@@ -151,10 +157,11 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
     if (publicationJob?.status === "done" || publicationJob?.status === "failed") void loadVersions();
   }, [publicationJob?.status, loadVersions]);
 
-  const referencedVersionIds = useMemo(() => {
+  // Only `derived_from_version_id` blocks a delete. A `supersedes_version_id`
+  // reference does not: the backend nulls it while deleting the superseded row.
+  const derivedFromReferencedVersionIds = useMemo(() => {
     const referenced = new Set<string>();
     for (const version of versions) {
-      if (version.supersedes_version_id) referenced.add(version.supersedes_version_id);
       if (version.derived_from_version_id) referenced.add(version.derived_from_version_id);
     }
     return referenced;
@@ -163,10 +170,10 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
   const blockReasons = useMemo(() => {
     const reasons: Record<string, string | null> = {};
     for (const version of versions) {
-      reasons[version.version_id] = deleteBlockReason(version, referencedVersionIds.has(version.version_id));
+      reasons[version.version_id] = deleteBlockReason(version, derivedFromReferencedVersionIds.has(version.version_id));
     }
     return reasons;
-  }, [referencedVersionIds, versions]);
+  }, [derivedFromReferencedVersionIds, versions]);
 
   const deletableVersionIds = useMemo(
     () => versions.filter((version) => !blockReasons[version.version_id]).map((version) => version.version_id),

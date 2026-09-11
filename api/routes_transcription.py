@@ -1307,7 +1307,7 @@ _TRANSCRIPT_VERSION_DELETE_REASONS = {
     "current_head": "当前正式版本不能删除，请先发布其它版本替换后再试。",
     "published": "已发布或正在发布的转录版本不能删除。",
     "awaiting_review": "待审核的转录版本不能删除，请先完成审核。",
-    "referenced": "该转录版本仍被其它版本引用，不能删除。",
+    "referenced_derived_from": "该转录版本是人工校对稿的来源版本，不能删除。",
     "legacy_manual": "手工上传的历史转录稿不能在此删除。",
 }
 _TRANSCRIPT_VERSION_DELETE_FAILURE_REASON = "删除转录版本时发生并发冲突，请刷新列表后重试。"
@@ -1337,7 +1337,15 @@ def _transcript_version_delete_transaction(conn: sqlite3.Connection) -> Iterator
 def _transcript_version_unavailable_reason(
     conn: sqlite3.Connection, media_id: str, version_id: str
 ) -> str:
-    """Return the safety rule that blocks deleting this version, or '' when allowed."""
+    """Return the safety rule that blocks deleting this version, or '' when allowed.
+
+    A version that is only *superseded* stays deletable: every version in a
+    normal chain supersedes the previous one, so treating that reference as a
+    blocker made the whole batch-delete feature unusable. The caller clears
+    those references in the same transaction before deleting the row.
+    A `derived_from_version_id` reference still refuses the delete, because a
+    manual revision keeps deriving from its source version.
+    """
     row = conn.execute(
         """SELECT media_id,publication_status,review_status FROM transcript_versions WHERE id=?""",
         (version_id,),
@@ -1357,11 +1365,11 @@ def _transcript_version_unavailable_reason(
         return "current_head"
     if conn.execute(
         """SELECT 1 FROM transcript_versions
-           WHERE id<>? AND (supersedes_version_id=? OR derived_from_version_id=?)
+           WHERE id<>? AND derived_from_version_id=?
            LIMIT 1""",
-        (version_id, version_id, version_id),
+        (version_id, version_id),
     ).fetchone() is not None:
-        return "referenced"
+        return "referenced_derived_from"
     return ""
 
 
@@ -1407,6 +1415,14 @@ def _delete_transcript_version_row(
             (version_id, markdown_rel_path),
         ).fetchone() is not None
         artifact_path: str | None = markdown_rel_path if not shared else None
+        # Superseding is history, not ownership: a newer version may point at a
+        # version we are allowed to delete, so its `supersedes_version_id` is
+        # cleared in the same transaction before the row goes away. Only
+        # `derived_from_version_id` still refuses the delete (checked above).
+        conn.execute(
+            "UPDATE transcript_versions SET supersedes_version_id=NULL WHERE supersedes_version_id=?",
+            (version_id,),
+        )
         conn.execute("DELETE FROM transcript_version_artifacts WHERE version_id=?", (version_id,))
         deleted = conn.execute(
             "DELETE FROM transcript_versions WHERE id=? AND media_id=?",
@@ -1528,9 +1544,11 @@ def bulk_delete_transcript_versions(
     """Permanently delete never-published old transcript versions of one video.
 
     Every item is validated and committed on its own, so a version that is the
-    current head, published, awaiting review or referenced by another version
-    only refuses itself. The same `request_idempotency_key` replays the first
-    result instead of deleting twice.
+    current head, published, awaiting review or still referenced through
+    `derived_from_version_id` only refuses itself. A version that is merely
+    superseded by newer versions is deletable: those `supersedes_version_id`
+    references are cleared in the same transaction. The same
+    `request_idempotency_key` replays the first result instead of deleting twice.
     """
     if not body.version_ids or len(body.version_ids) > _TRANSCRIPT_VERSIONS_DELETE_LIMIT:
         raise HTTPException(status_code=400, detail="每次最多删除 50 个转录版本，且列表不能为空。")
