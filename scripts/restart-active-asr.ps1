@@ -70,11 +70,16 @@ function Get-OwnedListenerIds {
     $baseOutput = & $venvPython -c "import sys; print(sys._base_executable)"
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($baseOutput)) { throw "Unable to resolve active ASR base Python" }
     $basePython = (Resolve-Path -LiteralPath ([string]$baseOutput).Trim()).Path
-    $expected = '"{0}" -m uvicorn {1} --factory --host 0.0.0.0 --port 8200' -f $basePython, $Context.module
+    $expected = @(
+        '"{0}" -m uvicorn {1} --factory --host 0.0.0.0 --port 8200' -f $basePython, $Context.module,
+        # The release start path may add -B to keep bytecode out of the
+        # content-addressed release tree; both forms are owned.
+        '"{0}" -B -m uvicorn {1} --factory --host 0.0.0.0 --port 8200' -f $basePython, $Context.module
+    )
     $ids = @()
     foreach ($processId in @(Get-NetTCPConnection -LocalPort 8200 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)) {
         $process = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $processId)
-        if ($null -eq $process -or [string]$process.ExecutablePath -ne $basePython -or [string]$process.CommandLine -ne $expected) {
+        if ($null -eq $process -or [string]$process.ExecutablePath -ne $basePython -or [string]$process.CommandLine -notin $expected) {
             throw "Refusing to modify an unexpected process listening on TCP 8200"
         }
         $ids += $processId

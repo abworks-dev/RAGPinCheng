@@ -208,7 +208,12 @@ function Stop-VerifiedListeners {
         throw "Unable to resolve the ASR venv base Python executable"
     }
     $basePython = (Resolve-Path -LiteralPath ([string]$baseOutput).Trim()).Path
-    $expectedCommandLine = '"{0}" -m uvicorn {1} --factory --host 0.0.0.0 --port 8200' -f $basePython, $AppModule
+    $expectedCommandLines = @(
+        '"{0}" -m uvicorn {1} --factory --host 0.0.0.0 --port 8200' -f $basePython, $AppModule,
+        # The release start path may add -B to keep bytecode out of the
+        # content-addressed release tree; both forms are owned.
+        '"{0}" -B -m uvicorn {1} --factory --host 0.0.0.0 --port 8200' -f $basePython, $AppModule
+    )
     foreach ($processId in @(
         Get-NetTCPConnection -LocalPort 8200 -State Listen -ErrorAction SilentlyContinue |
             Select-Object -ExpandProperty OwningProcess -Unique
@@ -217,7 +222,7 @@ function Stop-VerifiedListeners {
         if (
             $null -eq $process -or
             [string]$process.ExecutablePath -ne $basePython -or
-            [string]$process.CommandLine -ne $expectedCommandLine
+            [string]$process.CommandLine -notin $expectedCommandLines
         ) {
             throw "Refusing to stop an unexpected process listening on TCP 8200"
         }
