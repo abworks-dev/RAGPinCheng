@@ -22,9 +22,9 @@
 1. **可删范围**：仅允许删除**从未发布过**的旧版本，即同时满足
    - 不是当前正式 head（不等于 `media_transcript_heads.current_version_id`）；
    - `publication_status = 'not_published'`；
-   - `review_status != 'awaiting_review'`（待审核稿不可删）；
-   - 没有其它版本以 `supersedes_version_id` 或 `derived_from_version_id` 指向它。
-   已发布 / 发布中 / 发布失败 / 待审核 / 当前 head 一律**拒绝**并返回结构化原因。
+   - 没有其它版本以 `derived_from_version_id` 指向它。
+   已发布 / 发布中 / 发布失败 / 当前 head / 被 `derived_from_version_id` 引用一律**拒绝**并返回结构化原因。
+   生产决策（2026-09-12 修订）：`review_status = 'awaiting_review'` 的版本**可删**，删除即撤回这次未审核的尝试；`supersedes_version_id` 引用也不再拒绝，而是在同一事务内清空后被删版本的指向。待审核稿由 `register_metadata_revision` 与 `media_metadata_revisions` 行同事务创建，该外键为 `RESTRICT`，因此删除事务同时删除这行归属记录。
 2. **删除方式**：**永久删除**（版本行 + 该版本对应的托管 markdown 产物文件），并写入审计事件（actor、媒体、被删版本号/id、原因）。
 3. **作用范围**：仅限**当前视频**的版本列表（不做跨视频批量）。
 4. 前端必须二次确认，逐项展示不可删除原因，批量操作保留部分成功结果。
@@ -62,17 +62,17 @@
 
 ## 5. 验证方式
 
-- 后端：`tests/test_transcription_phase4_api.py` 新增用例 —— 可删旧版本被删；head/已发布/待审核/被引用版本被拒；部分成功；幂等键重复提交；非管理员与缺 CSRF 被拒。
+- 后端：`tests/test_transcription_phase4_api.py` 新增用例 —— 可删旧版本被删；待审核版本连同其 `media_metadata_revisions` 行被删；head/已发布/被 `derived_from_version_id` 引用版本被拒；被 `supersedes_version_id` 引用的版本可删且引用被清空；部分成功；幂等键重复提交；非管理员与缺 CSRF 被拒。
 - 前端：`npm run build`；`TranscriptionVersionPanel.test.tsx`、`TranscriptionWorkbenchSheet.test.tsx` 及 `npm run test:run`；新增批量选择、不可删禁用、确认流程、部分成功用例。
 - 真实浏览器验收（合成数据）：`1280x720` 与 `390x844`，检查 `body` 无横向溢出、核心操作可见、勾选与确认可达、partial-failure 提示、键盘路径。
 - 生产验收：由用户在抽屉中实际操作（选择 → 删除 → 确认），验收通过后更新 TODO 状态。
 
 ## 6. 风险与回滚
 
-- 风险：误删旧版本（缓解：只允许 never-published、head 与待审核永不可删、二次确认、审计留痕、逐项原因）；
+- 风险：误删旧版本（缓解：只允许 never-published、head 永不可删、二次确认、审计留痕、逐项原因）；
   发布/索引数据一致性（缓解：已发布/发布中/发布失败一律拒绝，不触碰索引任务行）。
 - 回滚：整体 revert 提交；无 schema 迁移、无批量数据改写；部署前生产 `app.sqlite` 已有 workflow 自动备份（另可在删除操作前手动再备一次）。
 
 ## 7. 明确不做
 
-- 不做跨视频批量删除；不做软删除/回收站；不允许删除已发布或待审核版本；不修改 `media_transcript_heads`；不新增数据库 schema；不改发布与索引流程。
+- 不做跨视频批量删除；不做软删除/回收站；不允许删除已发布版本；不修改 `media_transcript_heads` 与发布、索引任务行；不新增数据库 schema；不改发布与索引流程。

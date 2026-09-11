@@ -57,15 +57,19 @@ function newIdempotencyKey() {
 /**
  * Client-side mirror of the permanent-delete rules in the approved plan
  * (`docs/plans/transcript-version-batch-delete.md`): a version is deletable only
- * when it is not the current head, never published, not awaiting review, stored
- * as a managed artifact, and not referenced through `derived_from_version_id` by
- * another version.
+ * when it is not the current head, never published, stored as a managed
+ * artifact, and not referenced through `derived_from_version_id` by another
+ * version.
  *
  * A version that is only *superseded* (`supersedes_version_id`) stays deletable:
  * every version of a normal chain supersedes the previous one, so blocking that
  * reference made the whole feature unusable. The backend clears those references
  * in the deleting transaction and remains the authority; this only explains the
  * rule to the user before they click.
+ *
+ * A version *awaiting review* is deletable as well: deleting an unreviewed
+ * attempt withdraws it, so the reviewer is not forced to finish reviewing a
+ * version the user wants gone.
  */
 function deleteBlockReason(version: TranscriptVersion, derivedFromReferenced: boolean): string | null {
   if (version.is_current) return "当前正式检索版本，不能删除";
@@ -73,7 +77,6 @@ function deleteBlockReason(version: TranscriptVersion, derivedFromReferenced: bo
   if (version.publication_status === "published") return "已发布到知识库，不能删除";
   if (version.publication_status === "publishing") return "正在发布，暂时不能删除";
   if (version.publication_status === "publication_failed") return "发布失败版本需保留排查，不能删除";
-  if (version.review_status === "awaiting_review") return "正在等待审核，不能删除";
   // Legacy hand-written transcripts live outside the managed artifact root and are
   // never removed by this flow.
   if (version.markdown_storage_kind !== "managed_artifact") return "早期人工转录稿由系统归档，不能删除";
