@@ -1,0 +1,146 @@
+name: Diagnose ASR Prompt Echo Index
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character merged master SHA to inspect"
+        required: true
+        type: string
+      confirm_diagnostic:
+        description: "Confirm the read-only prompt echo index sweep"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-app-manual-v1
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    if: ${{ inputs.confirm_diagnostic == true }}
+    environment: production-asr
+    runs-on: [self-hosted, linux, ubuntu, production, app]
+    timeout-minutes: 30
+    env:
+      COMPOSE_OVERRIDE: ${{ vars.PRODUCTION_APP_COMPOSE_OVERRIDE }}
+      COMPOSE_ENV_FILE: ${{ vars.PRODUCTION_APP_ENV_FILE }}
+      REPO_PATH: ${{ vars.PRODUCTION_APP_REPO_PATH }}
+    steps:
+      - name: Validate immutable revision and diagnostic gate
+        run: |
+          if [[ ! "${{ inputs.commit_sha }}" =~ ^[0-9a-fA-F]{40}$ ]]; then echo "commit_sha must be a full SHA"; exit 1; fi
+          if [[ "${{ inputs.commit_sha }}" != "${{ github.sha }}" ]]; then echo "commit_sha must equal the dispatch revision"; exit 1; fi
+          if [[ "${{ github.ref }}" != "refs/heads/master" ]]; then echo "diagnostic must run from master"; exit 1; fi
+
+      - name: Check out requested revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Sweep indexed payloads for ASR prompt echo
+        run: |
+          set -euo pipefail
+          COMPOSE=(docker compose -p ragpincheng-prod \
+            -f "${REPO_PATH}/docker/docker-compose.yml" \
+            -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
+          "${COMPOSE[@]}" ps -q backend | grep -q . || { echo "production backend container is not running"; exit 1; }
+          "${COMPOSE[@]}" exec -T backend python - <<'PY' | tee "$RUNNER_TEMP/echo-sweep.txt"
+          import json
+          from collections import Counter
+
+          from src.config import COLLECTION, QDRANT_URL
+          from qdrant_client import QdrantClient
+
+          detector_source = "canonical"
+          try:
+              from src.transcription.normalizer import _prompt_echo_offset as detect
+          except Exception:  # pragma: no cover - fallback for an older deployed image
+              detector_source = "inline-copy"
+
+              _PROMPT_ECHO_MARKERS = ("请准确识别", "要准确识别")
+              _ENGINEERING_ECHO_TERMS = frozenset(
+                  ("Revit", "Navisworks", "AutoCAD", "BIM-", "GB ", "12.5", "208", "95%")
+              )
+
+              def detect(text):
+                  lowered = text.casefold()
+                  candidates = [text.find(marker) for marker in _PROMPT_ECHO_MARKERS]
+                  for start in sorted(position for position in candidates if position >= 0):
+                      suffix = lowered[start:]
+                      if sum(term.casefold() in suffix for term in _ENGINEERING_ECHO_TERMS) >= 3:
+                          return start
+                  return None
+
+          PAYLOAD_FIELDS = ["text", "doc_title", "content_item_id", "publication_target_id", "source_path"]
+          client = QdrantClient(url=QDRANT_URL)
+          info = client.get_collection(COLLECTION)
+
+          scanned = 0
+          offset = None
+          echo_points = 0
+          groups = Counter()
+          samples = {}
+          while True:
+              batch, offset = client.scroll(
+                  collection_name=COLLECTION,
+                  limit=512,
+                  offset=offset,
+                  with_payload=PAYLOAD_FIELDS,
+                  with_vectors=False,
+              )
+              for point in batch:
+                  scanned += 1
+                  text = (point.payload or {}).get("text") or ""
+                  position = detect(text) if text else None
+                  if position is None:
+                      continue
+                  echo_points += 1
+                  payload = point.payload or {}
+                  key = (
+                      str(payload.get("doc_title")),
+                      str(payload.get("content_item_id")),
+                      str(payload.get("publication_target_id")),
+                  )
+                  groups[key] += 1
+                  if key not in samples:
+                      samples[key] = {
+                          "point_id": str(point.id),
+                          "echo_offset": position,
+                          "echo_excerpt": text[position:position + 160],
+                      }
+              if offset is None:
+                  break
+
+          report = {
+              "schema_version": "asr-prompt-echo-index/1",
+              "read_only": True,
+              "detector_source": detector_source,
+              "collection": COLLECTION,
+              "points_total": int(info.points_count or 0),
+              "points_scanned": scanned,
+              "echo_points": echo_points,
+              "affected_groups": len(groups),
+              "groups": [
+                  {
+                      "doc_title": key[0],
+                      "content_item_id": key[1],
+                      "publication_target_id": key[2],
+                      "points": count,
+                      **samples[key],
+                  }
+                  for key, count in sorted(groups.items(), key=lambda item: -item[1])
+              ],
+          }
+          print("ECHO_INDEX_REPORT:" + json.dumps(report, ensure_ascii=False, sort_keys=True))
+          PY
+
+      - name: Publish sanitized summary
+        if: ${{ always() }}
+        run: |
+          echo "Read-only prompt echo index sweep; see the job log line prefixed ECHO_INDEX_REPORT. No production state was modified." >> "$GITHUB_STEP_SUMMARY"
