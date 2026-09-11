@@ -88,6 +88,8 @@ $manifestSha256 = ""
 $manifestShaMatches = $false
 $manifestParseOk = $false
 $declaredAppFiles = 0
+$manifestEngines = @()
+$manifestExpectedProfiles = @()
 if ($manifestPresent) {
     $manifestSha256 = (Get-FileHash -LiteralPath $layout.manifest_path -Algorithm SHA256).Hash.ToLowerInvariant()
     $manifestShaMatches = $manifestSha256 -eq $ExpectedManifestSha256.ToLowerInvariant()
@@ -95,6 +97,15 @@ if ($manifestPresent) {
         $manifest = Get-Content -LiteralPath $layout.manifest_path -Raw -Encoding UTF8 | ConvertFrom-Json
         $declaredAppFiles = @($manifest.app_files).Count
         $manifestParseOk = $true
+        foreach ($engine in @($manifest.engines)) {
+            $manifestEngines += [ordered]@{
+                engine = [string]$engine.engine
+                qualification_run_id = [string]$engine.qualification_run_id
+                qualification_commit_sha = [string]$engine.qualification_commit_sha
+                runtime_contract_sha256 = [string]$engine.runtime_contract_sha256
+            }
+        }
+        $manifestExpectedProfiles = @($manifest.expected_profiles | ForEach-Object { [string]$_ })
     } catch {
         $manifestParseOk = $false
     }
@@ -208,6 +219,8 @@ $report = [ordered]@{
         manifest_sha256_matches_expected = $manifestShaMatches
         manifest_parse_ok = $manifestParseOk
         declared_app_files = $declaredAppFiles
+        engines = @($manifestEngines)
+        expected_profiles = @($manifestExpectedProfiles)
     }
     contract_probe = [ordered]@{
         strict_outcome = $strictOutcome
