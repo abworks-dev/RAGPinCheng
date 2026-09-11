@@ -434,8 +434,6 @@ def _preflight_bulk_items(conn, body: BulkStartTranscriptionRequest) -> list[Bul
             item_status, reason = "unavailable", "该视频已完成转录"
         elif row["status"] == "failed" and not job_status:
             item_status, reason = "unavailable", "视频上传失败，请重新上传或删除失败记录"
-        elif job_status == "failed" and row["job_failure_classification"] == "permanent":
-            item_status, reason = "unavailable", "该转录任务属于永久失败，不能自动重试"
         elif row["status"] == "failed" and job_status not in {"failed", "cancelled"}:
             item_status, reason = "unavailable", "视频当前不可启动转录"
         else:
@@ -471,8 +469,10 @@ def start_media_transcription(
         ).fetchone()
         if row["status"] == "failed" and latest is None:
             raise HTTPException(status_code=409, detail="该视频上传失败，请重新上传或删除失败记录")
-        if latest is not None and latest["status"] == "failed" and latest["failure_classification"] == "permanent":
-            raise HTTPException(status_code=409, detail="该转录任务属于永久失败，不能自动重试")
+        # A permanently failed attempt must not block a new attempt: the operator
+        # re-transcribes with an explicitly chosen scheme, which creates a fresh
+        # job and never overwrites an existing version. Only retry_transcription
+        # (resuming the terminal job itself) stays closed for permanent failures.
         existing = conn.execute(
             "SELECT id,media_id,scheme_id FROM transcription_jobs WHERE request_idempotency_key=?",
             (body.request_idempotency_key,),
