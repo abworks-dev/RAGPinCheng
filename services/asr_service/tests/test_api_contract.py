@@ -74,6 +74,7 @@ def app_for(tmp_path: Path):
         failure_limit=config.consecutive_failure_limit,
         enabled=True,
         audio_window_extractor=lambda content, **_: content,
+        audio_decoder=lambda content: content,
     )
     return create_app(config, scheduler)
 

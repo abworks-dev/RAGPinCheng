@@ -22,7 +22,7 @@ from src.transcription.provider_protocol import (
 )
 from src.transcription.types import ContractValidationError, TimeUnit
 
-from .audio import extract_audio_window
+from .audio import decode_audio_samples, encode_wav_window
 from .engine_protocol import EngineChunkCandidate, PreparedAudioChunk
 from .engine_registry import EngineRegistry
 from .storage import LocalJobRepository
@@ -101,7 +101,8 @@ class Scheduler:
     disk_allows: Callable[[], bool] = lambda: True
     chunk_duration_ms: int | None = None
     chunk_overlap_ms: int | None = None
-    audio_window_extractor: Callable[..., bytes] = extract_audio_window
+    audio_decoder: Callable[[bytes], object] = decode_audio_samples
+    audio_window_extractor: Callable[..., bytes] = encode_wav_window
     _queue: list[str] = field(default_factory=list, init=False)
     _active_lock: Lock = field(default_factory=Lock, init=False)
     _state_lock: RLock = field(default_factory=RLock, init=False)
@@ -274,11 +275,15 @@ class Scheduler:
             artifact_refs = ()
             segments = () if checkpoint is None else checkpoint.partial_segments
             content = None
+            decoded_audio = None
             start_index = 0 if checkpoint is None else checkpoint.next_chunk_index
             if checkpoint is not None and checkpoint.processed_ms == job.total_ms:
                 start_index = (job.total_ms + self.chunk_duration_ms - 1) // self.chunk_duration_ms
             else:
                 content = self.repo.content(job_id)
+                # Decode once per job: re-decoding the whole upload inside every
+                # window would make long recordings quadratic.
+                decoded_audio = self.audio_decoder(content)
                 while start_index * self.chunk_duration_ms < job.total_ms:
                     core_start = start_index * self.chunk_duration_ms
                     core_end = min(job.total_ms, core_start + self.chunk_duration_ms)
@@ -286,7 +291,7 @@ class Scheduler:
                     window_end = min(job.total_ms, core_end + self.chunk_overlap_ms)
                     try:
                         chunk_content = self.audio_window_extractor(
-                            content, start_ms=window_start, end_ms=window_end
+                            decoded_audio, start_ms=window_start, end_ms=window_end
                         )
                         chunk = PreparedAudioChunk(
                             start_index, window_start, window_end, chunk_content
