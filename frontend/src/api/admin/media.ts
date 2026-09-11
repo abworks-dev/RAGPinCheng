@@ -23,6 +23,7 @@ export const adminMediaApi = {
   bulkReviewTranscripts: (...args: Parameters<typeof api.bulkReviewTranscriptions>) => api.bulkReviewTranscriptions(...args),
   bulkPublishTranscripts: (...args: Parameters<typeof api.bulkPublishTranscriptions>) => api.bulkPublishTranscriptions(...args),
   versions: (...args: Parameters<typeof api.listTranscriptVersions>) => api.listTranscriptVersions(...args),
+  bulkDeleteVersions: (...args: Parameters<typeof api.bulkDeleteTranscriptVersions>) => api.bulkDeleteTranscriptVersions(...args),
   previewVersion: (...args: Parameters<typeof api.previewTranscriptVersion>) => api.previewTranscriptVersion(...args),
   previewVersionTimeline: (...args: Parameters<typeof api.previewTranscriptVersionTimeline>) => api.previewTranscriptVersionTimeline(...args),
   createRevision: (...args: Parameters<typeof api.createTranscriptRevision>) => api.createTranscriptRevision(...args),

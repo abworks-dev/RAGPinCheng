@@ -1904,6 +1904,32 @@ class BulkTranscriptionResponse(BaseModel):
     failed: int
 
 
+class BulkDeleteTranscriptVersionsRequest(BaseModel):
+    """Delete request for old transcript versions of one video.
+
+    The observable 1..50 item limit is enforced by the route so that a bad body
+    answers with HTTP 400 and a product-facing Chinese message instead of a
+    schema 422.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    version_ids: list[str] = Field(max_length=200)
+    request_idempotency_key: str
+
+
+class BulkDeleteTranscriptVersionItemDTO(BaseModel):
+    version_id: str
+    status: Literal["deleted", "unavailable", "conflict"]
+    reason: str | None = None
+
+
+class BulkDeleteTranscriptVersionsResponse(BaseModel):
+    items: list[BulkDeleteTranscriptVersionItemDTO]
+    deleted_count: int
+    skipped_count: int
+
+
 class AnswerVersionDTO(BaseModel):
     id: int
     version_index: int

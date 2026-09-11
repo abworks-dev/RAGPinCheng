@@ -64,6 +64,21 @@ class LocalTranscriptionArtifactStore:
             raise ContractValidationError("artifact_hash_mismatch", "reference")
         return content
 
+    def delete_markdown(self, reference: ManagedMarkdownRef) -> bool:
+        """Remove one managed artifact file; returns False when it is already gone.
+
+        Callers own reference counting: this only ever unlinks the exact
+        contained file described by the reference and never a directory or a
+        path outside the configured artifact root.
+        """
+        if type(reference) is not ManagedMarkdownRef:
+            raise ContractValidationError("invalid_markdown_ref", "reference")
+        path = self._resolve(reference.relative_path)
+        if path.is_symlink() or not path.is_file():
+            return False
+        path.unlink()
+        return True
+
     def _resolve(self, relative_path: str) -> Path:
         validate_relative_identity(relative_path)
         candidate = (self._root / Path(*relative_path.split("/"))).resolve(strict=False)

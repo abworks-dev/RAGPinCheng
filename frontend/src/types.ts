@@ -1265,6 +1265,20 @@ export type PublishTranscriptVersionResult = {
   reused: boolean;
 };
 
+export type TranscriptVersionBulkDeleteItemStatus = "deleted" | "unavailable" | "conflict";
+
+export type TranscriptVersionBulkDeleteItem = {
+  version_id: string;
+  status: TranscriptVersionBulkDeleteItemStatus;
+  reason: string | null;
+};
+
+export type TranscriptVersionBulkDeleteResult = {
+  items: TranscriptVersionBulkDeleteItem[];
+  deleted_count: number;
+  skipped_count: number;
+};
+
 export type LlmHealth = {
   ok: boolean;
   key_present: boolean;

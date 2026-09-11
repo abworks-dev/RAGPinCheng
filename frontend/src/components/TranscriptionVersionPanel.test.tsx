@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptionVersionPanel } from "./TranscriptionVersionPanel";
 
@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   reviewTranscriptVersion: vi.fn(),
   publishTranscriptVersion: vi.fn(),
   getTranscriptPublicationJob: vi.fn(),
+  bulkDeleteTranscriptVersions: vi.fn(),
 }));
 vi.mock("../api/client", () => ({ api: mocks }));
 
@@ -49,6 +50,38 @@ const revisedVersion = {
   derived_from_version_id: awaitingVersion.version_id,
   edited_by: 1,
   markdown_sha256: "b".repeat(64),
+};
+
+// Deletable: a never-published, reviewed historical version that nothing references.
+const deletableVersion = {
+  ...awaitingVersion,
+  version_id: "55555555-5555-4555-8555-555555555555",
+  source: "manual",
+  profile_id: null,
+  provider_key: null,
+  model_id: null,
+  model_revision: null,
+  derived_from_version_id: null,
+  supersedes_version_id: null,
+  review_status: "review_approved" as const,
+  reviewed_by: 1,
+  reviewed_at: 2,
+  markdown_sha256: "c".repeat(64),
+};
+const publishedVersion = {
+  ...approvedVersion,
+  version_id: "33333333-3333-4333-8333-333333333333",
+  derived_from_version_id: null,
+  publication_status: "published" as const,
+  published_at: 3,
+};
+const currentHeadVersion = {
+  ...approvedVersion,
+  version_id: "44444444-4444-4444-8444-444444444444",
+  derived_from_version_id: null,
+  publication_status: "published" as const,
+  published_at: 3,
+  is_current: true,
 };
 
 describe("TranscriptionVersionPanel", () => {
@@ -243,6 +276,237 @@ describe("TranscriptionVersionPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "审核通过" }));
 
     await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+  });
+
+  it("keeps the version list in a left rail column that can scroll on its own", async () => {
+    mocks.listTranscriptVersions.mockResolvedValue([deletableVersion, revisedVersion]);
+    const { container } = render(<TranscriptionVersionPanel mediaId="media-1" embedded />);
+
+    await screen.findByText("2 个版本");
+    const grid = container.querySelector(".grid");
+    expect(grid?.className).toContain("lg:grid-cols-[minmax(14rem,18rem)_minmax(0,1fr)]");
+    const details = screen.getByTestId("version-list-region");
+    expect(details.className).toContain("lg:contents");
+    expect(details).not.toHaveAttribute("open");
+    const list = screen.getByRole("region", { name: "转录版本列表" });
+    expect(list.className).toContain("lg:sticky");
+    expect(list.className).toContain("lg:max-h-[calc(100vh-12rem)]");
+    expect(list.className).toContain("lg:overflow-hidden");
+  });
+
+  it("shows the loading placeholder before the version list resolves", async () => {
+    let resolveVersions: (versions: unknown[]) => void = () => {};
+    mocks.listTranscriptVersions.mockReturnValue(new Promise((resolve) => { resolveVersions = resolve; }));
+    render(<TranscriptionVersionPanel mediaId="media-1" embedded />);
+
+    expect(await screen.findByText("正在加载转录版本…")).toBeInTheDocument();
+    expect(screen.getByText("转录版本 · 共 0 个")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveVersions([deletableVersion, revisedVersion]);
+    });
+    expect(await screen.findByText("2 个版本")).toBeInTheDocument();
+    expect(screen.queryByText("正在加载转录版本…")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "批量选择" })).toBeEnabled();
+  });
+
+  it("explains an empty version list", async () => {
+    mocks.listTranscriptVersions.mockResolvedValue([]);
+    render(<TranscriptionVersionPanel mediaId="media-1" embedded />);
+
+    expect(await screen.findByText("暂无可审阅转录版本。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "批量选择" })).toBeDisabled();
+    expect(screen.queryByRole("region", { name: "当前版本校对工作区" })).not.toBeInTheDocument();
+  });
+
+  it("reports a version list failure and keeps the retry path usable", async () => {
+    mocks.listTranscriptVersions.mockRejectedValue(new Error("版本列表暂时不可用"));
+    render(<TranscriptionVersionPanel mediaId="media-1" embedded />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("转录版本操作失败");
+    expect(alert).toHaveTextContent("版本列表暂时不可用");
+    expect(screen.getByRole("button", { name: "批量选择" })).toBeDisabled();
+  });
+
+  it("pages to the neighbouring version from the left rail buttons", async () => {
+    mocks.listTranscriptVersions.mockResolvedValue([deletableVersion, revisedVersion, publishedVersion]);
+    render(<TranscriptionVersionPanel mediaId="media-1" embedded />);
+
+    const previous = await screen.findByRole("button", { name: "上一版" });
+    const next = screen.getByRole("button", { name: "下一版" });
+    expect(previous).toBeDisabled();
+    expect(next).toBeDisabled();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "校对内容" })[1]);
+    await waitFor(() => expect(mocks.previewTranscriptVersion).toHaveBeenCalledWith(revisedVersion.version_id));
+    await waitFor(() => expect(previous).toBeEnabled());
+    expect(next).toBeEnabled();
+
+    fireEvent.click(next);
+    await waitFor(() => expect(mocks.previewTranscriptVersion).toHaveBeenCalledWith(publishedVersion.version_id));
+    await waitFor(() => expect(next).toBeDisabled());
+
+    fireEvent.click(previous);
+    await waitFor(() => expect(mocks.previewTranscriptVersion).toHaveBeenCalledWith(revisedVersion.version_id));
+    expect(mocks.previewTranscriptVersion).toHaveBeenCalledTimes(3);
+  });
+
+  it("pages with Alt+ArrowUp and Alt+ArrowDown and loads that preview", async () => {
+    mocks.listTranscriptVersions.mockResolvedValue([deletableVersion, revisedVersion, publishedVersion]);
+    render(<TranscriptionVersionPanel mediaId="media-1" embedded />);
+
+    fireEvent.click((await screen.findAllByRole("button", { name: "校对内容" }))[1]);
+    await waitFor(() => expect(mocks.previewTranscriptVersion).toHaveBeenCalledWith(revisedVersion.version_id));
+
+    fireEvent.keyDown(document.body, { key: "ArrowDown", altKey: true });
+    await waitFor(() => expect(mocks.previewTranscriptVersion).toHaveBeenCalledWith(publishedVersion.version_id));
+
+    fireEvent.keyDown(document.body, { key: "ArrowUp", altKey: true });
+    await waitFor(() => expect(mocks.previewTranscriptVersion).toHaveBeenCalledWith(revisedVersion.version_id));
+    expect(mocks.previewTranscriptVersion).toHaveBeenCalledTimes(3);
+  });
+
+  it("surfaces a failed paging preview without losing the list", async () => {
+    mocks.listTranscriptVersions.mockResolvedValue([deletableVersion, revisedVersion]);
+    mocks.previewTranscriptVersion.mockRejectedValue(new Error("版本预览暂时不可用"));
+    render(<TranscriptionVersionPanel mediaId="media-1" embedded />);
+
+    fireEvent.click((await screen.findAllByRole("button", { name: "校对内容" }))[0]);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("版本预览暂时不可用");
+    expect(screen.getByText("2 个版本")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "当前版本校对工作区" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "校对内容" })).toHaveLength(2);
+  });
+
+  it("enables batch selection and disables versions that must be kept", async () => {
+    mocks.listTranscriptVersions.mockResolvedValue([awaitingVersion, deletableVersion, revisedVersion, publishedVersion, currentHeadVersion]);
+    render(<TranscriptionVersionPanel mediaId="media-1" embedded />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "批量选择" }));
+
+    // 版本 1 awaits review and is referenced by 版本 3; 版本 2 is a plain deletable draft.
+    expect(await screen.findByRole("checkbox", { name: "选择版本 1" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "选择版本 2" })).toBeEnabled();
+    expect(screen.getByRole("checkbox", { name: "选择版本 3" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "选择版本 4" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "选择版本 5" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "全选可删除版本" })).toBeEnabled();
+    expect(screen.getByText("已选 0 个")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "删除所选" })).toBeDisabled();
+    expect(screen.getByText("不能删除：正在等待审核，不能删除")).toBeInTheDocument();
+    expect(screen.getByText("不能删除：已发布到知识库，不能删除")).toBeInTheDocument();
+    expect(screen.getByText("不能删除：当前正式检索版本，不能删除")).toBeInTheDocument();
+    expect(screen.getByText("不能删除：已被其他版本引用，不能删除")).toBeInTheDocument();
+  });
+
+  it("keeps awaiting-review versions out of bulk selection with an explanation", async () => {
+    mocks.listTranscriptVersions.mockResolvedValue([awaitingVersion, deletableVersion]);
+    render(<TranscriptionVersionPanel mediaId="media-1" embedded />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "批量选择" }));
+
+    expect(screen.getByRole("checkbox", { name: "选择版本 1" })).toBeDisabled();
+    expect(screen.getByText("不能删除：正在等待审核，不能删除")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "选择版本 2" })).toBeEnabled();
+  });
+
+  it("keeps legacy hand-written transcripts out of the delete flow", async () => {
+    const legacyManual = { ...deletableVersion, version_id: "66666666-6666-4666-8666-666666666666", markdown_storage_kind: "legacy_manual" };
+    mocks.listTranscriptVersions.mockResolvedValue([legacyManual]);
+    render(<TranscriptionVersionPanel mediaId="media-1" embedded />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "批量选择" }));
+
+    expect(screen.getByRole("checkbox", { name: "选择版本 1" })).toBeDisabled();
+    expect(screen.getByText("不能删除：早期人工转录稿由系统归档，不能删除")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "全选可删除版本" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "删除所选" })).toBeDisabled();
+  });
+
+  it("confirms deletion of only the selected versions and renders partial success", async () => {
+    mocks.listTranscriptVersions
+      .mockResolvedValueOnce([deletableVersion, revisedVersion, publishedVersion, currentHeadVersion])
+      .mockResolvedValue([publishedVersion, currentHeadVersion]);
+    mocks.bulkDeleteTranscriptVersions.mockResolvedValue({
+      items: [
+        { version_id: deletableVersion.version_id, status: "deleted", reason: null },
+        { version_id: revisedVersion.version_id, status: "deleted", reason: null },
+        { version_id: publishedVersion.version_id, status: "unavailable", reason: "已发布到知识库，不能删除" },
+        { version_id: currentHeadVersion.version_id, status: "conflict", reason: "当前正式检索版本，不能删除" },
+      ],
+      deleted_count: 2,
+      skipped_count: 2,
+    });
+    const onChanged = vi.fn();
+    render(<TranscriptionVersionPanel mediaId="media-1" embedded onChanged={onChanged} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "批量选择" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择版本 1" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择版本 2" }));
+    expect(screen.getByText("已选 2 个")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "选择版本 3" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "删除所选" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("删除后无法恢复");
+    expect(dialog).toHaveTextContent("版本 1 · 人工转录");
+    expect(dialog).toHaveTextContent("版本 2 · 人工修订");
+    expect(dialog).toHaveTextContent("转写正文、时间轴及系统保存的转写产物文件都会被永久删除");
+    expect(dialog).not.toHaveTextContent("版本 3");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认删除 2 个版本" }));
+
+    await waitFor(() => expect(mocks.bulkDeleteTranscriptVersions).toHaveBeenCalledWith(
+      "media-1",
+      [deletableVersion.version_id, revisedVersion.version_id],
+      expect.stringMatching(/^[0-9a-f-]{36}$/),
+    ));
+
+    const result = await screen.findByTestId("version-bulk-delete-result");
+    expect(result).toHaveTextContent("成功 2 · 跳过 2");
+    expect(result).toHaveTextContent("版本 3：已发布到知识库，不能删除");
+    expect(result).toHaveTextContent("版本 4：当前正式检索版本，不能删除");
+
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    await waitFor(() => expect(mocks.listTranscriptVersions).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("2 个版本")).toBeInTheDocument();
+  });
+
+  it("keeps the dialog open, reports the failure and reuses one idempotency key on retry", async () => {
+    mocks.listTranscriptVersions.mockResolvedValue([deletableVersion]);
+    let rejectRun: (error: Error) => void = () => {};
+    const pending = new Promise((_resolve, reject) => { rejectRun = reject; });
+    mocks.bulkDeleteTranscriptVersions.mockReturnValueOnce(pending);
+    render(<TranscriptionVersionPanel mediaId="media-1" embedded />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "批量选择" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择版本 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "删除所选" }));
+
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认删除 1 个版本" }));
+
+    expect(await within(dialog).findByText("正在删除…")).toBeInTheDocument();
+
+    rejectRun(new Error("批量删除暂时不可用"));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("批量删除暂时不可用");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("已选 1 个")).toBeInTheDocument();
+
+    const firstKey = mocks.bulkDeleteTranscriptVersions.mock.calls[0][2];
+    mocks.bulkDeleteTranscriptVersions.mockResolvedValueOnce({
+      items: [{ version_id: deletableVersion.version_id, status: "deleted", reason: null }],
+      deleted_count: 1,
+      skipped_count: 0,
+    });
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "确认删除 1 个版本" }));
+
+    await waitFor(() => expect(mocks.bulkDeleteTranscriptVersions).toHaveBeenCalledTimes(2));
+    expect(mocks.bulkDeleteTranscriptVersions.mock.calls[1][2]).toBe(firstKey);
   });
 });
 

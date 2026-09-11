@@ -69,6 +69,7 @@ import type {
   TranscriptMarkdownPreview,
   TranscriptPublicationJob,
   TranscriptVersion,
+  TranscriptVersionBulkDeleteResult,
   PublishTranscriptVersionResult,
   AnswerPolicy,
   AnswerPolicyAuditEntry,
@@ -1189,6 +1190,14 @@ export const api = {
     }),
   listTranscriptVersions: (mediaId: string) =>
     jsonFetch<TranscriptVersion[]>(`/api/admin/transcription/media/${mediaId}/versions`),
+  bulkDeleteTranscriptVersions: (mediaId: string, versionIds: string[], requestIdempotencyKey: string) =>
+    jsonFetch<TranscriptVersionBulkDeleteResult>(
+      `/api/admin/transcription/media/${encodeURIComponent(mediaId)}/versions/bulk-delete`,
+      {
+        method: "POST",
+        body: JSON.stringify({ version_ids: versionIds, request_idempotency_key: requestIdempotencyKey }),
+      },
+    ),
   previewTranscriptVersion: (versionId: string) =>
     jsonFetch<TranscriptMarkdownPreview>(`/api/admin/transcription/versions/${versionId}/markdown`),
   previewTranscriptVersionTimeline: (versionId: string) =>
