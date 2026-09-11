@@ -178,8 +178,5 @@ def create_local_app():
         queue_limit=settings.max_queue_length,
         failure_limit=settings.consecutive_failure_limit,
         enabled=True,
-        chunk_duration_ms=settings.chunk_duration_ms,
-        chunk_overlap_ms=settings.chunk_overlap_ms,
-        audio_window_extractor=extract_audio_window,
     )
     return create_app(settings, scheduler)
