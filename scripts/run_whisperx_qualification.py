@@ -41,12 +41,18 @@ TERM_RECALL_LIMIT = shared.TERM_RECALL_LIMIT
 CODE_RECALL_LIMIT = shared.CODE_RECALL_LIMIT
 TIMESTAMP_P95_LIMIT_MS = shared.TIMESTAMP_P95_LIMIT_MS
 RTF_LIMIT = shared.RTF_LIMIT
+# 内容覆盖度门禁：每个非负样本的最差重复中，canonical 字数 / 标注字数不得低于该比例。
+# 现有门禁只测规范编号召回、noisy-BIM CER 与负样本误报，无法发现"解码塌缩但仍被判合格"
+# 的配置（生产实测 rp=2.0 只覆盖约 15%-25% 的语音）。0.60 只拦截这种数量级的内容丢失，
+# 不会因为正常识别差异而误判。
+CONTENT_COVERAGE_MIN_RATIO = 0.60
 _SCENARIOS = SCENARIOS
 character_error_rate = shared.character_error_rate
 _ENGINE = None
 _ACTIVE_SERVICE_CONFIG = None
 _DIAGNOSTIC_OBSERVATIONS: dict[str, list[dict[str, object]]] = {}
 _DIAGNOSTIC_SCENARIOS = {"noisy-bim-zh", "standard-codes"}
+_COVERAGE_OBSERVATIONS: dict[str, list[dict[str, object]]] = {}
 
 
 def load_manifest(
@@ -386,8 +392,17 @@ def _run_once(
         )
     if type(result) is not CanonicalTranscript:
         raise RuntimeError("pipeline did not return CanonicalTranscript")
+    canonical_text = " ".join(segment.text for segment in result.segments)
+    _COVERAGE_OBSERVATIONS.setdefault(sample.sample_id, []).append(
+        {
+            "reference_chars": len(shared.normalize_text(sample.reference_text)),
+            "raw_chars": len(shared.normalize_text(provider.raw_text)),
+            "canonical_chars": len(shared.normalize_text(canonical_text)),
+            "duration_ms": sample.duration_ms,
+            "negative_control": bool(sample.negative_control),
+        }
+    )
     if sample.scenario in _DIAGNOSTIC_SCENARIOS:
-        canonical_text = " ".join(segment.text for segment in result.segments)
         _DIAGNOSTIC_OBSERVATIONS.setdefault(sample.sample_id, []).append(
             _diagnostic_evidence(sample, provider.raw_text, canonical_text)
         )
@@ -418,8 +433,9 @@ def run_qualification(
     shared._run_once = _run_once
     shared.QWEN3_ASR_PROFILE_ID = WHISPERX_PROFILE_ID
     shared.REPORT_SCHEMA_VERSION = REPORT_SCHEMA_VERSION
+    _COVERAGE_OBSERVATIONS.clear()
     try:
-        return shared.run_qualification(
+        report = shared.run_qualification(
             manifest,
             base_url="in-process://whisperx",
             token="not-used",
@@ -431,6 +447,63 @@ def run_qualification(
         shared.QWEN3_ASR_PROFILE_ID = previous_profile
         shared.REPORT_SCHEMA_VERSION = previous_schema
         _ACTIVE_SERVICE_CONFIG = previous_config
+    _attach_content_coverage(report)
+    return report
+
+
+def _attach_content_coverage(report: dict[str, object]) -> None:
+    """Record how much annotated speech each candidate actually transcribed.
+
+    Coverage is the worst measurement across the repeated runs of a sample, so a
+    flaky collapse cannot hide behind a good repetition. The gate only ever
+    downgrades the existing verdict.
+    """
+    rows: list[dict[str, object]] = []
+    ratios: list[float] = []
+    for sample_id, observations in sorted(_COVERAGE_OBSERVATIONS.items()):
+        measured = [item for item in observations if not item["negative_control"]]
+        ratios_for_sample = [
+            int(item["canonical_chars"]) / int(item["reference_chars"])
+            for item in measured
+            if int(item["reference_chars"]) > 0
+        ]
+        if not ratios_for_sample:
+            continue
+        worst = min(ratios_for_sample)
+        ratios.append(worst)
+        rows.append(
+            {
+                "sample_id": sample_id,
+                "runs": len(measured),
+                "worst_ratio": round(worst, 6),
+                "reference_chars": min(
+                    int(item["reference_chars"]) for item in measured
+                ),
+                "canonical_chars": min(
+                    int(item["canonical_chars"]) for item in measured
+                ),
+                "duration_ms": int(measured[0]["duration_ms"]),
+            }
+        )
+    minimum = round(min(ratios), 6) if ratios else None
+    gate_pass = minimum is not None and minimum >= CONTENT_COVERAGE_MIN_RATIO
+    gates = report["gates"]
+    if type(gates) is dict:
+        gates["content_coverage"] = {
+            "observed": minimum,
+            "threshold": CONTENT_COVERAGE_MIN_RATIO,
+            "pass": gate_pass,
+        }
+        if not all(item["pass"] for item in gates.values()):
+            report["status"] = "fail"
+    thresholds = report["thresholds"]
+    if type(thresholds) is dict:
+        thresholds["content_coverage_min"] = CONTENT_COVERAGE_MIN_RATIO
+    report["content_coverage"] = {
+        "min_ratio": minimum,
+        "sample_count": len(rows),
+        "samples": rows,
+    }
 
 
 def _scenario_metric(
@@ -495,6 +568,7 @@ def run_candidate_matrix(
         "standard_code_recall_improved": full_code_recall > baseline_code_recall,
         "noisy_bim_cer_improved": full_noisy_cer < baseline_noisy_cer,
         "negative_false_positives_zero": negative_false_positives == 0,
+        "content_coverage_passed": bool(full["gates"]["content_coverage"]["pass"]),
     }
     selected = "full-decode" if all(selection.values()) else None
     return {
