@@ -327,6 +327,54 @@ def test_cleanup_batch_manifest_is_required_and_hash_locked_for_apply(tmp_path: 
     assert not (run_root / "venv").exists()
 
 
+def test_apply_deletes_when_dot_sourced_like_the_actions_powershell_step(tmp_path: Path):
+    """GitHub Actions 的 powershell 步骤是 ". step.ps1"，点源调用下
+    $PSCmdlet.ShouldProcess 会抛 NullReferenceException（生产实测 run 34719008697），
+    删除循环必须在这种调用方式下同样可用。"""
+    data_root = tmp_path / "data" / "RAGPinCheng-ASR"
+    program_root = tmp_path / "program" / "RAGPinCheng-ASR"
+    whisperx_root = tmp_path / "whisperx"
+    data_root.mkdir(parents=True)
+    program_root.mkdir(parents=True)
+    whisperx_root.mkdir(parents=True)
+    run_root = whisperx_root / "qualification" / "runs" / "202"
+    _write_tree(run_root, ("wheelhouse",))
+    os.utime(run_root, (1_600_000_000, 1_600_000_000))
+    manifest_path = tmp_path / "batch.json"
+    audit_path = tmp_path / "dry-run.json"
+
+    dry_run = _run(
+        CLEANUP_SCRIPT,
+        "-DataRoot", str(data_root),
+        "-ProgramRoot", str(program_root),
+        "-WhisperXRoot", str(whisperx_root),
+        "-QualificationKeepCount", "1",
+        "-BatchManifestPath", str(manifest_path),
+        "-AuditPath", str(audit_path),
+    )
+    assert dry_run.returncode == 0, dry_run.stderr
+    digest = _read_json(audit_path)["batch_manifest_sha256"]
+
+    executable = _powershell()
+    assert executable is not None
+    apply_command = (
+        f". '{CLEANUP_SCRIPT}' -DataRoot '{data_root}' -ProgramRoot '{program_root}' "
+        f"-WhisperXRoot '{whisperx_root}' -QualificationKeepCount 1 "
+        f"-BatchManifestPath '{manifest_path}' -ExpectedBatchManifestSha256 '{digest}' "
+        "-Apply -Confirm:$false"
+    )
+    applied = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", apply_command],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert applied.returncode == 0, applied.stderr
+    assert run_root.is_dir()
+    assert not (run_root / "wheelhouse").exists()
+
+
 def test_cleanup_sources_use_explicit_roots_and_exclude_protected_storage():
     compact = COMPACT_SCRIPT.read_text(encoding="utf-8")
     cleanup = CLEANUP_SCRIPT.read_text(encoding="utf-8")
