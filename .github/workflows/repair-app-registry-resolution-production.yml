@@ -1,0 +1,160 @@
+name: Repair App Registry Resolution Production
+
+# 应用节点 /etc/hosts 的受控修复通道。
+#
+# 背景（2026-09-12 实测）：应用节点 /etc/docker/daemon.json 只配置
+# registry-mirrors=https://docker.m.daocloud.io，而该域名在节点的 DNS
+# （192.168.11.1）上解析失败（getent 无结果；公共解析器 1.1.1.1 可解析），
+# 导致 LibreOffice 镜像构建无法解析 ubuntu:22.04 基础镜像，应用部署连续失败。
+#
+# 本 workflow 只做一件事：把已验证可达的镜像站地址写入该主机的域名解析记录。
+# 需要用户明确批准后执行；apply 会先备份 /etc/hosts 并打印备份路径，revert 用该
+# 备份还原。preflight 为只读。
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character merged master SHA to execute"
+        required: true
+        type: string
+      operation:
+        description: "Read-only preflight, apply the record, or revert from a backup"
+        required: true
+        default: preflight
+        type: choice
+        options:
+          - preflight
+          - apply
+          - revert
+      mirror_hostname:
+        description: "Registry mirror hostname that must resolve on the app node"
+        required: true
+        default: docker.m.daocloud.io
+        type: string
+      mirror_address:
+        description: "Verified IPv4 address for the mirror (empty = discover via public resolver)"
+        required: false
+        default: ""
+        type: string
+      backup_path:
+        description: "Backup path printed by the approved apply run; required for revert"
+        required: false
+        default: ""
+        type: string
+      confirm_repair:
+        description: "Confirm the production app-node name-resolution repair"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-app-manual-v1
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: ${{ inputs.confirm_repair == true }}
+    environment: production-asr
+    runs-on: [self-hosted, linux, ubuntu, production, app]
+    timeout-minutes: 15
+    env:
+      MIRROR_HOSTNAME: ${{ inputs.mirror_hostname }}
+      MIRROR_ADDRESS: ${{ inputs.mirror_address }}
+      OPERATION: ${{ inputs.operation }}
+      BACKUP_PATH: ${{ inputs.backup_path }}
+    steps:
+      - name: Validate immutable revision and repair gate
+        run: |
+          if [[ ! "${{ inputs.commit_sha }}" =~ ^[0-9a-fA-F]{40}$ ]]; then echo "commit_sha must be a full SHA"; exit 1; fi
+          if [[ "${{ inputs.commit_sha }}" != "${{ github.sha }}" ]]; then echo "commit_sha must equal the dispatch revision"; exit 1; fi
+          if [[ "${{ github.ref }}" != "refs/heads/master" ]]; then echo "repair must run from master"; exit 1; fi
+          if [[ ! "${MIRROR_HOSTNAME}" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]]; then echo "mirror_hostname is not a valid hostname"; exit 1; fi
+          if [[ -n "${MIRROR_ADDRESS}" && ! "${MIRROR_ADDRESS}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then echo "mirror_address must be an IPv4 address"; exit 1; fi
+          if [[ "${OPERATION}" = "revert" && -z "${BACKUP_PATH}" ]]; then echo "backup_path is required for revert"; exit 1; fi
+          if [[ "${OPERATION}" != "revert" && -n "${BACKUP_PATH}" ]]; then echo "backup_path is accepted only for revert"; exit 1; fi
+
+      - name: Inspect the current resolution state read-only
+        run: |
+          set -uo pipefail
+          echo ">> /etc/resolv.conf"
+          cat /etc/resolv.conf 2>/dev/null || echo "resolv.conf unreadable"
+          echo ">> system resolver"
+          getent hosts "${MIRROR_HOSTNAME}" || echo "system resolver has no record for ${MIRROR_HOSTNAME}"
+          echo ">> existing controlled records in /etc/hosts"
+          grep -n "RAGPinCheng controlled app-node registry resolution" /etc/hosts || echo "no controlled record present"
+          echo ">> public resolver A record"
+          if command -v dig >/dev/null 2>&1; then
+            dig +short +time=3 +tries=1 A "${MIRROR_HOSTNAME}" @1.1.1.1 || echo "dig lookup failed"
+          else
+            echo "dig unavailable"
+          fi
+
+      - name: Apply the controlled resolution record
+        if: ${{ inputs.operation == 'apply' }}
+        run: |
+          set -euo pipefail
+          run_privileged() {
+            if [ "$(id -u)" -eq 0 ]; then "$@"
+            elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then sudo -n "$@"
+            else echo "no privilege available to modify /etc/hosts" >&2; exit 1; fi
+          }
+
+          BACKUP_DIR="/data/backup/hosts"
+          BACKUP="${BACKUP_DIR}/hosts-${{ github.run_id }}"
+          run_privileged mkdir -p "${BACKUP_DIR}"
+          run_privileged cp -a /etc/hosts "${BACKUP}"
+          echo "APP_REGISTRY_HOSTS_BACKUP:${BACKUP}"
+
+          ADDRESS="${MIRROR_ADDRESS}"
+          if [[ -z "${ADDRESS}" ]]; then
+            ADDRESS="$(dig +short +time=3 +tries=1 A "${MIRROR_HOSTNAME}" @1.1.1.1 \
+              | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | head -1 || true)"
+          fi
+          if [[ -z "${ADDRESS}" ]]; then echo "no IPv4 address available for ${MIRROR_HOSTNAME}"; exit 1; fi
+
+          echo ">> verifying the mirror answers with a valid certificate at ${ADDRESS}"
+          STATUS="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 25 \
+            --resolve "${MIRROR_HOSTNAME}:443:${ADDRESS}" "https://${MIRROR_HOSTNAME}/v2/" || true)"
+          case "${STATUS}" in
+            200|401|403) echo "mirror endpoint reachable status=${STATUS}" ;;
+            *) echo "mirror endpoint did not answer as expected status=${STATUS}"; exit 1 ;;
+          esac
+
+          if getent hosts "${MIRROR_HOSTNAME}" >/dev/null 2>&1; then
+            echo "APP_REGISTRY_HOSTS_STATUS:already-resolvable"
+          else
+            printf '%s %s # RAGPinCheng controlled app-node registry resolution (run %s)\n' \
+              "${ADDRESS}" "${MIRROR_HOSTNAME}" "${{ github.run_id }}" \
+              | run_privileged tee -a /etc/hosts >/dev/null
+            echo "APP_REGISTRY_HOSTS_STATUS:appended ${ADDRESS} ${MIRROR_HOSTNAME}"
+          fi
+
+          getent hosts "${MIRROR_HOSTNAME}" || { echo "resolution still failing after the change"; exit 1; }
+          echo "APP_REGISTRY_HOSTS_APPLIED:${MIRROR_HOSTNAME}"
+
+      - name: Revert the controlled resolution record
+        if: ${{ inputs.operation == 'revert' }}
+        run: |
+          set -euo pipefail
+          run_privileged() {
+            if [ "$(id -u)" -eq 0 ]; then "$@"
+            elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then sudo -n "$@"
+            else echo "no privilege available to modify /etc/hosts" >&2; exit 1; fi
+          }
+          if [ ! -f "${BACKUP_PATH}" ]; then echo "backup file not found: ${BACKUP_PATH}"; exit 1; fi
+          if ! grep -q "RAGPinCheng controlled app-node registry resolution" "${BACKUP_PATH}"; then
+            echo "backup does not look like an /etc/hosts backup taken before the repair"
+          fi
+          run_privileged cp -a "${BACKUP_PATH}" /etc/hosts
+          echo "APP_REGISTRY_HOSTS_REVERTED:${BACKUP_PATH}"
+          getent hosts "${MIRROR_HOSTNAME}" || echo "controlled record removed; system resolver has no record again"
+
+      - name: Publish sanitized summary
+        if: ${{ always() }}
+        run: |
+          echo "Controlled app-node registry name-resolution repair; see the APP_REGISTRY_HOSTS_* lines in the job log." >> "$GITHUB_STEP_SUMMARY"
+          echo "Rollback: re-run this workflow with operation=revert and the printed APP_REGISTRY_HOSTS_BACKUP path." >> "$GITHUB_STEP_SUMMARY"
