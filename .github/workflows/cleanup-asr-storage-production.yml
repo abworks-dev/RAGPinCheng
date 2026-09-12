@@ -97,7 +97,11 @@ jobs:
           # 自然失败；这里再校验两份证据文件确实写出。
           if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { throw "batch manifest was not written" }
           if (-not (Test-Path -LiteralPath $audit -PathType Leaf)) { throw "storage audit evidence was not written" }
-          $sha = (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash.ToLowerInvariant()
+          # 批准摘要取脚本的"规范化批次摘要"（不含 generated_at_utc），不能对
+          # manifest 文件取哈希：文件里带生成时间，apply 同 run 内重新审计必然得到
+          # 不同文件哈希，会让 apply 永远以 "storage usage changed" 拒绝执行。
+          $sha = [string](Get-Content -LiteralPath $audit -Raw -Encoding UTF8 | ConvertFrom-Json).batch_manifest_sha256
+          if ($sha -notmatch '^[0-9a-f]{64}$') { throw "audit evidence has no batch manifest digest" }
           echo "ASR_STORAGE_BATCH_SHA256:$sha" >> $env:GITHUB_STEP_SUMMARY
           Write-Host "ASR_STORAGE_BATCH_SHA256:$sha"
           (Get-Content -LiteralPath $manifest -Raw -Encoding UTF8)
@@ -107,9 +111,11 @@ jobs:
         shell: powershell
         run: |
           $manifest = Join-Path $env:RUNNER_TEMP "asr-storage-batch-${{ github.run_id }}.json"
+          $audit = Join-Path $env:RUNNER_TEMP "asr-storage-audit-${{ github.run_id }}.json"
           $applyAudit = Join-Path $env:RUNNER_TEMP "asr-storage-apply-${{ github.run_id }}.json"
-          $sha = (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($sha -ne $env:EXPECTED_BATCH_SHA256.ToLowerInvariant()) {
+          if (-not (Test-Path -LiteralPath $audit -PathType Leaf)) { throw "audit evidence is missing; run the audit first" }
+          $sha = [string](Get-Content -LiteralPath $audit -Raw -Encoding UTF8 | ConvertFrom-Json).batch_manifest_sha256
+          if ($sha.ToLowerInvariant() -ne $env:EXPECTED_BATCH_SHA256.Trim().ToLowerInvariant()) {
             throw "storage usage changed since the approved audit; refusing to delete"
           }
           & "${{ github.workspace }}\scripts\cleanup-asr-storage.ps1" `

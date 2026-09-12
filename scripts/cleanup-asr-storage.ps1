@@ -458,6 +458,30 @@ function New-BatchManifest {
     }
 }
 
+# 批准用的批次摘要必须只覆盖"选了什么"，不能覆盖"什么时候选的"：manifest 里的
+# generated_at_utc 每次都不同，用文件哈希做批准摘要会让 apply 永远拒绝（apply 会
+# 在本 run 内重新审计一次，文件哈希必然与上次审计不同）。因此这里对去掉时间戳的
+# 规范化对象取 SHA-256，路径、类型、字节数、mtime、策略与总数仍然全部纳入校验。
+function Get-BatchManifestSha256 {
+    param([Parameter(Mandatory = $true)][object]$Manifest)
+
+    $canonical = [ordered]@{
+        schema_version = [string]$Manifest.schema_version
+        policy = $Manifest.policy
+        selected_count = [int64]$Manifest.selected_count
+        selected_bytes = [int64]$Manifest.selected_bytes
+        candidates = @($Manifest.candidates)
+    }
+    $json = $canonical | ConvertTo-Json -Depth 8 -Compress
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString(
+                $sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes($json))
+            )).Replace('-', '').ToLowerInvariant()
+    }
+    finally { $sha256.Dispose() }
+}
+
 if ($Apply) {
     if ([string]::IsNullOrWhiteSpace($BatchManifestPath) -or
         [string]::IsNullOrWhiteSpace($ExpectedBatchManifestSha256)) {
@@ -466,14 +490,14 @@ if ($Apply) {
     if (-not (Test-Path -LiteralPath $BatchManifestPath -PathType Leaf)) {
         throw "Approved batch manifest does not exist: $BatchManifestPath"
     }
-    $actualManifestSha256 = Get-FileSha256 -Path $BatchManifestPath
-    $batchManifestSha256 = $actualManifestSha256
-    if ($actualManifestSha256 -ne $ExpectedBatchManifestSha256.Trim().ToLowerInvariant()) {
-        throw "Approved batch manifest SHA-256 mismatch: expected $ExpectedBatchManifestSha256 actual $actualManifestSha256"
-    }
     $approvedManifest = Get-Content -LiteralPath $BatchManifestPath -Raw | ConvertFrom-Json
     if ($approvedManifest.schema_version -ne 'asr-storage-cleanup-batch/1') {
         throw 'Approved batch manifest has an unsupported schema version'
+    }
+    $actualManifestSha256 = Get-BatchManifestSha256 -Manifest $approvedManifest
+    $batchManifestSha256 = $actualManifestSha256
+    if ($actualManifestSha256 -ne $ExpectedBatchManifestSha256.Trim().ToLowerInvariant()) {
+        throw "Approved batch manifest SHA-256 mismatch: expected $ExpectedBatchManifestSha256 actual $actualManifestSha256"
     }
     if ([int64]$approvedManifest.selected_bytes -gt $batchMaxBytes -or
         [int64]$approvedManifest.selected_bytes -gt $maxDeleteBytes) {
@@ -515,8 +539,9 @@ elseif (-not [string]::IsNullOrWhiteSpace($BatchManifestPath)) {
     if ($manifestParent -and -not (Test-Path -LiteralPath $manifestParent -PathType Container)) {
         New-Item -ItemType Directory -Path $manifestParent -Force | Out-Null
     }
-    New-BatchManifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $BatchManifestPath -Encoding UTF8
-    $batchManifestSha256 = Get-FileSha256 -Path $BatchManifestPath
+    $manifest = New-BatchManifest
+    $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $BatchManifestPath -Encoding UTF8
+    $batchManifestSha256 = Get-BatchManifestSha256 -Manifest $manifest
 }
 
 if ($Apply -and $selectedBytes -gt $maxDeleteBytes) {
