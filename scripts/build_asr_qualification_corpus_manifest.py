@@ -161,6 +161,8 @@ def main() -> int:
     ids = [item["id"] for item in updated]
     if len(set(ids)) != len(ids):
         raise SystemExit("duplicate sample ids in the resulting corpus")
+    # The corpus contract requires sample ids to be sorted and unique.
+    updated.sort(key=lambda item: item["id"])
 
     manifest = {
         **source,
