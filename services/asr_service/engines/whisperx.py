@@ -194,8 +194,10 @@ class WhisperXEngine:
                 vad_filter=False,
                 condition_on_previous_text=False,
                 word_timestamps=False,
-                # 抑制 hotwords 高偏置在长音频停顿段的循环复读；实测不压低规范编号识别。
-                repetition_penalty=2.0,
+                # 不设置 repetition_penalty：生产真实音频同窗口实测，rp=2.0 会把解码压成
+                # 每个 30 s 块只吐十几个字（无热词 459→41 字、带热词 273→72 字，约 -85%），
+                # 开场白与大部分讲解被吞掉。保持 faster-whisper 默认 1.0，优先内容完整；
+                # 循环复读由应用层清洗与规范术语层兜底。
                 # VAD 保持 False：真实实操音频探针实测 vad=True 反而把碎片从 4 增至 72 个 <5字段，
                 # 且对短/噪样本（noisy-bim-zh）有误删风险；凭空"规范尾巴"交由应用层清洗兜底，而非硬开 VAD。
             )
