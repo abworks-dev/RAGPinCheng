@@ -305,3 +305,85 @@ def test_invalid_output_exposes_only_allowlisted_stage_and_exception_type(monkey
     assert result.error_code is ProviderErrorCode.invalid_provider_output
     assert engine.last_failure_stage == "transcribe"
     assert engine.last_failure_type == "ValueError"
+
+
+def _engine_with_aligned_segments(monkeypatch, segments):
+    install_fake(monkeypatch)
+    whisperx_module = SimpleNamespace(align=lambda *_args, **_kwargs: {"segments": segments})
+    monkeypatch.setattr(
+        whisperx_engine,
+        "importlib",
+        SimpleNamespace(import_module=lambda name: whisperx_module),
+    )
+    model = SimpleNamespace(
+        transcribe=lambda *_args, **_kwargs: (
+            iter([SimpleNamespace(start=0.0, end=1.0, text="测试")]),
+            SimpleNamespace(language="zh"),
+        )
+    )
+    return WhisperXEngine(_model=model, _align_model=object(), _align_metadata=object())
+
+
+def test_segment_end_beyond_the_chunk_is_clamped_instead_of_failing_the_job(monkeypatch):
+    # Production observed start 119960 ms and end 149940 ms inside a 120000 ms window;
+    # the whole job used to fail permanently on that single misaligned segment.
+    engine = _engine_with_aligned_segments(
+        monkeypatch,
+        [
+            {"start": 0.0, "end": 5.0, "text": "开场白"},
+            {"start": 119.96, "end": 149.94, "text": "结尾句"},
+        ],
+    )
+
+    result = engine.transcribe_chunk(
+        PreparedAudioChunk(0, 0, 120000, b"wav"),
+        WHISPERX_SERVICE_CONFIG,
+    )
+
+    assert type(result) is EngineChunkCandidate
+    assert [segment.text for segment in result.segments] == ["开场白", "结尾句"]
+    assert [segment.start_value for segment in result.segments] == ["0", "119960"]
+    assert [segment.end_value for segment in result.segments] == ["5000", "120000"]
+    assert engine.last_clamped_segments == 1
+    assert engine.last_dropped_segments == 0
+    assert engine.last_failure_stage is None
+
+
+def test_degenerate_or_textless_segments_are_dropped_and_the_rest_survives(monkeypatch):
+    engine = _engine_with_aligned_segments(
+        monkeypatch,
+        [
+            {"start": 0.0, "end": 5.0, "text": "保留这句"},
+            {"start": 6.0, "end": 6.0, "text": "零长度"},
+            {"start": 7.0, "end": 8.0, "text": "   "},
+            {"start": 119.999, "end": 150.0, "text": "越界但裁剪后仍有效"},
+            {"start": 120.001, "end": 150.0, "text": "越界且裁剪后退化"},
+        ],
+    )
+
+    result = engine.transcribe_chunk(
+        PreparedAudioChunk(0, 0, 120000, b"wav"),
+        WHISPERX_SERVICE_CONFIG,
+    )
+
+    assert type(result) is EngineChunkCandidate
+    assert [segment.text for segment in result.segments] == ["保留这句", "越界但裁剪后仍有效"]
+    assert [segment.end_value for segment in result.segments] == ["5000", "120000"]
+    assert engine.last_dropped_segments == 3
+    assert engine.last_clamped_segments == 2
+
+
+def test_alignment_that_yields_nothing_usable_still_fails_closed(monkeypatch):
+    engine = _engine_with_aligned_segments(
+        monkeypatch,
+        [{"start": 7.0, "end": 8.0, "text": "   "}],
+    )
+
+    result = engine.transcribe_chunk(
+        PreparedAudioChunk(0, 0, 120000, b"wav"),
+        WHISPERX_SERVICE_CONFIG,
+    )
+
+    assert type(result) is ProviderFailure
+    assert result.error_code is ProviderErrorCode.invalid_provider_output
+    assert engine.last_failure_stage == "map-segments"
