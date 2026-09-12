@@ -2305,10 +2305,15 @@ def test_faster_whisper_service_config_pins_systran_largev3_candidate():
     assert "53ecf83a5bedc5597eb8c8b34eac29e5345520ff" in profiles
     assert "dropbox-dash/faster-whisper-large-v3-turbo" not in profiles
     assert "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf" not in profiles
-    # whisperx v2 候选的 hotwords 同样收敛为 12 标准词（数字热词 208/12.5/95% 曾导致
-    # standard-codes 编号 50016→5016 识别错误）；BIM 术语 recall 由模型本身保障。
+    # 2026-09-13 批准：whisperx 生产解码不再使用热词（长音频实测热词偏置会把 30 秒窗口
+    # 解码成编号复读并吞掉真实讲解）；热词仅保留为 qualification 的上一版生产参照（v1 与
+    # v2 的 hotwords 候选），生产候选 WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG 不再带热词。
     assert "BIM_ENGINEERING_TERMS_V1" not in profiles
-    assert "hotwords=FASTER_WHISPER_SERVICE_CONFIG.hotwords," in profiles
+    assert "hotwords=WHISPERX_HOTWORDS," in profiles
+    production_block = profiles.split(
+        "WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG = ServiceProfileConfig(", 1
+    )[1].split("\n)", 1)[0]
+    assert "hotwords" not in production_block
     assert "faster-whisper-large-v3-turbo-v1" in profiles
     assert "beam_size=10" in profiles
     assert "temperature=0.0" in profiles

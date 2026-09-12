@@ -518,6 +518,58 @@ def _scenario_metric(
     return float(rows[0][metric])
 
 
+def evaluate_selection(
+    production: dict[str, object],
+    legacy: dict[str, object],
+    baseline: dict[str, object],
+) -> dict[str, object]:
+    """Decide whether the hotword-free production candidate may be selected.
+
+    The production WhisperX decode no longer uses hotwords (2026-09-13 批准),
+    because hotword bias swallowed whole 30-second spans of real speech on long
+    production audio. Two consequences shape this gate:
+
+    - the previous "must strictly beat the no-hotword baseline" comparison is
+      degenerate (the production candidate *is* a no-hotword decode), so it is
+      replaced by a like-for-like anti-regression comparison against the previous
+      production configuration (WHISPERX_V2_HOTWORDS_SERVICE_CONFIG);
+    - every absolute gate (per-sample CER, BIM term recall, standard code recall,
+      timestamp p95, negative false positives, content coverage) still has to pass.
+    """
+    legacy_code_recall = float(legacy["gates"]["standard_code_recall"]["observed"])
+    production_code_recall = float(
+        production["gates"]["standard_code_recall"]["observed"]
+    )
+    legacy_noisy_cer = _scenario_metric(legacy, "noisy-bim-zh", "cer")
+    production_noisy_cer = _scenario_metric(production, "noisy-bim-zh", "cer")
+    negative_false_positives = int(
+        production["gates"]["negative_false_positives"]["observed"]
+    )
+    selection = {
+        "production_candidate_passed": production["status"] == "pass",
+        "standard_code_recall_not_worse_than_legacy_hotwords": (
+            production_code_recall >= legacy_code_recall
+        ),
+        "noisy_bim_cer_not_worse_than_legacy_hotwords": (
+            production_noisy_cer <= legacy_noisy_cer
+        ),
+        "negative_false_positives_zero": negative_false_positives == 0,
+        "content_coverage_passed": bool(
+            production["gates"].get("content_coverage", {}).get("pass", True)
+        ),
+    }
+    return {
+        "selection": selection,
+        "selected_candidate": "full-decode" if all(selection.values()) else None,
+        "legacy_reference_candidate": "hotwords",
+        "baseline_code_recall": round(float(baseline["gates"]["standard_code_recall"]["observed"]), 6),
+        "legacy_code_recall": round(legacy_code_recall, 6),
+        "production_code_recall": round(production_code_recall, 6),
+        "legacy_noisy_bim_cer": round(legacy_noisy_cer, 6),
+        "production_noisy_bim_cer": round(production_noisy_cer, 6),
+    }
+
+
 def run_candidate_matrix(
     manifest: SampleManifest, *, timeout_ms: int
 ) -> dict[str, object]:
@@ -553,35 +605,20 @@ def run_candidate_matrix(
         report["qualification_policy"] = config.qualification_policy
         reports[candidate_id] = report
 
-    baseline = reports["baseline"]
-    full = reports["full-decode"]
-    baseline_code_recall = float(
-        baseline["gates"]["standard_code_recall"]["observed"]
+    decision = evaluate_selection(
+        reports["full-decode"], reports["hotwords"], reports["baseline"]
     )
-    full_code_recall = float(
-        full["gates"]["standard_code_recall"]["observed"]
-    )
-    baseline_noisy_cer = _scenario_metric(baseline, "noisy-bim-zh", "cer")
-    full_noisy_cer = _scenario_metric(full, "noisy-bim-zh", "cer")
-    negative_false_positives = int(
-        full["gates"]["negative_false_positives"]["observed"]
-    )
-    selection = {
-        "full_candidate_passed": full["status"] == "pass",
-        "standard_code_recall_improved": full_code_recall > baseline_code_recall,
-        "noisy_bim_cer_improved": full_noisy_cer < baseline_noisy_cer,
-        "negative_false_positives_zero": negative_false_positives == 0,
-        "content_coverage_passed": bool(
-            full["gates"].get("content_coverage", {}).get("pass", True)
-        ),
-    }
-    selected = "full-decode" if all(selection.values()) else None
     return {
-        **full,
+        **reports["full-decode"],
         "schema_version": MATRIX_REPORT_SCHEMA_VERSION,
-        "status": "pass" if selected else "fail",
-        "selected_candidate": selected,
-        "selection": selection,
+        "status": "pass" if decision["selected_candidate"] else "fail",
+        "selected_candidate": decision["selected_candidate"],
+        "selection": decision["selection"],
+        "selection_evidence": {
+            key: value
+            for key, value in decision.items()
+            if key not in ("selection", "selected_candidate")
+        },
         "candidate_order": [item[0] for item in candidates],
         "candidates": reports,
     }

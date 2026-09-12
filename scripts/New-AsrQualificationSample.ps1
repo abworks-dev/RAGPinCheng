@@ -21,6 +21,7 @@ param(
     [Parameter(Mandatory = $true)][string]$SentenceFile,
     [Parameter(Mandatory = $true)][string]$WavePath,
     [Parameter(Mandatory = $true)][string]$TimingPath,
+    [string]$ReferenceFile = '',
     [string]$VoiceName = 'Microsoft Huihui Desktop',
     [int]$GapMs = 350,
     [int]$Rate = 0
@@ -41,6 +42,24 @@ $sentences = @(
 )
 if ($sentences.Count -eq 0) {
     throw 'sentence file contains no usable sentences'
+}
+
+# The corpus annotation is the text a faithful transcript should contain, which is
+# not always the literal TTS input ("两米二" is transcribed as "2米2", TTS reads
+# "G B 五零零一一 二零一零" as the standard code "GB 50011-2010").
+$references = @()
+if (-not [string]::IsNullOrWhiteSpace($ReferenceFile)) {
+    if (-not (Test-Path -LiteralPath $ReferenceFile -PathType Leaf)) {
+        throw "reference file not found: $ReferenceFile"
+    }
+    $references = @(
+        Get-Content -LiteralPath $ReferenceFile -Encoding UTF8 |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { $_ -ne '' }
+    )
+    if ($references.Count -ne $sentences.Count) {
+        throw "reference file must contain one line per spoken sentence"
+    }
 }
 
 $synthesizer = New-Object System.Speech.Synthesis.SpeechSynthesizer
@@ -82,6 +101,7 @@ try {
                     start_ms = $cursorMs
                     end_ms = ($cursorMs + $partMs)
                     text = $sentence
+                    reference_text = if ($references.Count -gt 0) { $references[$index] } else { $sentence }
                 })
             $pcmChunks.Add($data)
             $cursorMs += $partMs
@@ -125,6 +145,7 @@ try {
             gap_ms = $GapMs
             duration_ms = $cursorMs
             sentence_count = $sentences.Count
+            reference_text = if ($references.Count -gt 0) { ($references -join '') } else { ($sentences -join '') }
             sentences = $timings
         }
         [IO.File]::WriteAllText(

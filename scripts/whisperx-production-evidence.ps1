@@ -267,7 +267,12 @@ function Get-QualifiedWhisperXEvidence {
         -Label "Qualified WhisperX verdict"
     Assert-WhisperXEvidenceProperties `
         -Value $verdict.selection `
-        -Expected @("full_candidate_passed", "negative_false_positives_zero", "noisy_bim_cer_improved", "standard_code_recall_improved") `
+        -Expected @(
+            "negative_false_positives_zero",
+            "noisy_bim_cer_not_worse_than_legacy_hotwords",
+            "production_candidate_passed",
+            "standard_code_recall_not_worse_than_legacy_hotwords"
+        ) `
         -Label "Qualified WhisperX selection"
     if (
         $verdict.schema_version -ne "whisperx-production-qualification-verdict/3" -or
@@ -282,9 +287,9 @@ function Get-QualifiedWhisperXEvidence {
         [int]$verdict.sample_count -ne $script:WhisperXSampleIds.Count -or
         [double]$verdict.peak_gpu_memory_mib -le 0 -or
         $verdict.diagnostic_mode -ne $false -or
-        $verdict.selection.full_candidate_passed -ne $true -or
-        $verdict.selection.standard_code_recall_improved -ne $true -or
-        $verdict.selection.noisy_bim_cer_improved -ne $true -or
+        $verdict.selection.production_candidate_passed -ne $true -or
+        $verdict.selection.standard_code_recall_not_worse_than_legacy_hotwords -ne $true -or
+        $verdict.selection.noisy_bim_cer_not_worse_than_legacy_hotwords -ne $true -or
         $verdict.selection.negative_false_positives_zero -ne $true -or
         $verdict.profile_admission -ne "disabled" -or
         $verdict.production_services_modified -ne $false -or

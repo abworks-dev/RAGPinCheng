@@ -168,12 +168,15 @@ FASTER_WHISPER_SERVICE_CONFIG = ServiceProfileConfig(
     temperature=0.0,
 )
 
-# whisperx 专用热词：在 faster 全量热词基础上去掉孤立且易被长音频停顿段拼凑成虚构尾巴的
-# "规范编号"（保留"复核"、GB 数字词、规范名称与工程术语）。
-# 真实实操音频探针实测（vad False / T0 / rp2.0）：
-#   - 全量热词   -> 凭空"建筑抗震设复核/规范 GB 50011"尾巴 7 处，碎片 <5字 16；
-#   - 去掉"复核" -> noisy-bim-zh 资格样本"复核"→"附和"，CER 超门槛（不可取）；
-#   - 只去"规范编号"（本集合）-> 尾巴 7→3、碎片 16→4，noisy-bim-zh"复核"与 GB 50016-2014 均完整。
+# whisperx 专用热词：仅作为"上一版生产配置"的回归参照（qualification 的 hotwords 候选），
+# 不再用于生产解码。生产解码（WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG）已去掉热词：
+# 2026-09-13 生产实测，热词在这种长音频里会把个别 30 秒窗口的解码带进编号复读，整段真实
+# 讲解被吞掉（job 459010b5：720.0-750.0s 输出 9 次"建筑抗震设计规范 GB 40011-2014"、
+# 779.3-802.1s 输出 5 段"楼层平台"、480.1-539.7s 输出 11-12 次"建筑设计规范 GB 50011-2010"，
+# 两次独立任务逐字节一致）。同一音频在活动 release 内重放：去热词后上述窗口恢复为
+# 12 段/108 字与 7 段/84 字真实讲解，而健康窗口内容相当（84 字 vs 89 字）。
+# 代价与补偿：无热词时 noisy 样本的"构件碰撞/净高分析"与 5 秒念编号片段会退化，
+# 由术语层纠正规则与"自然长音频"资格样本覆盖（见 scripts/qualification-corpus/）。
 WHISPERX_HOTWORDS = tuple(
     word
     for word in FASTER_WHISPER_SERVICE_CONFIG.hotwords
@@ -237,13 +240,16 @@ WHISPERX_V2_HOTWORDS_SERVICE_CONFIG = ServiceProfileConfig(
     qualification_policy="whisperx-r3/1",
 )
 
+# 生产配置：不再传热词（见上方 WHISPERX_HOTWORDS 注释）。beam/temperature 保持与上一版
+# 生产一致，使"去热词"成为唯一变量。qualification 仍会解码 WHISPERX_V2_HOTWORDS_SERVICE_CONFIG
+# 作为上一版生产配置的回归参照：生产候选必须通过全部绝对门禁，且规范编号召回不低于、
+# noisy-BIM CER 不高于该参照。
 WHISPERX_V2_FULL_DECODE_SERVICE_CONFIG = ServiceProfileConfig(
     "whisperx-large-v3-zh-align-v2",
     "whisperx",
     "Systran/faster-whisper-large-v3",
     "53ecf83a5bedc5597eb8c8b34eac29e5345520ff",
     "zh-CN",
-    hotwords=WHISPERX_HOTWORDS,
     beam_size=10,
     temperature=0.0,
     qualification_policy="whisperx-r3/1",
