@@ -598,13 +598,19 @@ if (-not $Apply) {
 }
 
 foreach ($candidate in $selectedCandidates) {
-    if ($PSCmdlet.ShouldProcess($candidate.Path, "Remove $($candidate.Kind)")) {
-        if ($candidate.Kind -eq 'qualification-run') {
-            Backup-QualificationEvidence -Candidate $candidate
-        }
-        Remove-Item -LiteralPath $candidate.Path -Recurse -Force
-        $candidate.Deleted = $true
-        Write-Host "Deleted: $($candidate.Path)"
+    # GitHub Actions 的 powershell 步骤是 ". script.ps1" 点源调用，这种调用下
+    # $PSCmdlet.ShouldProcess 会抛 NullReferenceException（实测 run 34719008697 与
+    # 本地点源复现），使删除循环整体失败。删除本身由 -Apply、已批准批次摘要、
+    # 候选 schema/bytes/mtime 一致性三重约束，这里只保留 -WhatIf 的预览语义。
+    if ($WhatIfPreference) {
+        Write-Host "WhatIf: would remove $($candidate.Kind): $($candidate.Path)"
+        continue
     }
+    if ($candidate.Kind -eq 'qualification-run') {
+        Backup-QualificationEvidence -Candidate $candidate
+    }
+    Remove-Item -LiteralPath $candidate.Path -Recurse -Force
+    $candidate.Deleted = $true
+    Write-Host "Deleted: $($candidate.Path)"
 }
 Write-Audit
