@@ -1434,7 +1434,10 @@ class SQLiteTranscriptionStore:
     def list_versions(self, media_id: str) -> tuple[TranscriptVersionRecord, ...]:
         validate_uuid(media_id, "media_id")
         rows = self._conn.execute(
-            "SELECT id FROM transcript_versions WHERE media_id=? ORDER BY created_at DESC,id DESC",
+            # rowid is insertion-ordered, so equal created_at values (batch runs finish
+            # inside the same second) keep a stable newest-first order instead of
+            # falling back to the random UUID primary key.
+            "SELECT id FROM transcript_versions WHERE media_id=? ORDER BY created_at DESC,rowid DESC",
             (media_id,),
         ).fetchall()
         return tuple(self.load_version(row["id"]) for row in rows)

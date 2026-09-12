@@ -249,6 +249,36 @@ def _scheme_display_lookup(
     return lookup
 
 
+def _version_job_lookup(
+    conn: sqlite3.Connection, version_ids: list[str]
+) -> dict[str, tuple[int | None, int | None]]:
+    """Return {version_id: (completed_at, attempt_number)} for the version list.
+
+    An automatic transcript version row is inserted in the same transaction that
+    marks its job succeeded, so ``finished_at`` is the transcription completion
+    time; manual versions have no job and fall back to their own ``created_at``.
+    """
+    unique_ids = sorted({str(version_id) for version_id in version_ids if version_id})
+    lookup: dict[str, tuple[int | None, int | None]] = {}
+    if not unique_ids:
+        return lookup
+    placeholders = ",".join("?" for _ in unique_ids)
+    for row in conn.execute(
+        f"""SELECT v.id AS version_id,v.created_at AS version_created_at,
+                   j.finished_at AS job_finished_at,j.attempt_number AS job_attempt_number
+              FROM transcript_versions v
+              LEFT JOIN transcription_jobs j ON j.id=v.transcription_job_id
+             WHERE v.id IN ({placeholders})""",
+        unique_ids,
+    ).fetchall():
+        finished_at = row["job_finished_at"]
+        lookup[str(row["version_id"])] = (
+            int(finished_at) if finished_at is not None else int(row["version_created_at"]),
+            None if row["job_attempt_number"] is None else int(row["job_attempt_number"]),
+        )
+    return lookup
+
+
 def _job_dto(
     job,
     scheme_lookup: dict[str, tuple[str | None, bool]] | None = None,
@@ -1081,6 +1111,7 @@ def _version_dto(
     version,
     current_version_id: str | None = None,
     scheme_lookup: dict[str, tuple[str | None, bool]] | None = None,
+    job_lookup: dict[str, tuple[int | None, int | None]] | None = None,
 ) -> TranscriptVersionDTO:
     scheme_name: str | None = None
     scheme_deleted = False
@@ -1095,6 +1126,12 @@ def _version_dto(
                 scheme_name, scheme_deleted = _scheme_display(conn, version.scheme_id)
             finally:
                 conn.close()
+    completed_at = int(version.created_at)
+    attempt_number: int | None = None
+    if job_lookup is not None:
+        resolved = job_lookup.get(version.id)
+        if resolved is not None:
+            completed_at, attempt_number = resolved
     return TranscriptVersionDTO(
         version_id=version.id,
         media_id=version.media_id,
@@ -1120,6 +1157,8 @@ def _version_dto(
         created_at=version.created_at,
         updated_at=version.updated_at,
         is_current=version.id == current_version_id,
+        completed_at=completed_at,
+        attempt_number=attempt_number,
     )
 
 
@@ -1224,7 +1263,16 @@ def list_transcript_versions(media_id: str, _admin: CurrentUser = Depends(requir
         service = _build_publication_service(conn)
         versions = service.list_versions(media_id)
         current = service.store.current_head(media_id)
-        return [_version_dto(version, current, _scheme_display_lookup(conn, [version.scheme_id for version in versions])) for version in versions]
+        job_lookup = _version_job_lookup(conn, [version.id for version in versions])
+        return [
+            _version_dto(
+                version,
+                current,
+                _scheme_display_lookup(conn, [version.scheme_id for version in versions]),
+                job_lookup,
+            )
+            for version in versions
+        ]
     except ContractValidationError:
         raise HTTPException(status_code=400, detail="媒体标识不合法")
     finally:

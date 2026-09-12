@@ -119,9 +119,12 @@ function formatDuration(milliseconds: number) {
 
 function transcriptionVersionOptionLabel(version: TranscriptVersion, index: number, total: number) {
   const source = version.source === "automatic" ? "自动转录" : version.derived_from_version_id ? "人工修订" : "人工转录";
-  const date = new Date(version.created_at * 1000).toLocaleDateString("zh-CN");
+  // 与版本列表一致：优先显示转录完成时间（自动稿为任务 finished_at）。
+  const completedAt = version.completed_at ?? version.created_at;
+  const date = new Date(completedAt * 1000).toLocaleString("zh-CN", { hour12: false });
   const rank = total === 1 ? "唯一版本" : index === 0 ? "最新一稿" : `第 ${index + 1} 稿`;
-  return `${rank} · ${date} · ${source}`;
+  const attempt = version.attempt_number ? ` · 第 ${version.attempt_number} 次尝试` : "";
+  return `${rank} · ${date}${attempt} · ${source}`;
 }
 
 function TimerLine({ job, nowMs }: { job: TranscriptionJob; nowMs: number }) {

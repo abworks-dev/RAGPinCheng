@@ -149,6 +149,34 @@ describe("TranscriptionVersionPanel", () => {
     expect(screen.getByText("原转录配置已删除")).toBeInTheDocument();
   });
 
+  it("shows the transcription completion time and attempt number", async () => {
+    const withCompletion = {
+      ...awaitingVersion,
+      created_at: 1_700_000_000,
+      completed_at: 1_700_003_600,
+      attempt_number: 2,
+    };
+    mocks.listTranscriptVersions.mockResolvedValue([withCompletion]);
+    render(<TranscriptionVersionPanel mediaId="media-1" embedded />);
+
+    expect(await screen.findByText(/完成于 .+ · 第 2 次尝试/)).toBeInTheDocument();
+  });
+
+  it("falls back to the version creation time when no transcription job time exists", async () => {
+    const manualOnly = {
+      ...revisedVersion,
+      created_at: 1_700_000_000,
+      completed_at: null,
+      attempt_number: null,
+    };
+    mocks.listTranscriptVersions.mockResolvedValue([manualOnly]);
+    render(<TranscriptionVersionPanel mediaId="media-1" embedded />);
+
+    const label = await screen.findByText(/^完成于 /);
+    expect(label).toBeInTheDocument();
+    expect(label.textContent).not.toMatch(/次尝试/);
+  });
+
   it("keeps multiple versions in a compact navigator and opens one workspace", async () => {
     const second = { ...revisedVersion, version_id: "33333333-3333-4333-8333-333333333333" };
     const third = { ...approvedVersion, version_id: "44444444-4444-4444-8444-444444444444" };

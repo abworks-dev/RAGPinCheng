@@ -1720,6 +1720,10 @@ class TranscriptVersionDTO(BaseModel):
     created_at: int
     updated_at: int
     is_current: bool = False
+    # 转录完成时间：自动转录稿取任务的 finished_at（与版本同一事务写入），人工稿回退
+    # created_at；attempt_number 是产出该稿的转录尝试序号（人工稿为 None）。
+    completed_at: int | None = None
+    attempt_number: int | None = None
 
 
 class TranscriptMarkdownPreviewDTO(BaseModel):
