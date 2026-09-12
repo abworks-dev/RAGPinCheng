@@ -245,6 +245,24 @@ def strip_whisper_boilerplate(text: str) -> tuple[str, bool]:
     return cleaned, cleaned != text
 
 
+# 解码在重复/不确定语音处会整串复读同一个短语（实测「楼梯楼梯楼梯…」与热词串
+# 反复）。引擎不再用 3-gram 禁令换取覆盖率，这里做保守折叠：同一个 2-4 字片段
+# 连续出现 4 次以上、或同一个 6-24 字片段连续出现 3 次以上，只保留一次。
+# 正常口语的叠词（看看、慢慢）最多两次，不会被命中。
+_REPEAT_SHORT = re.compile(r"([\u4e00-\u9fffA-Za-z0-9]{2,4})\1{3,}")
+_REPEAT_PHRASE = re.compile(r"([\u4e00-\u9fffA-Za-z0-9][\u4e00-\u9fffA-Za-z0-9 ]{5,38})\1{2,}")
+
+
+def collapse_degenerate_repeats(text: str) -> tuple[str, bool]:
+    """Collapse decode loops that repeat one short phrase over and over."""
+    collapsed = _REPEAT_SHORT.sub(r"\1", text)
+    collapsed = _REPEAT_PHRASE.sub(r"\1", collapsed)
+    # A loop can nest (phrase of a phrase), so settle with a bounded second pass.
+    collapsed = _REPEAT_SHORT.sub(r"\1", collapsed)
+    collapsed = _REPEAT_PHRASE.sub(r"\1", collapsed)
+    return collapsed, collapsed != text
+
+
 def _is_bias_only(text: str) -> bool:
     """True if text is composed only of recognised bias words/phrases, standard
     code tokens, generic 规范/编号 connectors, whitespace and commas — i.e. no
@@ -344,7 +362,7 @@ def clean_hallucinated_standard(text: str) -> tuple[str, bool]:
     """
     if not text or not text.strip():
         return text, False
-    stripped = text.strip()
+    stripped, repeated = collapse_degenerate_repeats(text.strip())
     if _is_bias_only(stripped):
         return "", True
     normalized = _normalize_bias_variants(stripped)
@@ -353,18 +371,16 @@ def clean_hallucinated_standard(text: str) -> tuple[str, bool]:
     # Subtitle credits and outro clichés are dropped per line before the bias run
     # handling, so a merged segment keeps its real speech and loses only the credit.
     without_credits, credit_changed = strip_whisper_boilerplate(stripped)
-    if credit_changed:
-        if not without_credits.strip():
-            return "", True
-        candidate = _normalize_bias_variants(without_credits)
-    else:
-        candidate = normalized
+    if credit_changed and not without_credits.strip():
+        return "", True
+    candidate = _normalize_bias_variants(without_credits)
+    result = candidate
     start = _leading_bias_run(candidate)
     end = _trailing_bias_run(candidate)
     if start or end < len(candidate):
         trimmed = candidate[start:end].strip(_BIAS_SEPARATORS + " ")
         if trimmed and not _is_bias_only(trimmed):
-            return trimmed, False
-    if credit_changed:
-        return without_credits, False
+            result = trimmed
+    if result != text:
+        return result, False
     return text, False

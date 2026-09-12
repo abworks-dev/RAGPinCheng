@@ -214,6 +214,38 @@ def test_misrecognised_hotword_variant_with_fabricated_code_is_dropped():
         normalize_candidate(input_ref, candidate, snapshot, execution)
 
 
+def test_degenerate_character_loop_is_collapsed_without_losing_the_rest():
+    result = normalize_engineering(
+        "楼梯楼梯楼梯楼梯楼梯楼梯 高度是多少",
+        maximum_ms=None,
+        maximum_chars=500,
+    )
+    assert [item.text for item in result.segments] == ["楼梯 高度是多少"]
+
+
+def test_repeated_hotword_phrase_collapses_and_is_then_dropped():
+    profile = make_profile(
+        normalizer_config=NormalizerConfig(0, 500, 1000),
+        segmentation_config=TranscriptSegmentationConfig("natural", None, 500, 1000),
+        terminology_config=TerminologyCorrectionConfig("bim-engineering-v1"),
+    )
+    input_ref, _profile, execution, snapshot = make_execution_bundle(duration_ms=6000, profile=profile)
+    candidate = ProviderCandidate(
+        execution.provider_key,
+        "zh-CN",
+        6000,
+        (seg(0, 0, 6, "建筑抗震设计规范 GB 50011-2010 建筑抗震设计规范 GB 50011-2010 建筑抗震设计规范 GB 50011-2010"),),
+    )
+    with pytest.raises(ContractValidationError):
+        normalize_candidate(input_ref, candidate, snapshot, execution)
+
+
+def test_normal_reduplication_is_not_collapsed():
+    text = "我们慢慢看一下这个楼梯的结构面"
+    result = normalize_engineering(text, maximum_ms=None, maximum_chars=500)
+    assert [item.text for item in result.segments] == [text]
+
+
 def test_subtitle_credit_line_is_dropped_from_a_merged_segment():
     result = normalize_engineering(
         "那我们具体来看一下我们怎么检查这个\n每个步骤我们来看一下\n中文字幕志愿者 杨茜茜",
