@@ -195,7 +195,6 @@ class WhisperXEngine:
                 temperature=config.temperature,
                 hotwords=" ".join(config.hotwords) if config.hotwords else None,
                 initial_prompt=config.initial_prompt if config.initial_prompt else None,
-                vad_filter=False,
                 condition_on_previous_text=False,
                 word_timestamps=False,
                 # 不设置 repetition_penalty：生产真实音频同窗口实测，rp=2.0 会把解码压成
@@ -207,8 +206,15 @@ class WhisperXEngine:
                 # 同一窗口复读段 1→0、对齐告警 1→0、越界 1→0，而正常窗口内容量基本不变
                 # （254 字 vs 273 字、177 字 vs 含复读的 224 字），且不牺牲规范编号召回。
                 no_repeat_ngram_size=3,
-                # VAD 保持 False：真实实操音频探针实测 vad=True 反而把碎片从 4 增至 72 个 <5字段，
-                # 且对短/噪样本（noisy-bim-zh）有误删风险；凭空"规范尾巴"交由应用层清洗兜底，而非硬开 VAD。
+                # VAD 改为 True：早期"VAD 保持 False"的结论是在 repetition_penalty=2.0 解码塌缩
+                # 的前提下测得的，那个前提已经不存在。在生产真实音频上重测（同一 120 秒窗口，
+                # VAD 估计语音占比 97%）：
+                #   - 关闭 VAD + 完整热词：17 段/177 字，且丢掉开场白「大家好，我是小张」；
+                #   - 开启 VAD + 完整热词：27 段/412 字（2.3 倍），开场白完整；
+                #   - 另一窗口 12 段/244 字 -> 12 段/261 字。
+                # 热词保持不动：qualification 的规范编号召回门禁结构上要求 full-decode 优于
+                # 无热词 baseline，去掉热词无法通过认证（实测去热词内容更多但编号召回归零）。
+                vad_filter=True,
             )
             transcribe_segments = [
                 {"id": i, "start": seg.start, "end": seg.end, "text": seg.text}
