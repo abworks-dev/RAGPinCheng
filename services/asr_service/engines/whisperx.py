@@ -111,6 +111,8 @@ class WhisperXEngine:
     unavailable_reason_code: str = "model-cache-unavailable"
     last_failure_stage: str | None = field(default=None, init=False)
     last_failure_type: str | None = field(default=None, init=False)
+    last_clamped_segments: int = field(default=0, init=False)
+    last_dropped_segments: int = field(default=0, init=False)
 
     def capabilities(self) -> ServiceEngineCapabilities:
         if self._model is not None and self._align_model is not None:
@@ -170,6 +172,8 @@ class WhisperXEngine:
     def transcribe_chunk(self, chunk: PreparedAudioChunk, config: ServiceProfileConfig) -> EngineChunkCandidate | ProviderFailure:
         self.last_failure_stage = None
         self.last_failure_type = None
+        self.last_clamped_segments = 0
+        self.last_dropped_segments = 0
         if config.provider_key != self.provider_key or config.service_profile_id != self.service_profile_id:
             return ProviderFailure(self.provider_key, ProviderErrorCode.service_contract_mismatch, ProviderFailureClassification.permanent)
         if not self.capabilities().available:
@@ -218,11 +222,28 @@ class WhisperXEngine:
             for position, item in enumerate(aligned["segments"]):
                 if type(item) is not dict:
                     raise ValueError("invalid aligned segment")
+                text = item.get("text")
+                if type(text) is not str or not text.strip():
+                    # Alignment can leave a segment with no text; there is nothing to
+                    # transcribe, so drop just that segment instead of the whole job.
+                    self.last_dropped_segments += 1
+                    continue
                 start_ms = _milliseconds(item.get("start"))
                 end_ms = _milliseconds(item.get("end"))
-                text = item.get("text")
-                if type(text) is not str or not text.strip() or end_ms <= start_ms or end_ms > duration_ms:
-                    raise ValueError("invalid aligned segment")
+                if end_ms <= start_ms:
+                    self.last_dropped_segments += 1
+                    continue
+                if end_ms > duration_ms:
+                    # whisperx alignment can end a segment past the audio it was given
+                    # (production observed start 119960 ms and end 149940 ms inside a
+                    # 120000 ms window). Trimming the end keeps the sentence and the rest
+                    # of the recording; failing the chunk used to lose the entire job
+                    # permanently because invalid_provider_output is not retryable.
+                    end_ms = duration_ms
+                    self.last_clamped_segments += 1
+                    if end_ms <= start_ms:
+                        self.last_dropped_segments += 1
+                        continue
                 segments.append(CandidateSegment(position, str(start_ms), str(end_ms), TimeUnit.milliseconds, text.strip()))
             if not segments:
                 raise ValueError("empty aligned output")
