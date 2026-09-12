@@ -36,6 +36,17 @@ _RULES_V1 = (
     (re.compile(r"提梁踢柱|踢梁踢柱"), "梯梁梯柱"),
     (re.compile(r"踢断|梯断|梭段"), "梯段"),
     (re.compile(r"踢面|题面"), "踏面"),
+    (re.compile(r"平态|平毯|平臺"), "平台"),
+    (re.compile(r"结购|结枡"), "结构"),
+    (re.compile(r"臺"), "台"),
+    (re.compile(r"梯株"), "梯柱"),
+    (re.compile(r"梯量|梯亮|梯岚|提梁"), "梯梁"),
+    (re.compile(r"提柱"), "梯柱"),
+    (re.compile(r"建筚"), "建筑"),
+    (re.compile(r"检杳"), "检查"),
+    (re.compile(r"减高"), "净高"),
+    (re.compile(r"数面"), "踏面"),
+    (re.compile(r"确确"), "确实"),
     (re.compile(r"剥面|头面|刮面"), "剖面"),
     (re.compile(r"头切"), "剖切"),
     (re.compile(r"三围"), "三维"),
@@ -170,6 +181,70 @@ def _normalize_bias_variants(text: str) -> str:
     return text
 
 
+# ---------------------------------------------------------------------------
+# Whisper 在音乐/静音段会吐出训练语料里的字幕组署名与片尾套话（实测：某段静音后
+# 附加「中文字幕志愿者 杨茜茜」），与本项目内容无关。这些短语不可能由讲师口述，
+# 因此按"整行署名"清理；只在独立行上生效（合并段用换行连接），避免误删正文同形词。
+_WHISPER_BOILERPLATE = (
+    "中文字幕志愿者",
+    "字幕志愿者",
+    "中文字幕",
+    "字幕组",
+    "字幕由",
+    "本字幕",
+    "翻译：",
+    "翻译:",
+    "校对：",
+    "校对:",
+    "时间轴：",
+    "时间轴:",
+    "听译：",
+    "听译:",
+    "压制：",
+    "压制:",
+    "感谢观看",
+    "感谢您的观看",
+    "请不吝点赞",
+    "订阅频道",
+    "明镜与点点",
+    "MING PAO",
+    "点点栏目",
+)
+# 署名后通常跟一个短名字（如「杨茜茜」）；去掉署名短语后只剩短名字即视为署名行。
+_BOILERPLATE_REMAINDER = re.compile(r"^[\u4e00-\u9fffA-Za-z·.\s]{0,8}$")
+
+
+def _line_is_boilerplate(line: str) -> bool:
+    candidate = line.strip()
+    if not candidate:
+        return False
+    hit = False
+    for phrase in sorted(_WHISPER_BOILERPLATE, key=len, reverse=True):
+        if phrase in candidate:
+            hit = True
+            candidate = candidate.replace(phrase, " ")
+    if not hit:
+        return False
+    candidate = (
+        candidate.replace("，", " ")
+        .replace(",", " ")
+        .replace("：", " ")
+        .replace(":", " ")
+    )
+    return bool(_BOILERPLATE_REMAINDER.match(candidate))
+
+
+def strip_whisper_boilerplate(text: str) -> tuple[str, bool]:
+    """Remove whole lines that are only a subtitle credit or an outro cliché."""
+    if "\n" not in text:
+        return ("", True) if _line_is_boilerplate(text) else (text, False)
+    kept = [line for line in text.split("\n") if not _line_is_boilerplate(line)]
+    cleaned = "\n".join(kept).strip("\n")
+    if not cleaned.strip():
+        return "", True
+    return cleaned, cleaned != text
+
+
 def _is_bias_only(text: str) -> bool:
     """True if text is composed only of recognised bias words/phrases, standard
     code tokens, generic 规范/编号 connectors, whitespace and commas — i.e. no
@@ -275,11 +350,21 @@ def clean_hallucinated_standard(text: str) -> tuple[str, bool]:
     normalized = _normalize_bias_variants(stripped)
     if normalized != stripped and _is_bias_only(normalized):
         return "", True
-    candidate = normalized
+    # Subtitle credits and outro clichés are dropped per line before the bias run
+    # handling, so a merged segment keeps its real speech and loses only the credit.
+    without_credits, credit_changed = strip_whisper_boilerplate(stripped)
+    if credit_changed:
+        if not without_credits.strip():
+            return "", True
+        candidate = _normalize_bias_variants(without_credits)
+    else:
+        candidate = normalized
     start = _leading_bias_run(candidate)
     end = _trailing_bias_run(candidate)
     if start or end < len(candidate):
         trimmed = candidate[start:end].strip(_BIAS_SEPARATORS + " ")
         if trimmed and not _is_bias_only(trimmed):
             return trimmed, False
+    if credit_changed:
+        return without_credits, False
     return text, False
