@@ -156,6 +156,80 @@ def test_fixed_engineering_terms_are_not_split_across_timestamp_segments():
         assert any(term in text for text in texts)
 
 
+def test_hotword_filler_prefix_is_stripped_and_real_speech_kept():
+    result = normalize_engineering(
+        "构件碰撞 净高分析 钢结构 焊缝 螺栓 1毫米的差值",
+        maximum_ms=None,
+        maximum_chars=500,
+    )
+    assert [item.text for item in result.segments] == ["1毫米的差值"]
+
+
+def test_hotword_filler_suffix_is_stripped_and_real_speech_kept():
+    result = normalize_engineering(
+        "1毫米的差值 构件碰撞 净高分析 钢结构",
+        maximum_ms=None,
+        maximum_chars=500,
+    )
+    assert [item.text for item in result.segments] == ["1毫米的差值"]
+
+
+def test_merged_filler_segment_does_not_survive_by_joining_real_speech():
+    """Merging runs before the filler check; the merged filler run must still go."""
+    profile = make_profile(
+        normalizer_config=NormalizerConfig(2, 500, 1000),
+        segmentation_config=TranscriptSegmentationConfig("natural", None, 500, 1000),
+        terminology_config=TerminologyCorrectionConfig("bim-engineering-v1"),
+    )
+    input_ref, _profile, execution, snapshot = make_execution_bundle(duration_ms=6000, profile=profile)
+    candidate = ProviderCandidate(
+        execution.provider_key,
+        "zh-CN",
+        6000,
+        (
+            seg(0, 0, 3, "构件碰撞 净高分析 钢结构 焊缝 螺栓"),
+            seg(1, 3, 6, "那我们量一下这个平台的高度"),
+        ),
+    )
+    result = normalize_candidate(input_ref, candidate, snapshot, execution)
+
+    assert [item.text for item in result.segments] == ["那我们量一下这个平台的高度"]
+
+
+def test_misrecognised_hotword_variant_with_fabricated_code_is_dropped():
+    profile = make_profile(
+        normalizer_config=NormalizerConfig(0, 500, 1000),
+        segmentation_config=TranscriptSegmentationConfig("natural", None, 500, 1000),
+        terminology_config=TerminologyCorrectionConfig("bim-engineering-v1"),
+    )
+    input_ref, _profile, execution, snapshot = make_execution_bundle(duration_ms=5000, profile=profile)
+    candidate = ProviderCandidate(
+        execution.provider_key,
+        "zh-CN",
+        5000,
+        (seg(0, 0, 5, "建筑抗震设计规范 GB 50011-2014 建筒碰撞 净高分析 复核 焊缝 螺栓"),),
+    )
+
+    with pytest.raises(ContractValidationError, match="invalid_canonical_segments"):
+        normalize_candidate(input_ref, candidate, snapshot, execution)
+
+
+def test_bim_misrecognitions_are_corrected_and_negative_samples_kept():
+    result = normalize_engineering(
+        "结枅面标高 梨柱 三围 头面 踢断 楼成平台 题面 检察 圖紙 標高",
+        maximum_ms=None,
+        maximum_chars=500,
+    )
+    assert result.segments[0].text == "结构面标高 梯柱 三维 剖面 梯段 楼层平台 踏面 检查 图纸 标高"
+
+    untouched = normalize_engineering(
+        "结构面标高、梯柱、三维模型、剖面、梯段、楼层平台、踏面、检查、图纸、标高。",
+        maximum_ms=None,
+        maximum_chars=500,
+    )
+    assert untouched.segments[0].text == "结构面标高、梯柱、三维模型、剖面、梯段、楼层平台、踏面、检查、图纸、标高。"
+
+
 def test_prompt_echo_segment_is_dropped_without_deleting_real_terms():
     profile = make_profile(
         normalizer_config=NormalizerConfig(0, 500, 1000),
