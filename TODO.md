@@ -195,15 +195,17 @@
 ### 生产转录可靠性修复与旧稿清理
 
 - 状态：待用户验收
-- 目标：修复生产批量转录超时与转录稿残缺（WhisperX 解码塌缩只转录约四分之一语音、单个越界对齐片段使整单永久失败、热词复读污染输出）、制度上杜绝含 ASR 提示词回吐的旧稿被发布，并清理已删除转录版本的检索索引残留。
+- 目标：修复生产批量转录超时与转录稿残缺（WhisperX 解码塌缩只转录约四分之一语音、单个越界对齐片段使整单永久失败、热词复读污染输出、关闭 VAD 导致长音频继续丢语音）、制度上杜绝含 ASR 提示词回吐的旧稿被发布，并清理已删除转录版本的检索索引残留。
 - 下一步：
-  - [ ] 重新转录受影响的培训视频与 ASR 验收媒体，在工作台确认新稿包含开场白、讲解连续且无复读（同一 120 秒窗口：解码塌缩时 6 段/72 字，修复后 12 段/244 字，正常窗口 16 段/254 字与 17 段/177 字）。
+  - [ ] 重新转录受影响的培训视频与 ASR 验收媒体，在工作台确认新稿包含开场白、讲解连续且无复读（同一 120 秒窗口：塌缩时 6 段/72 字 → 去 rp 后 12 段/244 字 → 开启 VAD 后 27 段/412 字并找回开场白「大家好，我是小张」）。
   - [ ] 抽查含回吐历史版本的视频，确认发布被拦截并提示重新转录生成新版本。
-  - [ ] 为 WhisperX qualification 语料补一条 60 至 120 秒长音频样本并重跑认证：现语料仅 3.5 至 5.2 秒，实测短片段上 `repetition_penalty` 2.0 与 1.0 产出几乎一致（23 字比 21 字），无法覆盖长音频塌缩与热词复读，`content_coverage` 门禁只能作为下限保护。
-  - [ ] 处理 ASR 节点 D: 空间紧张（当前约 9 GB）：按保留策略回收退役 release（14 个共约 114 GB，仅需保留 active 与回滚目标）与超过 7 天保留期的 `dependency-runs`（约 183 GB）。
+  - [ ] 处理「热词压制内容」这一结构性矛盾：qualification 的规范编号召回门禁要求 full-decode 优于无热词 baseline（baseline 召回 0.0），因此去掉热词无法通过认证，而实测去热词能把同一窗口从 244 字提到 384 字、从 177 字提到 439 字。需要重新设计语料/门禁（补长音频样本与内容覆盖度权重）后再评估。
+  - [ ] 为 WhisperX qualification 语料补一条 60 至 120 秒长音频样本并重跑认证：现语料仅 3.5 至 5.2 秒，实测短片段上 `repetition_penalty` 2.0 与 1.0 产出几乎一致（23 字比 21 字），无法覆盖长音频塌缩、热词复读与 VAD 收益。
+  - [ ] 持续关注 ASR 节点 D: 空间（当前约 47 GB）：已按策略回收 8 个退役 release（保留 active 与两个回滚目标，清单见 `release-retirement.json`），剩余可回收项为超 7 天保留期的 `dependency-runs`。
   - [ ] 验收通过后清理应用数据目录中的清理备份：`app.sqlite.pre-purge-34652290722`、`transcript-versions-purge-34652290722.jsonl`、`transcript-index-residue-34659496645.jsonl`、`parents.sqlite.pre-index-residue-34659496645`。
 - 完成标准：批量转录不再超时且转录稿完整、无复读；单个畸形对齐片段不会导致整单失败；WhisperX profile 出稿量与语速匹配；含回吐内容的版本无法发布；已删除版本的转录片段不再出现在检索结果中；用户确认验收通过。
-- 依赖：ASR active release `34674090875`（whisperx 资格 run `34673676368`、契约 `2181646b74ae0e737c87cad6be0019805f59b7a257ccf1296dd43ccbe3ffe344`；`ASR_CHUNK_DURATION_MS=120000` 与 `ASR_CHUNK_OVERLAP_MS=0` 已固化到 `services/asr_service/scheduler.py` 代码默认值）与应用 master tip `0c8fcd95`。
+- 依赖：ASR active release `34677923651`（whisperx 资格 run `34677503874`、契约 `c1ff406041b52f12ab6cf68c02a34c8e4f57b08bf3ec56e5b1a0f73d540c89e9`；引擎为 VAD 开启 + 无 `repetition_penalty` + `no_repeat_ngram_size=3` + 越界对齐片段裁剪；`ASR_CHUNK_DURATION_MS=120000` 与 `ASR_CHUNK_OVERLAP_MS=0` 已固化到 `services/asr_service/scheduler.py` 代码默认值）与应用 master tip `0dc88472`。
+- 方案链接：`docs/features/transcript-pipeline.md`
 - 方案链接：`docs/features/transcript-pipeline.md`
 
 ---
