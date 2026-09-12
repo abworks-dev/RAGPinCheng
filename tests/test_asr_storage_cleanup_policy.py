@@ -4,7 +4,6 @@ import json
 import os
 import shutil
 import subprocess
-import hashlib
 from pathlib import Path
 
 import pytest
@@ -272,10 +271,28 @@ def test_cleanup_batch_manifest_is_required_and_hash_locked_for_apply(tmp_path: 
     assert dry_run.returncode == 0, dry_run.stderr
     report = _read_json(audit_path)
     manifest = _read_json(manifest_path)
-    digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
-    assert report["batch_manifest_sha256"] == digest
+    digest = report["batch_manifest_sha256"]
+    assert isinstance(digest, str) and len(digest) == 64
     assert manifest["selected_count"] == 1
     assert run_root.is_dir()
+
+    # 批准摘要必须只覆盖"选了什么"，不覆盖"什么时候选的"：apply 会在同一次运行里
+    # 重新审计一次，若摘要等于 manifest 文件哈希，则必然因 generated_at_utc 变化而
+    # 以 "storage usage changed since the approved audit" 拒绝执行。
+    second_manifest = tmp_path / "batch-2.json"
+    second_audit = tmp_path / "dry-run-2.json"
+    second_dry_run = _run(
+        CLEANUP_SCRIPT,
+        "-DataRoot", str(data_root),
+        "-ProgramRoot", str(program_root),
+        "-Qwen3AsrQualificationRoot", str(qwen_root),
+        "-QualificationKeepCount", "1",
+        "-BatchManifestPath", str(second_manifest),
+        "-AuditPath", str(second_audit),
+    )
+    assert second_dry_run.returncode == 0, second_dry_run.stderr
+    assert second_manifest.read_bytes() != manifest_path.read_bytes()
+    assert _read_json(second_audit)["batch_manifest_sha256"] == digest
 
     wrong_hash = _run(
         CLEANUP_SCRIPT,
