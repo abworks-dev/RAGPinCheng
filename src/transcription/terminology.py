@@ -44,7 +44,8 @@ _RULES_V1 = (
     (re.compile(r"提柱"), "梯柱"),
     (re.compile(r"建筚"), "建筑"),
     (re.compile(r"检杳"), "检查"),
-    (re.compile(r"减高"), "净高"),
+    (re.compile(r"减高|进高"), "净高"),
+    (re.compile(r"屏面"), "平面"),
     (re.compile(r"数面"), "踏面"),
     (re.compile(r"确确"), "确实"),
     (re.compile(r"剥面|头面|刮面"), "剖面"),
@@ -250,7 +251,16 @@ def strip_whisper_boilerplate(text: str) -> tuple[str, bool]:
 # 连续出现 4 次以上、或同一个 6-24 字片段连续出现 3 次以上，只保留一次。
 # 正常口语的叠词（看看、慢慢）最多两次，不会被命中。
 _REPEAT_SHORT = re.compile(r"([\u4e00-\u9fffA-Za-z0-9]{2,4})\1{3,}")
-_REPEAT_PHRASE = re.compile(r"([\u4e00-\u9fffA-Za-z0-9][\u4e00-\u9fffA-Za-z0-9 ]{5,38})\1{2,}")
+# 短语复读要能覆盖带连字符/点号的规范编号（实测「建筑抗震设计规范 GB 40011-2014」
+# 连续 9 次），因此字符类必须含 - . / % 这些编号里出现的符号。
+_REPEAT_PHRASE = re.compile(
+    r"([\u4e00-\u9fffA-Za-z0-9][\u4e00-\u9fffA-Za-z0-9 \-./%]{5,38})\1{2,}"
+)
+# 长短语只重复两次同样是复读（实测「…GB 40011-2014」成对出现）；10 字以上的短语
+# 逐字重复两次不会是正常口述。
+_REPEAT_LONG_PAIR = re.compile(
+    r"([\u4e00-\u9fffA-Za-z0-9][\u4e00-\u9fffA-Za-z0-9 \-./%]{9,38})\1"
+)
 
 
 def collapse_degenerate_repeats(text: str) -> tuple[str, bool]:
@@ -260,6 +270,7 @@ def collapse_degenerate_repeats(text: str) -> tuple[str, bool]:
     # A loop can nest (phrase of a phrase), so settle with a bounded second pass.
     collapsed = _REPEAT_SHORT.sub(r"\1", collapsed)
     collapsed = _REPEAT_PHRASE.sub(r"\1", collapsed)
+    collapsed = _REPEAT_LONG_PAIR.sub(r"\1", collapsed)
     return collapsed, collapsed != text
 
 

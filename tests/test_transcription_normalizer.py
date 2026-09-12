@@ -214,6 +214,110 @@ def test_misrecognised_hotword_variant_with_fabricated_code_is_dropped():
         normalize_candidate(input_ref, candidate, snapshot, execution)
 
 
+def test_pure_standard_code_loop_segment_is_dropped_entirely():
+    """实测 11:30 之后出现一段 206 字、只复读「建筑抗震设计规范 GB 40011-2014」的内容：
+    折叠成一次后仍只是 bias 词 + 伪造编号，整段应被剔除而不是留在转写稿里。"""
+    profile = make_profile(
+        normalizer_config=NormalizerConfig(2, 500, 1000),
+        segmentation_config=TranscriptSegmentationConfig("natural", None, 500, 1000),
+        terminology_config=TerminologyCorrectionConfig("bim-engineering-v1"),
+    )
+    input_ref, _profile, execution, snapshot = make_execution_bundle(duration_ms=60000, profile=profile)
+    candidate = ProviderCandidate(
+        execution.provider_key,
+        "zh-CN",
+        60000,
+        (
+            seg(0, 0, 10, "那我们先看一下这个楼梯"),
+            seg(1, 20, 32, ("建筑抗震设计规范 GB 40011-2014 " * 9).strip()),
+            seg(2, 40, 50, "然后我们把这段检查一遍"),
+        ),
+    )
+    result = normalize_candidate(input_ref, candidate, snapshot, execution)
+
+    texts = [item.text for item in result.segments]
+    assert not any("40011" in item for item in texts)
+    assert any("楼梯" in item for item in texts)
+    assert any("检查一遍" in item for item in texts)
+    assert TranscriptWarningCode.hallucinated_tail_dropped in {
+        item.code for item in result.warnings
+    }
+
+
+def test_standard_code_phrase_loop_is_collapsed_even_with_a_hyphen():
+    result = normalize_engineering(
+        ("建筑抗震设计规范 GB 40011-2014 " * 9).strip() + " 那这一段是没有问题的",
+        maximum_ms=None,
+        maximum_chars=500,
+    )
+    text = result.segments[0].text
+    assert text.count("GB 40011-2014") <= 1
+    assert "那这一段是没有问题的" in text
+
+
+def test_consecutive_identical_short_segments_collapse_to_one():
+    profile = make_profile(
+        normalizer_config=NormalizerConfig(2, 500, 1000),
+        segmentation_config=TranscriptSegmentationConfig("natural", None, 500, 1000),
+        terminology_config=TerminologyCorrectionConfig("bim-engineering-v1"),
+    )
+    input_ref, _profile, execution, snapshot = make_execution_bundle(duration_ms=40000, profile=profile)
+    candidate = ProviderCandidate(
+        execution.provider_key,
+        "zh-CN",
+        40000,
+        (
+            seg(0, 0, 5, "那这个是没有错的"),
+            seg(1, 6, 10, "楼层平台"),
+            seg(2, 11, 15, "楼层平台"),
+            seg(3, 16, 20, "楼层平台"),
+            seg(4, 21, 25, "楼层平台"),
+            seg(5, 26, 30, "楼层平台"),
+            seg(6, 33, 38, "结构平面图与外层楼层结构表达"),
+        ),
+    )
+    result = normalize_candidate(input_ref, candidate, snapshot, execution)
+
+    texts = [item.text for item in result.segments]
+    # 归一化会把相邻短段合并成一个段落，因此按出现次数而不是按段计数。
+    assert "".join(texts).count("楼层平台") == 1
+    assert texts[0].startswith("那这个是没有错的")
+    assert TranscriptWarningCode.duplicate_segment_dropped in {
+        item.code for item in result.warnings
+    }
+
+
+def test_two_identical_short_segments_are_not_treated_as_a_loop():
+    profile = make_profile(
+        normalizer_config=NormalizerConfig(2, 500, 1000),
+        segmentation_config=TranscriptSegmentationConfig("natural", None, 500, 1000),
+        terminology_config=TerminologyCorrectionConfig("bim-engineering-v1"),
+    )
+    input_ref, _profile, execution, snapshot = make_execution_bundle(duration_ms=20000, profile=profile)
+    candidate = ProviderCandidate(
+        execution.provider_key,
+        "zh-CN",
+        20000,
+        (
+            seg(0, 0, 4, "这个是没有错的"),
+            seg(1, 6, 10, "楼层平台"),
+            seg(2, 12, 16, "楼层平台"),
+        ),
+    )
+    result = normalize_candidate(input_ref, candidate, snapshot, execution)
+
+    assert "".join(item.text for item in result.segments).count("楼层平台") == 2
+
+
+def test_new_misrecognitions_are_corrected_v2():
+    result = normalize_engineering(
+        "进高的话怎么测量呢 结构屏面图与外层楼层结构表达",
+        maximum_ms=None,
+        maximum_chars=500,
+    )
+    assert result.segments[0].text == "净高的话怎么测量呢 结构平面图与外层楼层结构表达"
+
+
 def test_degenerate_character_loop_is_collapsed_without_losing_the_rest():
     result = normalize_engineering(
         "楼梯楼梯楼梯楼梯楼梯楼梯 高度是多少",

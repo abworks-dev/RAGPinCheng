@@ -33,6 +33,10 @@ class _WorkSegment:
 
 _BOUNDARY_GROUPS = ("\n", "。！？!?；;", "，,", " \t")
 _SENTENCE_ENDINGS = frozenset("。！？!?；;")
+# 跨段复读判定参数：连续至少 3 段完全相同的短文本、相邻间隔不超过 15 秒。
+_LOOP_SEGMENT_MIN_RUN = 3
+_LOOP_SEGMENT_MAX_CHARS = 12
+_LOOP_SEGMENT_GAP_MS = 15000
 _PROMPT_ECHO_MARKERS = ("请准确识别", "要准确识别")
 _ENGINEERING_ECHO_TERMS = frozenset(
     ("Revit", "Navisworks", "AutoCAD", "BIM-", "GB ", "12.5", "208", "95%")
@@ -206,7 +210,35 @@ def normalize_candidate(
     converted.sort(key=lambda item: (item.start_ms, item.end_ms, item.original_positions[0]))
     deduplicated: list[_WorkSegment] = []
     exact_seen: dict[tuple[int, int, str], _WorkSegment] = {}
-    for item in converted:
+    # 解码偶发"跨段复读"：同一短句被拆成连续多段（实测某视频 5 段「楼层平台」，
+    # 每段间隔约 5 秒）。整段文本折叠管不到跨段形态，因此这里按"连续 ≥3 段完全
+    # 相同的短文本、且相邻间隔在 15 秒内"判定为复读，只保留第一段。
+    looped: set[int] = set()
+    run_start = 0
+    while run_start < len(converted):
+        run_end = run_start + 1
+        while (
+            run_end < len(converted)
+            and converted[run_end].text.strip() == converted[run_start].text.strip()
+            and len(converted[run_start].text.strip()) <= _LOOP_SEGMENT_MAX_CHARS
+            and 0 <= converted[run_end].start_ms - converted[run_end - 1].end_ms
+            <= _LOOP_SEGMENT_GAP_MS
+        ):
+            run_end += 1
+        if run_end - run_start >= _LOOP_SEGMENT_MIN_RUN:
+            looped.update(range(run_start + 1, run_end))
+        run_start = run_end
+
+    for index, item in enumerate(converted):
+        if index in looped:
+            warnings.append(
+                _warning(
+                    TranscriptWarningCode.duplicate_segment_dropped,
+                    item.original_positions[0],
+                    converted[index - 1].original_positions,
+                )
+            )
+            continue
         key = (item.start_ms, item.end_ms, item.text)
         kept = exact_seen.get(key)
         if kept is not None:
