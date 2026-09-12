@@ -214,6 +214,56 @@ def test_misrecognised_hotword_variant_with_fabricated_code_is_dropped():
         normalize_candidate(input_ref, candidate, snapshot, execution)
 
 
+def test_subtitle_credit_line_is_dropped_from_a_merged_segment():
+    result = normalize_engineering(
+        "那我们具体来看一下我们怎么检查这个\n每个步骤我们来看一下\n中文字幕志愿者 杨茜茜",
+        maximum_ms=None,
+        maximum_chars=500,
+    )
+    assert [item.text for item in result.segments] == [
+        "那我们具体来看一下我们怎么检查这个\n每个步骤我们来看一下"
+    ]
+
+
+def test_pure_subtitle_credit_or_outro_cliche_segment_is_dropped():
+    for text in (
+        "中文字幕志愿者 杨茜茜",
+        "感谢观看 请不吝点赞 订阅频道",
+        "字幕由 张三 提供",
+    ):
+        profile = make_profile(
+            normalizer_config=NormalizerConfig(0, 500, 1000),
+            segmentation_config=TranscriptSegmentationConfig("natural", None, 500, 1000),
+            terminology_config=TerminologyCorrectionConfig("bim-engineering-v1"),
+        )
+        input_ref, _profile, execution, snapshot = make_execution_bundle(
+            duration_ms=4000, profile=profile
+        )
+        candidate = ProviderCandidate(
+            execution.provider_key,
+            "zh-CN",
+            4000,
+            (seg(0, 0, 4, text),),
+        )
+        with pytest.raises(ContractValidationError):
+            normalize_candidate(input_ref, candidate, snapshot, execution)
+
+
+def test_real_speech_with_a_measurement_is_not_stripped():
+    text = "那如果说梯梁到这个低阶的间距是小于300的"
+    result = normalize_engineering(text, maximum_ms=None, maximum_chars=500)
+    assert [item.text for item in result.segments] == [text]
+
+
+def test_new_misrecognitions_are_corrected():
+    result = normalize_engineering(
+        "平态的结构面 结购面 梯量底 梯亮下 建筚面 检杳一下 平台净高是2米1",
+        maximum_ms=None,
+        maximum_chars=500,
+    )
+    assert result.segments[0].text == "平台的结构面 结构面 梯梁底 梯梁下 建筑面 检查一下 平台净高是2米1"
+
+
 def test_bim_misrecognitions_are_corrected_and_negative_samples_kept():
     result = normalize_engineering(
         "结枅面标高 梨柱 三围 头面 踢断 楼成平台 题面 检察 圖紙 標高",

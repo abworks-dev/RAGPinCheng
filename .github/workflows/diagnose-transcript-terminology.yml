@@ -89,6 +89,12 @@ jobs:
               ("", True),
           )
           expect("trailing filler run", cleaned("1毫米的差值 构件碰撞 净高分析 钢结构"), ("1毫米的差值", False))
+          expect(
+              "subtitle credit line removed",
+              cleaned("那我们具体来看一下我们怎么检查这个\n每个步骤我们来看一下\n中文字幕志愿者 杨茜茜"),
+              ("那我们具体来看一下我们怎么检查这个\n每个步骤我们来看一下", False),
+          )
+          expect("pure subtitle credit dropped", cleaned("中文字幕志愿者 杨茜茜"), ("", True))
 
           # Real sentences and genuine citations must survive untouched.
           keep = "楼梯的净高是否满足规范要求 建筑信息模型用于碰撞检测和施工图审查。"
@@ -99,6 +105,11 @@ jobs:
               "misrecognitions corrected",
               corrected_text("结枅面标高 梨柱 三围 头面 踢断 楼成平台 题面 检察"),
               "结构面标高 梯柱 三维 剖面 梯段 楼层平台 踏面 检查",
+          )
+          expect(
+              "second misrecognition family corrected",
+              corrected_text("平态的结构面 结购面 梯量底 梯亮下 建筚面 检杳一下"),
+              "平台的结构面 结构面 梯梁底 梯梁下 建筑面 检查一下",
           )
           expect(
               "correct text untouched",
