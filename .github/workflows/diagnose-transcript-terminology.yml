@@ -53,8 +53,10 @@ jobs:
           "${COMPOSE[@]}" exec -T backend python - <<'PY'
           import json
 
+          from src.transcription import normalizer as normalizer_module
           from src.transcription.terminology import (
               clean_hallucinated_standard,
+              collapse_degenerate_repeats,
               correct_terminology,
           )
           from src.transcription.types import TerminologyCorrectionConfig
@@ -116,6 +118,34 @@ jobs:
               corrected_text("结构面标高 梯柱 三维 剖面 梯段 楼层平台 踏面 检查"),
               "结构面标高 梯柱 三维 剖面 梯段 楼层平台 踏面 检查",
           )
+
+          # 2026-09-12 用户反馈的 11:30 之后现象：整段只复读带连字符的规范编号。
+          expect(
+              "pure fabricated code loop dropped",
+              cleaned(("建筑抗震设计规范 GB 40011-2014 " * 9).strip()),
+              ("", True),
+          )
+          expect(
+              "hyphenated code pair dropped",
+              cleaned("建筑抗震设计规范 GB 40011-2014 建筑抗震设计规范 GB 40011-2014"),
+              ("", True),
+          )
+          expect(
+              "long content phrase pair collapsed",
+              collapse_degenerate_repeats("结构平面图与外层楼层结构表达" * 2),
+              ("结构平面图与外层楼层结构表达", True),
+          )
+          expect(
+              "third misrecognition family corrected",
+              corrected_text("进高的话怎么测量呢 结构屏面图"),
+              "净高的话怎么测量呢 结构平面图",
+          )
+          loop_guard = (
+              normalizer_module._LOOP_SEGMENT_MIN_RUN,
+              normalizer_module._LOOP_SEGMENT_MAX_CHARS,
+              normalizer_module._LOOP_SEGMENT_GAP_MS,
+          )
+          expect("cross-segment loop guard deployed", loop_guard, (3, 12, 15000))
 
           failed = [item for item in cases if not item["ok"]]
           print("TERMINOLOGY_DIAGNOSTIC " + json.dumps({
