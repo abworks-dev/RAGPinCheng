@@ -22,6 +22,44 @@ _RULES_V1 = (
     (re.compile(r"(?<![A-Za-z0-9])b[ \t]+i[ \t]+m(?![A-Za-z0-9])", re.IGNORECASE), "BIM"),
     (re.compile(r"(?<![A-Za-z0-9])revit(?![A-Za-z0-9])", re.IGNORECASE), "Revit"),
     (re.compile(r"(?<![A-Za-z0-9])navisworks(?![A-Za-z0-9])", re.IGNORECASE), "Navisworks"),
+    # 中文同音/形近误识纠正。仅收真实生产稿中反复出现的形态，且都是"正确写法唯一"的
+    # 情形（结构/楼梯/梯段/梯柱/剖面/三维/检查/图纸…），不猜测语义、不做同义词替换。
+    (re.compile(r"结枅|结枯|结枸|结枡"), "结构"),
+    (re.compile(r"楼坯|楼姟|搂梯"), "楼梯"),
+    (re.compile(r"楼成(?=平台|面|结构)"), "楼层"),
+    # 先纠正"误识的热词本身"，否则下面的通用规则会把「建筒碰撞」改成「建筑碰撞」，
+    # 使回吐纯度判定误认为存在真实内容而整段保留。
+    (re.compile(r"建筒碰撞|建筥碰撞|建筒构碰"), "构件碰撞"),
+    (re.compile(r"建筒模型|建筥模型"), "建筑信息模型"),
+    (re.compile(r"建筒|建筥|建筡"), "建筑"),
+    (re.compile(r"梨柱|梭柱|梨组|梯组"), "梯柱"),
+    (re.compile(r"提梁踢柱|踢梁踢柱"), "梯梁梯柱"),
+    (re.compile(r"踢断|梯断|梭段"), "梯段"),
+    (re.compile(r"踢面|题面"), "踏面"),
+    (re.compile(r"剥面|头面|刮面"), "剖面"),
+    (re.compile(r"头切"), "剖切"),
+    (re.compile(r"三围"), "三维"),
+    (re.compile(r"检察"), "检查"),
+    (re.compile(r"图质"), "图纸"),
+    (re.compile(r"净靠"), "净高"),
+    (re.compile(r"标靠|比辅高"), "标高"),
+    (re.compile(r"核兑"), "核对"),
+    (re.compile(r"连泡化|连泊化"), "连梁化"),
+    # 繁体字形（模型偶发输出），统一为简体，避免同一术语在稿中出现两种写法。
+    (re.compile(r"圖"), "图"),
+    (re.compile(r"紙"), "纸"),
+    (re.compile(r"標"), "标"),
+    (re.compile(r"對"), "对"),
+    (re.compile(r"結"), "结"),
+    (re.compile(r"構"), "构"),
+    (re.compile(r"樓"), "楼"),
+    (re.compile(r"檢"), "检"),
+    (re.compile(r"測"), "测"),
+    (re.compile(r"規"), "规"),
+    (re.compile(r"範"), "范"),
+    (re.compile(r"確"), "确"),
+    (re.compile(r"認"), "认"),
+    (re.compile(r"體"), "体"),
 )
 _BIM_CODE = re.compile(
     r"(?<![A-Za-z0-9])BIM[ \t]*[- ][ \t]*(\d{4})[ \t]*[- ][ \t]*(\d{4})(?!\d)",
@@ -112,11 +150,31 @@ _BIAS_STANDARD_CODE = re.compile(
 
 
 # ---------------------------------------------------------------------------
+# Misrecognised spellings of the bias phrases above. Production decode writes these
+# variants (e.g. 「建筒碰撞」 for 「构件碰撞」), which used to defeat the purity test
+# because the variant was treated as real content.
+_BIAS_VARIANTS = (
+    (re.compile(r"建筒碰撞|建筥碰撞|建筒构碰"), "构件碰撞"),
+    (re.compile(r"建筒模型|建筥模型"), "建筑信息模型"),
+    (re.compile(r"净高分证明|净高分识|净高分析规范"), "净高分析"),
+    (re.compile(r"建筒|建筥|建筡"), "建筑"),
+    (re.compile(r"钢结枸|钢结枯"), "钢结构"),
+    (re.compile(r"焊健|焊缝隙"), "焊缝"),
+    (re.compile(r"螺检|螺拴"), "螺栓"),
+)
+
+
+def _normalize_bias_variants(text: str) -> str:
+    for pattern, replacement in _BIAS_VARIANTS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
 def _is_bias_only(text: str) -> bool:
     """True if text is composed only of recognised bias words/phrases, standard
     code tokens, generic 规范/编号 connectors, whitespace and commas — i.e. no
     other meaningful Han/ASCII/numeral content (real speech)."""
-    candidate = text
+    candidate = _normalize_bias_variants(text)
     for phrase in sorted(_BIAS_WORDS, key=len, reverse=True):
         candidate = candidate.replace(phrase, " ")
     for connector in _BIAS_CONNECTORS:
@@ -127,23 +185,101 @@ def _is_bias_only(text: str) -> bool:
     return candidate == ""
 
 
-def clean_hallucinated_standard(text: str) -> tuple[str, bool]:
-    """Conservative scrub of hallucinated standard/code tails.
+# A run of at least this many consecutive bias phrases at a segment edge is filler
+# even when the same (merged) segment also carries real speech. Three is deliberate:
+# two adjacent genuine citations are possible, three hallucinated ones in a row are
+# not something a speaker dictates.
+_BIAS_RUN_MIN_PHRASES = 3
+_BIAS_SEPARATORS = " \t\n\r，,。.、·—/:：\u3000"
 
-    Returns (cleaned_text, changed). Deterministic and deliberately narrow: a
-    whole segment is dropped (returns "", True) ONLY when its text is composed
-    exclusively of recognised hotword-bias filler (no other meaningful content),
-    e.g. "建筑抗震设复核", "建筑抗震设复核 规范 GB 50011-2010",
-    "净高分析规范 GB 50011-2014". These are the pure hallucination lines the
-    decode appends at pauses. Any segment containing real speech (measurements,
-    verbs, other Han) is returned unchanged, so genuine citations are preserved.
-    Fabricated code *years* are therefore handled implicitly: a fake edition like
-    GB 50011-2014 only ever survives inside a bias-only line, which is dropped
-    here; we never rewrite an embedded year inside real speech.
+
+def _leading_bias_run(text: str) -> int:
+    """Length of the leading run of bias phrases/codes/connectors, or 0."""
+    position = 0
+    phrases = 0
+    while position < len(text):
+        while position < len(text) and text[position] in _BIAS_SEPARATORS:
+            position += 1
+        matched = None
+        for phrase in sorted(_BIAS_WORDS, key=len, reverse=True):
+            if text.startswith(phrase, position):
+                matched = phrase
+                break
+        if matched is None:
+            code = _BIAS_STANDARD_CODE.match(text, position)
+            if code is not None:
+                position = code.end()
+                continue
+            connector = next(
+                (item for item in _BIAS_CONNECTORS if text.startswith(item, position)),
+                None,
+            )
+            if connector is None:
+                break
+            position += len(connector)
+            continue
+        position += len(matched)
+        phrases += 1
+    if phrases < _BIAS_RUN_MIN_PHRASES:
+        return 0
+    return position
+
+
+def _trailing_bias_run(text: str) -> int:
+    """Offset where a trailing run of bias phrases starts, or len(text)."""
+    position = len(text)
+    phrases = 0
+    while position > 0:
+        while position > 0 and text[position - 1] in _BIAS_SEPARATORS:
+            position -= 1
+        matched = None
+        for phrase in sorted(_BIAS_WORDS, key=len, reverse=True):
+            if text.endswith(phrase, 0, position):
+                matched = phrase
+                break
+        if matched is None:
+            connector = next(
+                (item for item in _BIAS_CONNECTORS if text.endswith(item, 0, position)),
+                None,
+            )
+            if connector is None:
+                break
+            position -= len(connector)
+            continue
+        position -= len(matched)
+        phrases += 1
+    if phrases < _BIAS_RUN_MIN_PHRASES:
+        return len(text)
+    return position
+
+
+def clean_hallucinated_standard(text: str) -> tuple[str, bool]:
+    """Conservative scrub of hallucinated standard/code filler.
+
+    Returns (text, dropped):
+    - a whole segment is DROPPED (``"", True``) only when it is composed
+      exclusively of recognised bias filler, e.g. "建筑抗震设复核",
+      "净高分析规范 GB 50011-2014";
+    - a segment that also carries real speech keeps that speech, but a run of at
+      least three consecutive bias phrases at either edge is removed
+      (``stripped_text, False``). Merging runs before this check is why a pure
+      filler segment used to survive by being joined to the next real one;
+    - anything else is returned unchanged, so genuine citations inside real
+      sentences are preserved.
     """
-    original = text
     if not text or not text.strip():
         return text, False
-    if _is_bias_only(text.strip()):
+    stripped = text.strip()
+    if _is_bias_only(stripped):
         return "", True
+    normalized = _normalize_bias_variants(stripped)
+    if normalized != stripped and _is_bias_only(normalized):
+        return "", True
+    candidate = normalized
+    start = _leading_bias_run(candidate)
+    end = _trailing_bias_run(candidate)
+    if start or end < len(candidate):
+        trimmed = candidate[start:end].strip(_BIAS_SEPARATORS + " ")
+        if trimmed and not _is_bias_only(trimmed):
+            return trimmed, False
     return text, False
