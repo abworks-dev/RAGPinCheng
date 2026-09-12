@@ -95,7 +95,40 @@ jobs:
           print("APP_DEPLOYED_MARKERS:" + json.dumps(report, ensure_ascii=False, sort_keys=True))
           PY
 
+      - name: Inspect the container registry path read-only
+        if: ${{ always() }}
+        run: |
+          set -uo pipefail
+          echo ">> /etc/resolv.conf"
+          cat /etc/resolv.conf 2>/dev/null || echo "resolv.conf unreadable"
+          echo ">> resolvectl status (head)"
+          resolvectl status 2>/dev/null | head -20 || echo "resolvectl unavailable"
+          for host in docker.m.daocloud.io registry-1.docker.io docker.io; do
+            echo ">> getent hosts ${host}"
+            getent hosts "${host}" || echo "getent failed for ${host}"
+          done
+          echo ">> resolver comparison (1.1.1.1)"
+          getent hosts docker.m.daocloud.io >/dev/null 2>&1 && echo "system resolver OK" || echo "system resolver FAILED"
+          (command -v dig >/dev/null && dig +short +time=3 +tries=1 docker.m.daocloud.io @1.1.1.1) || echo "dig unavailable"
+          echo ">> docker daemon registry configuration (values only, no credentials)"
+          python3 - <<'PY' || true
+          import json, pathlib
+          path = pathlib.Path("/etc/docker/daemon.json")
+          try:
+              data = json.loads(path.read_text(encoding="utf-8"))
+          except Exception as exc:
+              print(f"daemon.json unavailable: {type(exc).__name__}: {exc}")
+              raise SystemExit
+          allowed = ("registry-mirrors", "insecure-registries", "dns", "max-concurrent-downloads")
+          print(json.dumps({k: data[k] for k in allowed if k in data}, ensure_ascii=False))
+          PY
+          echo ">> docker info registry mirrors"
+          docker info --format '{{json .RegistryConfig.Mirrors}}' 2>/dev/null || echo "docker info unavailable"
+          echo ">> locally available base images"
+          docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' 2>/dev/null | grep -E '^(ubuntu|pincheng-libreoffice|python)' || echo "no matching local images"
+
       - name: Publish sanitized summary
         if: ${{ always() }}
         run: |
           echo "Read-only deployed revision marker check; see the job log line prefixed APP_DEPLOYED_MARKERS. No production state was modified." >> "$GITHUB_STEP_SUMMARY"
+          echo "Read-only container registry inspection; see the 'Inspect the container registry path read-only' step log. No production state was modified." >> "$GITHUB_STEP_SUMMARY"
