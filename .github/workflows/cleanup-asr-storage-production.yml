@@ -91,8 +91,12 @@ jobs:
             -BatchMaxGB ([int]$env:BATCH_MAX_GB) `
             -BatchManifestPath $manifest `
             -AuditPath $audit
-          if ($LASTEXITCODE -ne 0) { throw "storage audit failed" }
+          # 不要用 $LASTEXITCODE 判断 .ps1 调用是否成功：脚本调用不会更新它，新会话里
+          # 它是 $null，`$null -ne 0` 恒为真，使这一步必然失败（实测 audit 已成功打印
+          # 摘要仍报 "storage audit failed"）。脚本内部用 throw 终止，真失败会让本步骤
+          # 自然失败；这里再校验两份证据文件确实写出。
           if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { throw "batch manifest was not written" }
+          if (-not (Test-Path -LiteralPath $audit -PathType Leaf)) { throw "storage audit evidence was not written" }
           $sha = (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash.ToLowerInvariant()
           echo "ASR_STORAGE_BATCH_SHA256:$sha" >> $env:GITHUB_STEP_SUMMARY
           Write-Host "ASR_STORAGE_BATCH_SHA256:$sha"
@@ -103,6 +107,7 @@ jobs:
         shell: powershell
         run: |
           $manifest = Join-Path $env:RUNNER_TEMP "asr-storage-batch-${{ github.run_id }}.json"
+          $applyAudit = Join-Path $env:RUNNER_TEMP "asr-storage-apply-${{ github.run_id }}.json"
           $sha = (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($sha -ne $env:EXPECTED_BATCH_SHA256.ToLowerInvariant()) {
             throw "storage usage changed since the approved audit; refusing to delete"
@@ -117,8 +122,16 @@ jobs:
             -BatchMaxGB ([int]$env:BATCH_MAX_GB) `
             -BatchManifestPath $manifest `
             -ExpectedBatchManifestSha256 $env:EXPECTED_BATCH_SHA256 `
+            -AuditPath $applyAudit `
             -Apply
-          if ($LASTEXITCODE -ne 0) { throw "storage cleanup failed" }
+          # 同上：用证据文件替代不可靠的 $LASTEXITCODE，并核对选中对象确实全部删除。
+          if (-not (Test-Path -LiteralPath $applyAudit -PathType Leaf)) { throw "storage cleanup evidence was not written" }
+          $applied = Get-Content -LiteralPath $applyAudit -Raw -Encoding UTF8 | ConvertFrom-Json
+          $deleted = @($applied.selected_candidates | Where-Object { $_.Deleted }).Count
+          if ([int]$applied.selected_count -ne $deleted) {
+            throw "only $deleted of $($applied.selected_count) selected candidates were deleted"
+          }
+          Write-Host "ASR_STORAGE_CLEANUP applied=$deleted bytes=$($applied.selected_bytes)"
 
       - name: Report free space
         if: ${{ always() }}
