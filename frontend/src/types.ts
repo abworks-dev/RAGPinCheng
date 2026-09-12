@@ -1237,6 +1237,10 @@ export type TranscriptVersion = {
   created_at: number;
   updated_at: number;
   is_current: boolean;
+  /** 转录完成时间：自动稿取任务 finished_at，人工稿回退 created_at。 */
+  completed_at?: number | null;
+  /** 产出该稿的转录尝试序号；人工稿与历史数据为 null。 */
+  attempt_number?: number | null;
 };
 
 export type TranscriptMarkdownPreview = {

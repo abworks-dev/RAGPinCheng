@@ -46,6 +46,13 @@ function formatVersionTime(timestamp: number) {
   return date.toLocaleString("zh-CN", { hour12: false });
 }
 
+/** 转录完成时间：自动稿取任务的 finished_at，人工稿回退 created_at。 */
+function completionLabel(version: TranscriptVersion) {
+  const completedAt = version.completed_at ?? version.created_at;
+  const attempt = version.attempt_number ? ` · 第 ${version.attempt_number} 次尝试` : "";
+  return `完成于 ${formatVersionTime(completedAt)}${attempt}`;
+}
+
 function newIdempotencyKey() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (character) => {
@@ -519,6 +526,7 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
                   <Badge variant={version.is_current ? "success" : "secondary"}>{version.is_current ? "当前正式版本" : statusLabel(version.publication_status)}</Badge>
                   <Badge variant="secondary">{statusLabel(version.review_status)}</Badge>
                   <span className="min-w-0 break-words text-ui-xs text-muted-foreground">{sourceLabel(version)}</span>
+                  <span className="min-w-0 break-words text-ui-xs text-muted-foreground">{completionLabel(version)}</span>
                 </button>
                 {/* Icon-only is allowed here because the entry/exit action is
                     repeated by the row button above and by 收起校对 in the
