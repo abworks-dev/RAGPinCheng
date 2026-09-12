@@ -125,7 +125,9 @@ def test_report_contains_no_reference_or_hypothesis_text(tmp_path, monkeypatch):
     assert "hypothesis" not in encoded
 
 
-def test_candidate_matrix_selects_only_improving_full_decode(monkeypatch):
+def test_candidate_matrix_selects_hotword_free_production_when_it_matches_the_reference(
+    monkeypatch,
+):
     reports = {
         "baseline": {
             "status": "fail",
@@ -137,13 +139,13 @@ def test_candidate_matrix_selects_only_improving_full_decode(monkeypatch):
             "samples": [{"scenario": "noisy-bim-zh", "cer": 0.25}],
         },
         "hotwords": {
-            "status": "fail",
+            "status": "pass",
             "sample_count": 8,
             "gates": {
-                "standard_code_recall": {"observed": 0.5},
+                "standard_code_recall": {"observed": 1.0},
                 "negative_false_positives": {"observed": 0},
             },
-            "samples": [{"scenario": "noisy-bim-zh", "cer": 0.2}],
+            "samples": [{"scenario": "noisy-bim-zh", "cer": 0.12}],
         },
         "full-decode": {
             "status": "pass",
@@ -152,18 +154,18 @@ def test_candidate_matrix_selects_only_improving_full_decode(monkeypatch):
                 "standard_code_recall": {"observed": 1.0},
                 "negative_false_positives": {"observed": 0},
             },
-            "samples": [{"scenario": "noisy-bim-zh", "cer": 0.1}],
+            "samples": [{"scenario": "noisy-bim-zh", "cer": 0.12}],
         },
     }
 
     def run_qualification(_manifest, *, timeout_ms, service_config):
         del timeout_ms
-        if not service_config.hotwords:
-            candidate = "baseline"
+        if service_config.hotwords:
+            candidate = "hotwords"
         elif service_config.beam_size != 1 or service_config.temperature != 0.0:
             candidate = "full-decode"
         else:
-            candidate = "hotwords"
+            candidate = "baseline"
         return json.loads(json.dumps(reports[candidate]))
 
     monkeypatch.setattr(qualification, "run_qualification", run_qualification)
@@ -173,22 +175,23 @@ def test_candidate_matrix_selects_only_improving_full_decode(monkeypatch):
     assert result["selected_candidate"] == "full-decode"
     assert result["candidate_order"] == ["baseline", "hotwords", "full-decode"]
     assert all(result["selection"].values())
+    assert result["selection_evidence"]["legacy_reference_candidate"] == "hotwords"
 
 
-def test_candidate_matrix_rejects_non_improving_or_false_positive_full_decode(
+def test_candidate_matrix_rejects_a_regressing_or_false_positive_production_decode(
     monkeypatch,
 ):
     def run_qualification(_manifest, *, timeout_ms, service_config):
         del timeout_ms
-        full = service_config.beam_size != 1 or service_config.temperature != 0.0
+        production = not service_config.hotwords and service_config.beam_size != 1
         return {
             "status": "pass",
             "sample_count": 8,
             "gates": {
-                "standard_code_recall": {"observed": 1.0},
-                "negative_false_positives": {"observed": 1 if full else 0},
+                "standard_code_recall": {"observed": 0.5 if production else 1.0},
+                "negative_false_positives": {"observed": 1 if production else 0},
             },
-            "samples": [{"scenario": "noisy-bim-zh", "cer": 0.1}],
+            "samples": [{"scenario": "noisy-bim-zh", "cer": 0.2 if production else 0.1}],
         }
 
     monkeypatch.setattr(qualification, "run_qualification", run_qualification)
@@ -197,9 +200,9 @@ def test_candidate_matrix_rejects_non_improving_or_false_positive_full_decode(
     assert result["status"] == "fail"
     assert result["selected_candidate"] is None
     assert result["selection"] == {
-        "full_candidate_passed": True,
-        "standard_code_recall_improved": False,
-        "noisy_bim_cer_improved": False,
+        "production_candidate_passed": True,
+        "standard_code_recall_not_worse_than_legacy_hotwords": False,
+        "noisy_bim_cer_not_worse_than_legacy_hotwords": False,
         "negative_false_positives_zero": False,
         # This stub never measures coverage, so the gate is absent and cannot veto.
         "content_coverage_passed": True,
@@ -388,6 +391,6 @@ def test_workflow_and_runner_are_manual_isolated_and_disabled():
     assert "$diagnosticComplete" in script
     assert 'status -eq "complete"' in script
     assert "selected_candidate = $SelectedCandidate" in script
-    assert "standard_code_recall_improved = [bool]" in script
-    assert "noisy_bim_cer_improved = [bool]" in script
+    assert "standard_code_recall_not_worse_than_legacy_hotwords = [bool]" in script
+    assert "noisy_bim_cer_not_worse_than_legacy_hotwords = [bool]" in script
     assert "- Selected candidate:" in workflow

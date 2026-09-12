@@ -39,9 +39,9 @@ $SampleCount = 0
 $LicenseAuditStatus = "not-run"
 $SelectedCandidate = ""
 $Selection = [ordered]@{
-    full_candidate_passed = $false
-    standard_code_recall_improved = $false
-    noisy_bim_cer_improved = $false
+    production_candidate_passed = $false
+    standard_code_recall_not_worse_than_legacy_hotwords = $false
+    noisy_bim_cer_not_worse_than_legacy_hotwords = $false
     negative_false_positives_zero = $false
 }
 $RuntimeContract = $null
@@ -275,9 +275,9 @@ try {
         $Status = [string]$report.status
         $SelectedCandidate = [string]$report.selected_candidate
         $Selection = [ordered]@{
-            full_candidate_passed = [bool]$report.selection.full_candidate_passed
-            standard_code_recall_improved = [bool]$report.selection.standard_code_recall_improved
-            noisy_bim_cer_improved = [bool]$report.selection.noisy_bim_cer_improved
+            production_candidate_passed = [bool]$report.selection.production_candidate_passed
+            standard_code_recall_not_worse_than_legacy_hotwords = [bool]$report.selection.standard_code_recall_not_worse_than_legacy_hotwords
+            noisy_bim_cer_not_worse_than_legacy_hotwords = [bool]$report.selection.noisy_bim_cer_not_worse_than_legacy_hotwords
             negative_false_positives_zero = [bool]$report.selection.negative_false_positives_zero
         }
         $FailureCode = if ($Status -eq "pass") { "" } else { "quality_gate_failed" }
