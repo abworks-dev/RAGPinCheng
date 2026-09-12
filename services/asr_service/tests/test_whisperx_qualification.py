@@ -201,6 +201,8 @@ def test_candidate_matrix_rejects_non_improving_or_false_positive_full_decode(
         "standard_code_recall_improved": False,
         "noisy_bim_cer_improved": False,
         "negative_false_positives_zero": False,
+        # This stub never measures coverage, so the gate is absent and cannot veto.
+        "content_coverage_passed": True,
     }
 
 

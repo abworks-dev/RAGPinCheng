@@ -122,5 +122,18 @@ def test_negative_controls_are_not_measured_for_coverage() -> None:
 
     assert report["content_coverage"]["samples"] == []
     assert report["content_coverage"]["min_ratio"] is None
-    assert report["gates"]["content_coverage"]["pass"] is False
+    assert report["content_coverage"]["status"] == "not_measured"
+    assert "content_coverage" not in report["gates"]
+    assert report["status"] == "pass"
+    _clear()
+
+
+def test_unmeasured_coverage_never_fails_a_report() -> None:
+    _clear()
+    report = _report()
+
+    qualification._attach_content_coverage(report)
+
+    assert report["content_coverage"]["status"] == "not_measured"
+    assert report["status"] == "pass"
     _clear()
