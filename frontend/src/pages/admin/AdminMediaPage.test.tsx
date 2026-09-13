@@ -1226,4 +1226,65 @@ describe("AdminMediaPage wizard", () => {
       expect.any(String),
     ));
   });
+
+  it("sorts the task list from the column headers in both directions", async () => {
+    mocks.listMediaAssets.mockResolvedValue([
+      { ...assets[0], media_id: "media-b", title: "楼梯专项检查", created_at: 300, status: "uploaded", publication_request_status: "pending_transcription" },
+      { ...assets[0], media_id: "media-a", title: "Archicad 入门", created_at: 100, status: "uploaded", publication_request_status: "pending_transcription" },
+      { ...assets[0], media_id: "media-c", title: "桥梁施工", created_at: 200, status: "uploaded", publication_request_status: "pending_transcription" },
+    ]);
+    mocks.listTranscriptionJobs.mockResolvedValue([]);
+    render(<AdminMediaPage />);
+    await screen.findByText("楼梯专项检查");
+
+    const rowTitles = () => screen.getAllByTestId("media-record-row").map((row) => row.querySelector("p")?.textContent);
+
+    // Default order is newest submission first.
+    expect(rowTitles()).toEqual(["楼梯专项检查", "桥梁施工", "Archicad 入门"]);
+
+    fireEvent.click(screen.getByTestId("media-sort-media"));
+    expect(rowTitles()).toEqual(["楼梯专项检查", "桥梁施工", "Archicad 入门"]);
+    expect(screen.getByTestId("media-list-sort-status")).toHaveTextContent("已按媒体信息升序排序");
+
+    fireEvent.click(screen.getByTestId("media-sort-media"));
+    expect(rowTitles()).toEqual(["Archicad 入门", "桥梁施工", "楼梯专项检查"]);
+    expect(screen.getByTestId("media-list-sort-status")).toHaveTextContent("已按媒体信息降序排序");
+
+    fireEvent.click(screen.getByTestId("media-sort-submitted"));
+    expect(rowTitles()).toEqual(["Archicad 入门", "桥梁施工", "楼梯专项检查"]);
+    fireEvent.click(screen.getByTestId("media-sort-submitted"));
+    expect(rowTitles()).toEqual(["楼梯专项检查", "桥梁施工", "Archicad 入门"]);
+  });
+
+  it("filters the task list from the search box and clears it again", async () => {
+    mocks.listMediaAssets.mockResolvedValue([
+      { ...assets[0], media_id: "media-failed", title: "楼梯专项检查", original_filename: "2.4.10-楼梯.mp4", status: "failed", publication_request_status: "failed" },
+      { ...assets[0], media_id: "media-review", title: "桥梁施工", original_filename: "bridge.mp4", publication_request_status: "pending_transcription" },
+    ]);
+    mocks.listTranscriptionJobs.mockResolvedValue([{
+      ...succeededJob,
+      job_id: "job-failed",
+      media_id: "media-failed",
+      status: "failed" as const,
+    }]);
+    render(<AdminMediaPage />);
+    await screen.findByText("楼梯专项检查");
+    expect(screen.getAllByTestId("media-record-row")).toHaveLength(2);
+
+    fireEvent.change(screen.getByLabelText("搜索转录任务"), { target: { value: "转录失败" } });
+    expect(screen.getAllByTestId("media-record-row")).toHaveLength(1);
+    expect(screen.getByText("楼梯专项检查")).toBeInTheDocument();
+    expect(screen.queryByText("桥梁施工")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("搜索转录任务"), { target: { value: "bridge" } });
+    expect(screen.getByText("桥梁施工")).toBeInTheDocument();
+    expect(screen.queryByText("楼梯专项检查")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("搜索转录任务"), { target: { value: "不存在的内容" } });
+    expect(screen.getByText("没有符合条件的媒体")).toBeInTheDocument();
+    expect(screen.getByText(/没有匹配「不存在的内容」/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "清空搜索" }));
+    expect(screen.getAllByTestId("media-record-row")).toHaveLength(2);
+  });
 });

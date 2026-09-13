@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Archive, ArrowLeft, Ban, CheckCircle2, ChevronDown, ClipboardCheck, FileUp, Film, FolderInput, LoaderCircle, RefreshCcw, RefreshCw, Repeat2, RotateCcw, Rocket, Search, Send, Settings2, Trash2, Upload, XCircle } from "lucide-react";
+import { Archive, ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, Ban, CheckCircle2, ChevronDown, ClipboardCheck, FileUp, Film, FolderInput, LoaderCircle, RefreshCcw, RefreshCw, Repeat2, RotateCcw, Rocket, Search, Send, Settings2, Trash2, Upload, X, XCircle } from "lucide-react";
 import { adminMediaApi } from "../../api/admin/media";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
@@ -22,6 +22,18 @@ import { useAdminMediaAssets } from "../../hooks/useAdminMediaAssets";
 import { createRequestId } from "../../lib/request-id";
 import type { ManagedCategory, MediaAsset, MediaUploadPreflightEntry, TranscriptionJob, TranscriptionSchemeOption, TranscriptVersion } from "../../types";
 import { formatAdminDate, formatBytes } from "../../lib/admin-formatters";
+import {
+  DEFAULT_MEDIA_LIST_SORT,
+  MEDIA_LIST_SORT_KEYS,
+  MEDIA_LIST_SORT_LABELS,
+  SORT_DIRECTION_LABELS,
+  matchesMediaSearch,
+  mediaSearchHaystack,
+  nextMediaListSort,
+  sortMediaAssets,
+  type MediaListSort,
+  type MediaListSortKey,
+} from "../../lib/admin-media-list";
 import {
   audioElapsedSeconds,
   formatElapsedClock,
@@ -260,6 +272,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const [conflictChoices, setConflictChoices] = useState<Record<string, MediaConflictChoice>>({});
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
   const [mediaQuery, setMediaQuery] = useState("");
+  const [mediaSort, setMediaSort] = useState<MediaListSort>(DEFAULT_MEDIA_LIST_SORT);
   const [mediaPage, setMediaPage] = useState(0);
   const [mediaPageSize, setMediaPageSize] = useState(10);
   const [selectedMediaIds, setSelectedMediaIds] = useState<string[]>([]);
@@ -432,10 +445,30 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
     || asset.status === "failed"
     || asset.available_actions.includes("finalize_failed_cleanup"),
   );
-  const visibleMediaAssets = transcriptionTaskAssets.filter((asset) => {
-    const query = mediaQuery.trim().toLocaleLowerCase("zh-CN");
-    return matchesMediaFilter(asset, mediaFilter) && (!query || `${asset.title} ${asset.original_filename}`.toLocaleLowerCase("zh-CN").includes(query));
-  });
+  // Search covers the operator-visible wording of a row: title, file name,
+  // archive folder and the Chinese status labels, so typing「失败」or「待审核」
+  // narrows the list exactly like the quick filters do.
+  const mediaAssetSearchHaystack = (asset: MediaAsset) => {
+    const job = jobsByMediaId.get(asset.media_id);
+    return mediaSearchHaystack({
+      asset,
+      job,
+      categoryPath: categories.find((category) => category.id === asset.category_id)?.full_path || asset.category_path || "",
+      statusLabels: [
+        job ? jobStatusMeta[job.status]?.label : null,
+        mediaStatusMeta[asset.status]?.label,
+        asset.review_status ? reviewMeta[asset.review_status]?.label : null,
+        asset.publication_status ? publicationMeta[asset.publication_status]?.label : null,
+      ],
+    });
+  };
+  const visibleMediaAssets = sortMediaAssets(
+    transcriptionTaskAssets.filter(
+      (asset) => matchesMediaFilter(asset, mediaFilter) && matchesMediaSearch(mediaQuery, mediaAssetSearchHaystack(asset)),
+    ),
+    mediaSort,
+    { jobFor: (asset) => jobsByMediaId.get(asset.media_id) },
+  );
   const mediaPageCount = Math.max(1, Math.ceil(visibleMediaAssets.length / mediaPageSize));
   const pagedMediaAssets = visibleMediaAssets.slice(mediaPage * mediaPageSize, (mediaPage + 1) * mediaPageSize);
   const pageIds = pagedMediaAssets.map((asset) => asset.media_id);
@@ -691,7 +724,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
     setPublishSelectedIds([]);
     await refreshMediaState();
   };
-  useEffect(() => { setMediaPage(0); setSelectedMediaIds([]); }, [mediaFilter, mediaPageSize, mediaQuery]);
+  useEffect(() => { setMediaPage(0); setSelectedMediaIds([]); }, [mediaFilter, mediaPageSize, mediaQuery, mediaSort.key, mediaSort.direction]);
   useEffect(() => { if (mediaPage >= mediaPageCount) setMediaPage(Math.max(0, mediaPageCount - 1)); }, [mediaPage, mediaPageCount]);
   const filterCounts = mediaFilterOptions.reduce<Record<MediaFilter, number>>((counts, [value]) => {
     counts[value] = transcriptionTaskAssets.filter((asset) => matchesMediaFilter(asset, value)).length;
@@ -1297,7 +1330,12 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
         <Card className="overflow-hidden shadow-surface">
           <div className="grid gap-3 border-b border-border px-4 py-4 sm:px-5 lg:grid-cols-[minmax(13rem,1fr)_18rem_auto] lg:items-end">
             <div className="min-w-0"><h2 id="media-assets-title" className="text-ui-base font-semibold">视频资源</h2><p className="mt-1 text-ui-xs text-muted-foreground">视频由资料列表上传，在这里跟踪转录、审核、发布、专属索引和恢复操作。</p></div>
-            <div className="relative min-w-0"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /><Input type="search" aria-label="搜索转录任务" placeholder="搜索标题或文件名…" className="h-control-md pl-9 text-ui-xs" value={mediaQuery} onChange={(event) => setMediaQuery(event.target.value)} /></div>
+            <div className="relative min-w-0"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /><Input type="search" aria-label="搜索转录任务" placeholder="搜索标题、文件名、目录或状态…" className="h-control-md pl-9 pr-9 text-ui-xs [&::-webkit-search-cancel-button]:appearance-none" value={mediaQuery} onChange={(event) => setMediaQuery(event.target.value)} />{mediaQuery && <IconButton label="清空搜索" tooltip="清空搜索条件" className="absolute right-1 top-1/2 -translate-y-1/2" onClick={() => setMediaQuery("")}><X className="size-4" /></IconButton>}</div>
+            <div className="flex items-center gap-2 lg:hidden">
+              <label className="flex min-w-0 flex-1 items-center gap-2 text-ui-xs text-muted-foreground">排序<Select aria-label="排序字段" className="h-control-md min-w-0 flex-1 text-ui-xs" value={mediaSort.key} onChange={(event) => setMediaSort((current) => ({ key: event.target.value as MediaListSortKey, direction: current.direction }))}>{MEDIA_LIST_SORT_KEYS.map((key) => <option key={key} value={key}>{MEDIA_LIST_SORT_LABELS[key]}</option>)}</Select></label>
+              <Button variant="outline" className="h-control-md" data-testid="media-sort-direction" aria-label={`当前${SORT_DIRECTION_LABELS[mediaSort.direction]}，切换为${mediaSort.direction === "asc" ? "降序" : "升序"}`} title={mediaSort.direction === "asc" ? `当前升序，点击改为降序` : `当前降序，点击改为升序`} onClick={() => setMediaSort((current) => ({ ...current, direction: current.direction === "asc" ? "desc" : "asc" }))}>{mediaSort.direction === "asc" ? <ArrowUp className="size-4" aria-hidden="true" /> : <ArrowDown className="size-4" aria-hidden="true" />}{SORT_DIRECTION_LABELS[mediaSort.direction]}</Button>
+            </div>
+            <p className="sr-only" role="status" aria-live="polite" data-testid="media-list-sort-status">已按{MEDIA_LIST_SORT_LABELS[mediaSort.key]}{SORT_DIRECTION_LABELS[mediaSort.direction]}排序，共 {visibleMediaAssets.length} 条任务</p>
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
 <a className={buttonVariants({ variant: "outline" })} href="/admin/asr"><Settings2 className="size-4" />转录配置</a>
               <Button variant="outline" aria-label="刷新媒体资源" title="刷新媒体资源" disabled={loading} onClick={() => void refreshMediaState()}><RefreshCw className="size-4" aria-hidden="true" />刷新列表</Button>
@@ -1311,7 +1349,22 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
           : transcriptionTaskAssets.length === 0 ? <EmptyState title="暂无转录任务" description="视频在资料列表发布后，会进入这里等待选择转录方案。" />
           : <>
             <div className="hidden grid-cols-[3rem_minmax(0,31fr)_minmax(0,42fr)_minmax(0,12fr)_minmax(0,15fr)] gap-4 border-b border-border bg-surface-muted px-5 py-3 text-ui-sm font-medium text-muted-foreground lg:grid" data-testid="media-record-header">
-              <Checkbox aria-label="选择当前页视频" checked={allPageSelected} onChange={() => setSelectedMediaIds(allPageSelected ? [] : pageIds)} /><span>媒体信息</span><span>处理进度</span><span>最近提交</span><span>操作</span>
+              <Checkbox aria-label="选择当前页视频" checked={allPageSelected} onChange={() => setSelectedMediaIds(allPageSelected ? [] : pageIds)} />
+              {MEDIA_LIST_SORT_KEYS.map((key) => {
+                const active = mediaSort.key === key;
+                const directionLabel = active ? `，当前${SORT_DIRECTION_LABELS[mediaSort.direction]}，点击切换` : "，点击排序";
+                return <span key={key} className="min-w-0">
+                  <button type="button" data-testid={`media-sort-${key}`} aria-label={`按${MEDIA_LIST_SORT_LABELS[key]}排序${directionLabel}`} title={active ? `按${MEDIA_LIST_SORT_LABELS[key]}排序（当前${SORT_DIRECTION_LABELS[mediaSort.direction]}）` : `按${MEDIA_LIST_SORT_LABELS[key]}排序`} className="inline-flex items-center gap-1 rounded-ui-sm px-1 py-0.5 text-left hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setMediaSort((current) => nextMediaListSort(current, key))}>
+                    <span className="whitespace-nowrap">{MEDIA_LIST_SORT_LABELS[key]}</span>
+                    {active
+                      ? mediaSort.direction === "asc"
+                        ? <ArrowUp className="size-3.5" aria-hidden="true" />
+                        : <ArrowDown className="size-3.5" aria-hidden="true" />
+                      : <ArrowUpDown className="size-3.5 opacity-60" aria-hidden="true" />}
+                  </button>
+                </span>;
+              })}
+              <span>操作</span>
             </div>
             <ul className="divide-y divide-border" aria-label="视频处理记录">
               {pagedMediaAssets.map((asset) => {
@@ -1342,15 +1395,15 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
                       <p className="mt-1 truncate text-ui-xs text-muted-foreground" title={categories.find((category) => category.id === asset.category_id)?.full_path}>{categories.find((category) => category.id === asset.category_id)?.full_path || "尚未选择归档目录"}</p>
                       <div className="mt-2 flex flex-wrap gap-2 text-ui-xs text-muted-foreground"><span>{formatBytes(asset.file_size)}</span>{isExternal && <Badge variant="secondary">共享目录视频 · 只读</Badge>}{sameNameCount > 1 && <Badge variant="secondary">同名记录 {sameNameCount} 条</Badge>}{asset.replacement_source_media_id && <Badge variant={asset.replacement_status === "activated" ? "success" : asset.replacement_status === "failed" ? "destructive" : "warning"}>{asset.replacement_status === "activated" ? "替换已生效" : asset.replacement_status === "failed" ? "替换候选失败" : "替换候选"}</Badge>}{asset.replacement_candidate_media_id && asset.replacement_status === "pending" && <Badge variant="warning">替换处理中</Badge>}</div>
                     </div>
-                    <div className="min-w-0 space-y-2">
+                    <div className="min-w-0 space-y-2 max-lg:col-start-2">
                       <div className="flex flex-wrap items-center gap-2"><StatusBadge value={job?.status || asset.status} meta={job ? jobStatusMeta : mediaStatusMeta} /></div>
                       {asset.error && !job && <p className="text-ui-xs text-destructive">媒体处理失败，请修复转录方案后重试。原因：{asset.error}{asset.storage_kind === "external" ? "（共享目录原文件不可删除）" : ""}</p>}
                       {job ? <JobSummary job={job} /> : <p className="text-ui-xs text-muted-foreground">{asset.transcript_origin === "manual" ? "人工转写" : "尚未创建转录任务"}</p>}
                       {hasSchemeEntry && <div className="flex flex-wrap items-center gap-1.5 text-ui-xs text-muted-foreground" data-testid="media-scheme-line"><span>转录方案：{schemeName ? <span className="font-medium text-foreground">{schemeName}</span> : "原转录配置已删除"}</span>{schemeName && schemeDeleted && <Badge variant="secondary">原转录配置已删除</Badge>}</div>}
                       <LifecycleRail asset={asset} />
                     </div>
-                    <p className="text-ui-xs text-muted-foreground"><span className="sr-only">提交时间：</span>{formatAdminDate(asset.created_at)}</p>
-                    <div className="flex flex-wrap gap-1.5 lg:justify-end" aria-label={`媒体操作：${asset.title}`}>
+                    <p className="text-ui-xs text-muted-foreground max-lg:col-start-2"><span className="sr-only">提交时间：</span>{formatAdminDate(asset.created_at)}</p>
+                    <div className="flex flex-wrap gap-1.5 max-lg:col-start-2 lg:justify-end" aria-label={`媒体操作：${asset.title}`}>
                       <IconButton label="转录" title={canStart ? "选择转录方案开始转录" : disabledActions.start_transcription || "当前不可开始转录"} tooltip={canStart ? "选择转录方案开始转录" : disabledActions.start_transcription || "当前不可开始转录"} className="border border-border max-sm:size-control-md" disabled={!canStart || deletingMediaId === asset.media_id} onClick={() => openStartDialog([asset])}><Rocket className="size-4" /></IconButton>
                       <IconButton label="重新转录" title={canReTranscribe ? "默认使用原转录配置，也可选择其他方案" : disabledActions.re_transcribe || "当前不可重新转录"} tooltip={canReTranscribe ? "默认使用原转录配置，也可选择其他方案" : disabledActions.re_transcribe || "当前不可重新转录"} className="border border-border max-sm:size-control-md" disabled={!canReTranscribe || deletingMediaId === asset.media_id} onClick={() => openReTranscribeDialog([asset])}><RefreshCcw className="size-4" /></IconButton>
                       <IconButton label="进入转写工作台" tooltip="进入转写工作台" className="border border-border max-sm:size-control-md" onClick={() => openWorkbench(asset.media_id)}><Film className="size-4" /></IconButton>
@@ -1367,8 +1420,8 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
               })}
             </ul>
           </>}
-        {visibleMediaAssets.length === 0 && transcriptionTaskAssets.length > 0 && <EmptyState title="没有符合条件的媒体" description="请切换其他快捷筛选条件。" />}
-        <div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><p className="text-ui-xs text-muted-foreground">当前显示 {visibleMediaAssets.length ? mediaPage * mediaPageSize + 1 : 0} - {Math.min((mediaPage + 1) * mediaPageSize, visibleMediaAssets.length)} / {visibleMediaAssets.length} 条记录{lastLoadedAt ? ` · 最近刷新 ${new Date(lastLoadedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : ""}。</p><div className="flex flex-wrap items-center gap-2"><label className="flex items-center gap-2 text-ui-xs text-muted-foreground">每页<Select aria-label="每页视频条数" className="h-control-sm w-20" value={String(mediaPageSize)} onChange={(event) => setMediaPageSize(Number(event.target.value))}><option value="10">10 条</option><option value="20">20 条</option><option value="50">50 条</option></Select></label><Button size="sm" variant="outline" disabled={mediaPage === 0} onClick={() => setMediaPage((value) => value - 1)}>上一页</Button><Select aria-label="跳转视频页码" className="h-control-sm w-24" value={String(mediaPage + 1)} onChange={(event) => setMediaPage(Number(event.target.value) - 1)}>{Array.from({ length: mediaPageCount }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 页</option>)}</Select><Button size="sm" variant="outline" disabled={mediaPage + 1 >= mediaPageCount} onClick={() => setMediaPage((value) => value + 1)}>下一页</Button></div></div>
+        {visibleMediaAssets.length === 0 && transcriptionTaskAssets.length > 0 && <EmptyState title="没有符合条件的媒体" description={mediaQuery.trim() ? `没有匹配「${mediaQuery.trim()}」的任务，请调整搜索词或切换快捷筛选条件。` : "请切换其他快捷筛选条件。"} />}
+        <div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><p className="text-ui-xs text-muted-foreground" role="status" aria-live="polite">当前显示 {visibleMediaAssets.length ? mediaPage * mediaPageSize + 1 : 0} - {Math.min((mediaPage + 1) * mediaPageSize, visibleMediaAssets.length)} / {visibleMediaAssets.length} 条记录{mediaQuery.trim() ? ` · 搜索「${mediaQuery.trim()}」` : ""} · 按{MEDIA_LIST_SORT_LABELS[mediaSort.key]}{SORT_DIRECTION_LABELS[mediaSort.direction]}{lastLoadedAt ? ` · 最近刷新 ${new Date(lastLoadedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : ""}。</p><div className="flex flex-wrap items-center gap-2"><label className="flex items-center gap-2 text-ui-xs text-muted-foreground">每页<Select aria-label="每页视频条数" className="h-control-sm w-20" value={String(mediaPageSize)} onChange={(event) => setMediaPageSize(Number(event.target.value))}><option value="10">10 条</option><option value="20">20 条</option><option value="50">50 条</option></Select></label><Button size="sm" variant="outline" disabled={mediaPage === 0} onClick={() => setMediaPage((value) => value - 1)}>上一页</Button><Select aria-label="跳转视频页码" className="h-control-sm w-24" value={String(mediaPage + 1)} onChange={(event) => setMediaPage(Number(event.target.value) - 1)}>{Array.from({ length: mediaPageCount }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 页</option>)}</Select><Button size="sm" variant="outline" disabled={mediaPage + 1 >= mediaPageCount} onClick={() => setMediaPage((value) => value + 1)}>下一页</Button></div></div>
         </Card>
       </section>
 
