@@ -176,3 +176,102 @@ export function matchesMediaSearch(query: string, haystack: string): boolean {
   if (!terms.length) return true;
   return terms.every((term) => haystack.includes(term));
 }
+
+/* ------------------------------------------------------------------ *
+ * Filter panel behind the search box (same affordance as 资料列表/回收站)
+ * ------------------------------------------------------------------ */
+
+/** Sentinel for「原转录配置已删除」inside the scheme filter. */
+export const MEDIA_SCHEME_DELETED_VALUE = "__deleted__";
+/** Sentinel for「尚未选择归档目录」inside the folder filter. */
+export const MEDIA_CATEGORY_NONE_VALUE = "__none__";
+
+export type MediaSubmittedRange = "" | "today" | "week" | "month";
+
+export const MEDIA_SUBMITTED_RANGE_LABELS: Record<Exclude<MediaSubmittedRange, "">, string> = {
+  today: "今天",
+  week: "最近 7 天",
+  month: "最近 30 天",
+};
+
+export const MEDIA_SUBMITTED_RANGE_VALUES: Exclude<MediaSubmittedRange, "">[] = ["today", "week", "month"];
+
+export type MediaPanelFilters = {
+  /** "" = 全部方案, a scheme id, or MEDIA_SCHEME_DELETED_VALUE. */
+  scheme: string;
+  /** "" = 全部目录, a category id, or MEDIA_CATEGORY_NONE_VALUE. */
+  category: string;
+  submitted: MediaSubmittedRange;
+};
+
+export const DEFAULT_MEDIA_PANEL_FILTERS: MediaPanelFilters = { scheme: "", category: "", submitted: "" };
+
+export function countMediaPanelFilters(filters: MediaPanelFilters, statusFilterActive: boolean): number {
+  return (
+    (statusFilterActive ? 1 : 0)
+    + (filters.scheme ? 1 : 0)
+    + (filters.category ? 1 : 0)
+    + (filters.submitted ? 1 : 0)
+  );
+}
+
+export function mediaSchemeOf(
+  asset: MediaAsset,
+  job?: TranscriptionJob,
+): { schemeId: string; name: string; deleted: boolean } {
+  return {
+    schemeId: job?.scheme_id ?? asset.transcription_scheme_id ?? "",
+    name: (job?.scheme_name ?? asset.transcription_scheme_name ?? "").trim(),
+    deleted: Boolean(job?.scheme_deleted ?? asset.transcription_scheme_deleted),
+  };
+}
+
+export type MediaSubmittedBucket = Exclude<MediaSubmittedRange, ""> | "older";
+
+/** Local-day buckets so「今天」matches the operator's own calendar day. */
+export function mediaSubmittedBucket(createdAtSec: number, nowSec: number): MediaSubmittedBucket {
+  if (!Number.isFinite(createdAtSec) || createdAtSec <= 0) return "older";
+  const created = new Date(createdAtSec * 1000);
+  const now = new Date(nowSec * 1000);
+  if (
+    created.getFullYear() === now.getFullYear()
+    && created.getMonth() === now.getMonth()
+    && created.getDate() === now.getDate()
+  ) {
+    return "today";
+  }
+  const ageSeconds = Math.max(0, nowSec - createdAtSec);
+  if (ageSeconds <= 7 * 24 * 3600) return "week";
+  if (ageSeconds <= 30 * 24 * 3600) return "month";
+  return "older";
+}
+
+export type MediaPanelFilterInput = {
+  asset: MediaAsset;
+  job?: TranscriptionJob;
+  filters: MediaPanelFilters;
+  nowSec: number;
+};
+
+export function matchesMediaPanelFilters({ asset, job, filters, nowSec }: MediaPanelFilterInput): boolean {
+  if (filters.scheme) {
+    const scheme = mediaSchemeOf(asset, job);
+    if (filters.scheme === MEDIA_SCHEME_DELETED_VALUE) {
+      if (!scheme.deleted) return false;
+    } else if (scheme.schemeId !== filters.scheme) {
+      return false;
+    }
+  }
+  if (filters.category) {
+    const categoryId = asset.category_id ?? "";
+    if (filters.category === MEDIA_CATEGORY_NONE_VALUE) {
+      if (categoryId) return false;
+    } else if (categoryId !== filters.category) {
+      return false;
+    }
+  }
+  if (filters.submitted && mediaSubmittedBucket(asset.created_at, nowSec) !== filters.submitted) {
+    return false;
+  }
+  return true;
+}

@@ -65,6 +65,44 @@ test.describe("转录任务", () => {
     await expectNoBodyOverflow(page);
   });
 
+  test("搜索框提供与资料列表一致的筛选面板", async ({ page }, testInfo) => {
+    await installAdminRoutes(page);
+    await page.goto("/admin/content?view=transcription");
+    await expect(page.getByRole("heading", { name: "转录任务" })).toBeVisible();
+    // The helper line stays on one line after shortening it.
+    await expect(page.getByText("跟踪转录、审核与发布。", { exact: true })).toBeVisible();
+
+    const rows = page.getByTestId("media-record-row");
+    const toggle = page.getByTestId("media-filter-toggle");
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await toggle.click();
+
+    const panel = page.getByRole("dialog", { name: "转录任务搜索筛选" });
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText("未启用附加筛选");
+    await expect(panel.getByRole("button", { name: "清除搜索与筛选" })).toBeDisabled();
+    await expectInViewport(panel);
+
+    const viewport = page.viewportSize()!;
+    await page.screenshot({ path: testInfo.outputPath(`transcription-search-filters-${viewport.width}x${viewport.height}.png`) });
+
+    await panel.getByLabel("任务状态筛选").selectOption("failed");
+    await expect(rows).toHaveCount(2);
+    await expect(panel).toContainText("已启用 1 项筛选");
+    await page.getByLabel("搜索转录任务").fill("mep");
+    await expect(rows).toHaveCount(2);
+    await expect(panel.getByRole("button", { name: "清除搜索与筛选" })).toBeEnabled();
+
+    await panel.getByRole("button", { name: "清除搜索与筛选" }).click();
+    await expect(rows).toHaveCount(3);
+    await expect(page.getByLabel("搜索转录任务")).toHaveValue("");
+
+    await page.keyboard.press("Escape");
+    await expect(panel).toHaveCount(0);
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expectNoBodyOverflow(page);
+  });
+
   test("旧入口保留深链参数并进入资料管理子页", async ({ page }) => {
     await installAdminRoutes(page);
     await page.goto("/admin/media?media_id=media-ready&workbench=1");
