@@ -4,18 +4,22 @@ $script:WhisperXAsrModelId = "Systran/faster-whisper-large-v3"
 $script:WhisperXAsrRevision = "53ecf83a5bedc5597eb8c8b34eac29e5345520ff"
 $script:WhisperXAlignModelId = "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn"
 $script:WhisperXAlignRevision = "51d27579a1040ee4e967979278d5f76b9c32c375"
-$script:WhisperXQualificationManifestSha256 = "cb2cad81ec8d592a2fadcb4b35903cb563acee200aad13be2bde7687c59ca80b"
+# WhisperX 的资格语料自 2026-09-13 起独立于其他引擎：生产去热词后，人工 5 秒念编号片段
+# （standard-codes.wav）在无热词下会丢位，因此 whisperx 使用标注版本 2 的语料
+# （manifest-whisperx-v2.json：以 57.72 秒自造自然长音频 natural-narration-zh 替代该片段，
+# 自然说出规范编号与 BIM 术语）。faster-whisper / qwen3 仍使用共享 v1 语料，其 pin 不变。
+$script:WhisperXQualificationManifestSha256 = "5c6653ebcfef775d9b66dbb9d2347e325e96dceb0885405a17f59800419342a2"
 $script:WhisperXSampleSetId = "self-made-faster-whisper-r3"
-$script:WhisperXAnnotationVersion = "1"
+$script:WhisperXAnnotationVersion = "2"
 $script:WhisperXSampleIds = @(
     "bim-terms",
     "clear-zh",
     "mixed-zh-en",
+    "natural-narration-zh",
     "negative-control-1",
     "negative-control-2",
     "negative-control-3",
-    "noisy-bim-zh",
-    "standard-codes"
+    "noisy-bim-zh"
 )
 
 function Get-WhisperXEvidenceSha256 {
