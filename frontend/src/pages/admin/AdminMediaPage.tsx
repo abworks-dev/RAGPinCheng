@@ -45,7 +45,7 @@ import { toast } from "../../components/ui/toast";
 type UploadMode = "manual" | "automatic";
 type UploadState = "waiting" | "uploading" | "preparing" | "succeeded" | "skipped" | "failed";
 type StatusVariant = "secondary" | "success" | "warning" | "destructive" | "info";
-type MediaFilter = "all" | "processing" | "review" | "publishing" | "failed";
+type MediaFilter = "all" | "processing" | "review" | "published" | "failed";
 
 type PendingVideo = {
   id: string;
@@ -427,7 +427,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
     ["all", "全部任务"],
     ["processing", "处理中"],
     ["review", "待审核"],
-    ["publishing", "发布处理中"],
+    ["published", "已发布"],
     ["failed", "失败"],
   ] as const;
   const matchesMediaFilter = (asset: MediaAsset, filter: MediaFilter) => {
@@ -435,7 +435,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
     const job = jobsByMediaId.get(asset.media_id);
     if (filter === "processing") return job?.status === "pending" || job?.status === "running";
     if (filter === "review") return asset.review_status === "awaiting_review";
-    if (filter === "publishing") return asset.publication_status === "publishing";
+    if (filter === "published") return asset.publication_status === "published";
     return job?.status === "failed" || asset.status === "failed" || asset.publication_status === "publication_failed" || asset.publication_index_status === "failed";
   };
   const transcriptionTaskAssets = mediaAssets.filter((asset) =>
@@ -729,7 +729,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const filterCounts = mediaFilterOptions.reduce<Record<MediaFilter, number>>((counts, [value]) => {
     counts[value] = transcriptionTaskAssets.filter((asset) => matchesMediaFilter(asset, value)).length;
     return counts;
-  }, { all: 0, processing: 0, review: 0, publishing: 0, failed: 0 });
+  }, { all: 0, processing: 0, review: 0, published: 0, failed: 0 });
   const selectedAsset = selectedMediaId ? mediaAssets.find((asset) => asset.media_id === selectedMediaId) ?? null : null;
   const replaceSourceAsset = replaceSourceMediaId ? mediaAssets.find((asset) => asset.media_id === replaceSourceMediaId) ?? null : null;
   const refreshMediaState = useCallback(async () => {
@@ -1325,7 +1325,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
 
       <section className="space-y-5" aria-labelledby="media-assets-title">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="媒体快捷筛选">
-          {mediaFilterOptions.map(([value, label]) => { const icons = { all: <Film className="size-4" />, processing: <LoaderCircle className="size-4" />, review: <ClipboardCheck className="size-4" />, publishing: <Rocket className="size-4" />, failed: <XCircle className="size-4" /> }; return <ManagedSummaryCard key={value} label={label} value={filterCounts[value]} icon={icons[value]} tone={value === "failed" ? "destructive" : value === "review" || value === "publishing" ? "warning" : "primary"} active={mediaFilter === value} onClick={() => setMediaFilter(value)} />; })}
+          {mediaFilterOptions.map(([value, label]) => { const icons = { all: <Film className="size-4" />, processing: <LoaderCircle className="size-4" />, review: <ClipboardCheck className="size-4" />, published: <Rocket className="size-4" />, failed: <XCircle className="size-4" /> }; return <ManagedSummaryCard key={value} label={label} value={filterCounts[value]} icon={icons[value]} tone={value === "failed" ? "destructive" : value === "review" ? "warning" : value === "published" ? "success" : "primary"} active={mediaFilter === value} onClick={() => setMediaFilter(value)} />; })}
         </div>
         <Card className="overflow-hidden shadow-surface">
           <div className="grid gap-3 border-b border-border px-4 py-4 sm:px-5 lg:grid-cols-[minmax(13rem,1fr)_18rem_auto] lg:items-end">
@@ -1421,7 +1421,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
             </ul>
           </>}
         {visibleMediaAssets.length === 0 && transcriptionTaskAssets.length > 0 && <EmptyState title="没有符合条件的媒体" description={mediaQuery.trim() ? `没有匹配「${mediaQuery.trim()}」的任务，请调整搜索词或切换快捷筛选条件。` : "请切换其他快捷筛选条件。"} />}
-        <div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><p className="text-ui-xs text-muted-foreground" role="status" aria-live="polite">当前显示 {visibleMediaAssets.length ? mediaPage * mediaPageSize + 1 : 0} - {Math.min((mediaPage + 1) * mediaPageSize, visibleMediaAssets.length)} / {visibleMediaAssets.length} 条记录{mediaQuery.trim() ? ` · 搜索「${mediaQuery.trim()}」` : ""} · 按{MEDIA_LIST_SORT_LABELS[mediaSort.key]}{SORT_DIRECTION_LABELS[mediaSort.direction]}{lastLoadedAt ? ` · 最近刷新 ${new Date(lastLoadedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : ""}。</p><div className="flex flex-wrap items-center gap-2"><label className="flex items-center gap-2 text-ui-xs text-muted-foreground">每页<Select aria-label="每页视频条数" className="h-control-sm w-20" value={String(mediaPageSize)} onChange={(event) => setMediaPageSize(Number(event.target.value))}><option value="10">10 条</option><option value="20">20 条</option><option value="50">50 条</option></Select></label><Button size="sm" variant="outline" disabled={mediaPage === 0} onClick={() => setMediaPage((value) => value - 1)}>上一页</Button><Select aria-label="跳转视频页码" className="h-control-sm w-24" value={String(mediaPage + 1)} onChange={(event) => setMediaPage(Number(event.target.value) - 1)}>{Array.from({ length: mediaPageCount }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 页</option>)}</Select><Button size="sm" variant="outline" disabled={mediaPage + 1 >= mediaPageCount} onClick={() => setMediaPage((value) => value + 1)}>下一页</Button></div></div>
+        <div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"><p className="text-ui-xs text-muted-foreground" role="status" aria-live="polite">当前显示 {visibleMediaAssets.length ? mediaPage * mediaPageSize + 1 : 0} - {Math.min((mediaPage + 1) * mediaPageSize, visibleMediaAssets.length)} / {visibleMediaAssets.length} 条记录{mediaQuery.trim() ? ` · 搜索「${mediaQuery.trim()}」` : ""} · 按{MEDIA_LIST_SORT_LABELS[mediaSort.key]}{SORT_DIRECTION_LABELS[mediaSort.direction]}{lastLoadedAt ? ` · 最近刷新 ${new Date(lastLoadedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : ""}。</p><div className="flex flex-wrap items-center gap-2"><label className="flex items-center gap-2 text-ui-xs text-muted-foreground">每页<Select aria-label="每页视频条数" className="h-control-sm w-20" value={String(mediaPageSize)} onChange={(event) => setMediaPageSize(Number(event.target.value))}><option value="10">10 条</option><option value="20">20 条</option><option value="50">50 条</option><option value="100">100 条</option></Select></label><Button size="sm" variant="outline" disabled={mediaPage === 0} onClick={() => setMediaPage((value) => value - 1)}>上一页</Button><Select aria-label="跳转视频页码" className="h-control-sm w-24" value={String(mediaPage + 1)} onChange={(event) => setMediaPage(Number(event.target.value) - 1)}>{Array.from({ length: mediaPageCount }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 页</option>)}</Select><Button size="sm" variant="outline" disabled={mediaPage + 1 >= mediaPageCount} onClick={() => setMediaPage((value) => value + 1)}>下一页</Button></div></div>
         </Card>
       </section>
 
