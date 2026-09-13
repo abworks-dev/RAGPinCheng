@@ -277,6 +277,27 @@ describe("AdminMediaPage wizard", () => {
     expect(screen.getByText(/最近刷新/)).toBeInTheDocument();
   });
 
+  it("counts published videos in the 已发布 card and offers 100 rows per page", async () => {
+    mocks.listMediaAssets.mockResolvedValue([
+      { ...assets[0], media_id: "media-published", title: "已发布视频", publication_status: "published", publication_request_status: "published" },
+      { ...assets[0], media_id: "media-publishing", title: "发布中视频", publication_status: "publishing", publication_request_status: "publishing" },
+    ]);
+    render(<AdminMediaPage />);
+    await screen.findByText("已发布视频");
+
+    expect(screen.queryByRole("button", { name: /发布处理中/ })).not.toBeInTheDocument();
+    const publishedCard = screen.getByRole("button", { name: "已发布 1" });
+    fireEvent.click(publishedCard);
+    await waitFor(() => expect(screen.queryByText("发布中视频")).not.toBeInTheDocument());
+    expect(screen.getByText("已发布视频")).toBeInTheDocument();
+
+    const pageSize = screen.getByRole("combobox", { name: "每页视频条数" }) as HTMLSelectElement;
+    expect(Array.from(pageSize.options, (option) => option.value)).toEqual(["10", "20", "50", "100"]);
+    fireEvent.change(pageSize, { target: { value: "100" } });
+    expect(pageSize).toHaveValue("100");
+    expect(screen.getByText(/当前显示 1 - 1 \/ 1 条记录/)).toBeInTheDocument();
+  });
+
   it("uses one transcription status when media and transcription both fail", async () => {
     const failedJob = {
       ...succeededJob,

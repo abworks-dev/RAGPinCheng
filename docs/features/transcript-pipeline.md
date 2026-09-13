@@ -60,7 +60,7 @@ Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审�
 - Phase 3 remote Provider 仍只返回严格 `ProviderCandidate | ProviderFailure`，由 `pipeline.py` 独占 normalizer/Canonical 结果流；
 - 管理端单 MP4 + `profile_id` 上传、任务状态/取消/恢复已接入应用 API 和后台 worker；人工 MP4+Markdown 路径保持独立；
 - 管理端按媒体 lazy 加载版本历史，可校对并渲染预览不可变版本的 Markdown、将修改保存为新的受管人工修订、提交审核备注、批准/拒绝并显式发布；legacy 人工版本不提供可用的受管发布动作；
-- 管理端媒体列表使用真实审核枚举计算唯一当前阶段，独立展示索引状态，并提供处理中、待审核、发布处理中和失败快捷筛选；媒体与最近任务窗口统一为 500 条，避免 500 条媒体响应因只加载 100 条任务而遗漏旧任务状态；
+- 管理端媒体列表使用真实审核枚举计算唯一当前阶段，独立展示索引状态，并提供处理中、待审核、已发布和失败快捷筛选（发布处理中的视频通过行内状态和关键词搜索查看）；媒体与最近任务窗口统一为 500 条，避免 500 条媒体响应因只加载 100 条任务而遗漏旧任务状态；
 - Canonical normalizer 在唯一的 `ProviderCandidate → CanonicalTranscript` 边界过滤高置信 ASR Prompt 回吐：仅当片段同时含“请准确识别/要准确识别”“以下是/以下为”骨架并密集出现至少 3 个受控工程术语时丢弃，普通包含 Revit/BIM 的真实语句保留，并复用既有 `empty_segment_dropped` warning 记录审核证据，保持 `canonical-transcript/1` 旧读取器兼容。faster-whisper 与 WhisperX 的 ServiceProfile 不再把 Prompt 资产注入 `initial_prompt`，保留 hotwords、beam、temperature 与应用层术语纠正；`src/transcription/service_profiles.py` 纳入对应 ASR runtime contract，防止旧 qualification 证据复用，必须重新 qualification 后才能生产启用。相邻片段若前段至少 8 字、没有句末标点、间隔在方案 `merge_gap_ms` 内且合并后仍满足字符/时长上限，则在 normalizer 中合并，减少半句分段，但不伪造标点或缺失正文。
 - 自动稿格式中的 `说话人 N` 是历史解析兼容标记，`N` 为 Canonical 片段序号，并非声纹/说话人识别结果；当前 ProviderCandidate/Canonical schema 没有 diarization 字段。改名会影响既有 transcript parser、检索 chunk 与历史稿兼容，因此本次保留格式并明确语义。
 - 转录任务的转录版本列表按 `created_at DESC, rowid DESC` 返回（同一秒完成的批量稿用插入顺序兜底，不再由随机 UUID 决定），保持“最新一稿在最上”。`transcript_versions` DTO 新增 `completed_at` 与 `attempt_number`：自动稿的 `completed_at` 取任务 `finished_at`（版本行与任务置为 succeeded 在同一事务、同一时刻写入），人工稿回退为版本自身 `created_at`，`attempt_number` 为产出该稿的转录尝试序号（人工稿为 `null`）；转写工作台版本行与“审核/发布所选”的版本选择项据此显示“完成于 <本地时间> · 第 N 次尝试”，替代此前无时间、且版本号会随新稿整体漂移的展示。该列表只包含成功产出的版本，失败或取消的尝试仅在任务历史中体现，因此“版本 N”不等于“第 N 次尝试”。
