@@ -1287,4 +1287,63 @@ describe("AdminMediaPage wizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "清空搜索" }));
     expect(screen.getAllByTestId("media-record-row")).toHaveLength(2);
   });
+
+  it("opens the search filter panel and narrows the list by status, scheme and folder", async () => {
+    mocks.listMediaAssets.mockResolvedValue([
+      {
+        ...assets[0],
+        media_id: "media-scheme-a",
+        title: "桥梁施工",
+        category_id: "cat-05",
+        status: "uploaded",
+        publication_request_status: "pending_transcription",
+        transcription_scheme_id: availableProfile.scheme_id,
+        transcription_scheme_name: availableProfile.name,
+      },
+      {
+        ...assets[0],
+        media_id: "media-scheme-b",
+        title: "楼梯专项检查",
+        category_id: null,
+        status: "failed",
+        publication_request_status: "failed",
+        transcription_scheme_id: "scheme-removed",
+        transcription_scheme_deleted: true,
+      },
+    ]);
+    mocks.listTranscriptionJobs.mockResolvedValue([]);
+    render(<AdminMediaPage />);
+    await screen.findByText("桥梁施工");
+
+    const toggle = screen.getByTestId("media-filter-toggle");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+
+    const panel = screen.getByRole("dialog", { name: "转录任务搜索筛选" });
+    expect(panel).toHaveTextContent("未启用附加筛选");
+    expect(within(panel).getByRole("button", { name: "清除搜索与筛选" })).toBeDisabled();
+
+    fireEvent.change(within(panel).getByLabelText("转录方案筛选"), { target: { value: "__deleted__" } });
+    expect(screen.getAllByTestId("media-record-row")).toHaveLength(1);
+    expect(screen.getByText("楼梯专项检查")).toBeInTheDocument();
+    expect(panel).toHaveTextContent("已启用 1 项筛选");
+
+    fireEvent.change(within(panel).getByLabelText("归档目录筛选"), { target: { value: "__none__" } });
+    expect(screen.getAllByTestId("media-record-row")).toHaveLength(1);
+
+    fireEvent.change(within(panel).getByLabelText("任务状态筛选"), { target: { value: "failed" } });
+    expect(screen.getAllByTestId("media-record-row")).toHaveLength(1);
+    expect(panel).toHaveTextContent("已启用 3 项筛选");
+
+    fireEvent.change(within(panel).getByLabelText("转录方案筛选"), { target: { value: availableProfile.scheme_id } });
+    expect(screen.queryAllByTestId("media-record-row")).toHaveLength(0);
+    expect(screen.getByText("没有符合条件的媒体")).toBeInTheDocument();
+
+    fireEvent.click(within(panel).getByRole("button", { name: "清除搜索与筛选" }));
+    expect(screen.getAllByTestId("media-record-row")).toHaveLength(2);
+    expect(within(panel).getByText("未启用附加筛选")).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "转录任务搜索筛选" })).not.toBeInTheDocument();
+  });
 });

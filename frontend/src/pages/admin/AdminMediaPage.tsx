@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Archive, ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, Ban, CheckCircle2, ChevronDown, ClipboardCheck, FileUp, Film, FolderInput, LoaderCircle, RefreshCcw, RefreshCw, Repeat2, RotateCcw, Rocket, Search, Send, Settings2, Trash2, Upload, X, XCircle } from "lucide-react";
+import { Archive, ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, Ban, CheckCircle2, ChevronDown, ClipboardCheck, FileUp, Film, FolderInput, LoaderCircle, RefreshCcw, RefreshCw, Repeat2, RotateCcw, Rocket, Search, Send, Settings2, SlidersHorizontal, Trash2, Upload, X, XCircle } from "lucide-react";
 import { adminMediaApi } from "../../api/admin/media";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
@@ -24,15 +24,25 @@ import type { ManagedCategory, MediaAsset, MediaUploadPreflightEntry, Transcript
 import { formatAdminDate, formatBytes } from "../../lib/admin-formatters";
 import {
   DEFAULT_MEDIA_LIST_SORT,
+  DEFAULT_MEDIA_PANEL_FILTERS,
+  MEDIA_CATEGORY_NONE_VALUE,
   MEDIA_LIST_SORT_KEYS,
   MEDIA_LIST_SORT_LABELS,
+  MEDIA_SCHEME_DELETED_VALUE,
+  MEDIA_SUBMITTED_RANGE_LABELS,
+  MEDIA_SUBMITTED_RANGE_VALUES,
   SORT_DIRECTION_LABELS,
+  countMediaPanelFilters,
+  matchesMediaPanelFilters,
   matchesMediaSearch,
+  mediaSchemeOf,
   mediaSearchHaystack,
   nextMediaListSort,
   sortMediaAssets,
   type MediaListSort,
   type MediaListSortKey,
+  type MediaPanelFilters,
+  type MediaSubmittedRange,
 } from "../../lib/admin-media-list";
 import {
   audioElapsedSeconds,
@@ -272,6 +282,10 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const [conflictChoices, setConflictChoices] = useState<Record<string, MediaConflictChoice>>({});
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
   const [mediaQuery, setMediaQuery] = useState("");
+  const [mediaPanelFilters, setMediaPanelFilters] = useState<MediaPanelFilters>(DEFAULT_MEDIA_PANEL_FILTERS);
+  const [mediaFiltersOpen, setMediaFiltersOpen] = useState(false);
+  const mediaFiltersPanelRef = useRef<HTMLDivElement | null>(null);
+  const mediaFiltersButtonRef = useRef<HTMLButtonElement | null>(null);
   const [mediaSort, setMediaSort] = useState<MediaListSort>(DEFAULT_MEDIA_LIST_SORT);
   const [mediaPage, setMediaPage] = useState(0);
   const [mediaPageSize, setMediaPageSize] = useState(10);
@@ -464,11 +478,25 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   };
   const visibleMediaAssets = sortMediaAssets(
     transcriptionTaskAssets.filter(
-      (asset) => matchesMediaFilter(asset, mediaFilter) && matchesMediaSearch(mediaQuery, mediaAssetSearchHaystack(asset)),
+      (asset) =>
+        matchesMediaFilter(asset, mediaFilter)
+        && matchesMediaPanelFilters({
+          asset,
+          job: jobsByMediaId.get(asset.media_id),
+          filters: mediaPanelFilters,
+          nowSec: Date.now() / 1000,
+        })
+        && matchesMediaSearch(mediaQuery, mediaAssetSearchHaystack(asset)),
     ),
     mediaSort,
     { jobFor: (asset) => jobsByMediaId.get(asset.media_id) },
   );
+  const mediaActiveFilterCount = countMediaPanelFilters(mediaPanelFilters, mediaFilter !== "all");
+  const clearMediaSearchAndFilters = () => {
+    setMediaQuery("");
+    setMediaFilter("all");
+    setMediaPanelFilters(DEFAULT_MEDIA_PANEL_FILTERS);
+  };
   const mediaPageCount = Math.max(1, Math.ceil(visibleMediaAssets.length / mediaPageSize));
   const pagedMediaAssets = visibleMediaAssets.slice(mediaPage * mediaPageSize, (mediaPage + 1) * mediaPageSize);
   const pageIds = pagedMediaAssets.map((asset) => asset.media_id);
@@ -724,7 +752,28 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
     setPublishSelectedIds([]);
     await refreshMediaState();
   };
-  useEffect(() => { setMediaPage(0); setSelectedMediaIds([]); }, [mediaFilter, mediaPageSize, mediaQuery, mediaSort.key, mediaSort.direction]);
+  useEffect(() => { setMediaPage(0); setSelectedMediaIds([]); }, [mediaFilter, mediaPageSize, mediaQuery, mediaPanelFilters, mediaSort.key, mediaSort.direction]);
+  useEffect(() => {
+    if (!mediaFiltersOpen) return;
+    // On short viewports the panel can start below the fold; keep it fully visible.
+    mediaFiltersPanelRef.current?.scrollIntoView({ block: "nearest" });
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (mediaFiltersPanelRef.current?.contains(target) || mediaFiltersButtonRef.current?.contains(target)) return;
+      setMediaFiltersOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setMediaFiltersOpen(false);
+      mediaFiltersButtonRef.current?.focus();
+    };
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [mediaFiltersOpen]);
   useEffect(() => { if (mediaPage >= mediaPageCount) setMediaPage(Math.max(0, mediaPageCount - 1)); }, [mediaPage, mediaPageCount]);
   const filterCounts = mediaFilterOptions.reduce<Record<MediaFilter, number>>((counts, [value]) => {
     counts[value] = transcriptionTaskAssets.filter((asset) => matchesMediaFilter(asset, value)).length;
@@ -1329,8 +1378,54 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
         </div>
         <Card className="overflow-hidden shadow-surface">
           <div className="grid gap-3 border-b border-border px-4 py-4 sm:px-5 lg:grid-cols-[minmax(13rem,1fr)_18rem_auto] lg:items-end">
-            <div className="min-w-0"><h2 id="media-assets-title" className="text-ui-base font-semibold">视频资源</h2><p className="mt-1 text-ui-xs text-muted-foreground">视频由资料列表上传，在这里跟踪转录、审核、发布、专属索引和恢复操作。</p></div>
-            <div className="relative min-w-0"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /><Input type="search" aria-label="搜索转录任务" placeholder="搜索标题、文件名、目录或状态…" className="h-control-md pl-9 pr-9 text-ui-xs [&::-webkit-search-cancel-button]:appearance-none" value={mediaQuery} onChange={(event) => setMediaQuery(event.target.value)} />{mediaQuery && <IconButton label="清空搜索" tooltip="清空搜索条件" className="absolute right-1 top-1/2 -translate-y-1/2" onClick={() => setMediaQuery("")}><X className="size-4" /></IconButton>}</div>
+            <div className="min-w-0"><h2 id="media-assets-title" className="text-ui-base font-semibold">视频资源</h2><p className="mt-1 text-ui-xs text-muted-foreground">跟踪转录、审核与发布。</p></div>
+            <div className="relative min-w-0">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+              <Input type="search" aria-label="搜索转录任务" placeholder="搜索标题、文件名、目录或状态…" className={`h-control-md pl-9 text-ui-xs [&::-webkit-search-cancel-button]:appearance-none ${mediaQuery ? "pr-[3.75rem]" : "pr-11"}`} value={mediaQuery} onChange={(event) => setMediaQuery(event.target.value)} />
+              <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
+                {mediaQuery && <IconButton label="清空搜索" tooltip="清空搜索条件" onClick={() => setMediaQuery("")}><X className="size-4" /></IconButton>}
+                <button type="button" ref={mediaFiltersButtonRef} data-testid="media-filter-toggle" className="relative flex size-7 items-center justify-center rounded-ui-sm text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={mediaFiltersOpen ? "收起搜索筛选" : "展开搜索筛选"} title={mediaFiltersOpen ? "收起搜索筛选" : "展开搜索筛选"} aria-haspopup="dialog" aria-expanded={mediaFiltersOpen} aria-controls="media-search-filters-panel" onClick={() => setMediaFiltersOpen((current) => !current)}>
+                  <SlidersHorizontal className="size-4" aria-hidden="true" />
+                  {mediaActiveFilterCount > 0 && <span className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-primary" aria-hidden="true" />}
+                  {mediaActiveFilterCount > 0 && <span className="sr-only">，已启用 {mediaActiveFilterCount} 项筛选</span>}
+                </button>
+              </div>
+              {mediaFiltersOpen && (
+                <div id="media-search-filters-panel" ref={mediaFiltersPanelRef} role="dialog" aria-label="转录任务搜索筛选" className="absolute left-0 top-full z-dropdown mt-2 max-h-[70vh] w-[min(21rem,calc(100vw-2rem))] overflow-y-auto rounded-ui-lg border border-border bg-popover p-3 text-popover-foreground shadow-overlay">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="space-y-1 text-ui-xs text-muted-foreground"><span>状态</span>
+                      <Select className="h-control-sm" aria-label="任务状态筛选" value={mediaFilter} onChange={(event) => setMediaFilter(event.target.value as MediaFilter)}>
+                        {mediaFilterOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                      </Select>
+                    </label>
+                    <label className="space-y-1 text-ui-xs text-muted-foreground"><span>转录方案</span>
+                      <Select className="h-control-sm" aria-label="转录方案筛选" value={mediaPanelFilters.scheme} onChange={(event) => setMediaPanelFilters((current) => ({ ...current, scheme: event.target.value }))}>
+                        <option value="">全部方案</option>
+                        {schemes.map((scheme) => <option key={scheme.scheme_id} value={scheme.scheme_id}>{scheme.name}</option>)}
+                        <option value={MEDIA_SCHEME_DELETED_VALUE}>原转录配置已删除</option>
+                      </Select>
+                    </label>
+                    <label className="space-y-1 text-ui-xs text-muted-foreground"><span>归档目录</span>
+                      <Select className="h-control-sm" aria-label="归档目录筛选" value={mediaPanelFilters.category} onChange={(event) => setMediaPanelFilters((current) => ({ ...current, category: event.target.value }))}>
+                        <option value="">全部目录</option>
+                        {categories.map((category) => <option key={category.id} value={category.id}>{category.full_path || category.display_name}</option>)}
+                        <option value={MEDIA_CATEGORY_NONE_VALUE}>尚未选择归档目录</option>
+                      </Select>
+                    </label>
+                    <label className="space-y-1 text-ui-xs text-muted-foreground"><span>提交时间</span>
+                      <Select className="h-control-sm" aria-label="提交时间筛选" value={mediaPanelFilters.submitted} onChange={(event) => setMediaPanelFilters((current) => ({ ...current, submitted: event.target.value as MediaSubmittedRange }))}>
+                        <option value="">全部时间</option>
+                        {MEDIA_SUBMITTED_RANGE_VALUES.map((value) => <option key={value} value={value}>{MEDIA_SUBMITTED_RANGE_LABELS[value]}</option>)}
+                      </Select>
+                    </label>
+                  </div>
+                  <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-ui-xs text-muted-foreground" role="status">{mediaActiveFilterCount > 0 ? `已启用 ${mediaActiveFilterCount} 项筛选` : "未启用附加筛选"}</p>
+                    <Button size="sm" variant="outline" disabled={!mediaQuery && mediaActiveFilterCount === 0} onClick={clearMediaSearchAndFilters}>清除搜索与筛选</Button>
+                  </div>
+                </div>
+              )}
+            </div>
             <div className="flex items-center gap-2 lg:hidden">
               <label className="flex min-w-0 flex-1 items-center gap-2 text-ui-xs text-muted-foreground">排序<Select aria-label="排序字段" className="h-control-md min-w-0 flex-1 text-ui-xs" value={mediaSort.key} onChange={(event) => setMediaSort((current) => ({ key: event.target.value as MediaListSortKey, direction: current.direction }))}>{MEDIA_LIST_SORT_KEYS.map((key) => <option key={key} value={key}>{MEDIA_LIST_SORT_LABELS[key]}</option>)}</Select></label>
               <Button variant="outline" className="h-control-md" data-testid="media-sort-direction" aria-label={`当前${SORT_DIRECTION_LABELS[mediaSort.direction]}，切换为${mediaSort.direction === "asc" ? "降序" : "升序"}`} title={mediaSort.direction === "asc" ? `当前升序，点击改为降序` : `当前降序，点击改为升序`} onClick={() => setMediaSort((current) => ({ ...current, direction: current.direction === "asc" ? "desc" : "asc" }))}>{mediaSort.direction === "asc" ? <ArrowUp className="size-4" aria-hidden="true" /> : <ArrowDown className="size-4" aria-hidden="true" />}{SORT_DIRECTION_LABELS[mediaSort.direction]}</Button>

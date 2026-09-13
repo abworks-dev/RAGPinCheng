@@ -2,9 +2,16 @@ import { describe, expect, it } from "vitest";
 import type { MediaAsset, TranscriptionJob } from "../types";
 import {
   DEFAULT_MEDIA_LIST_SORT,
+  DEFAULT_MEDIA_PANEL_FILTERS,
+  MEDIA_CATEGORY_NONE_VALUE,
+  MEDIA_SCHEME_DELETED_VALUE,
+  countMediaPanelFilters,
+  matchesMediaPanelFilters,
   matchesMediaSearch,
   mediaProgressRank,
+  mediaSchemeOf,
   mediaSearchHaystack,
+  mediaSubmittedBucket,
   nextMediaListSort,
   sortMediaAssets,
   type MediaListSort,
@@ -180,5 +187,71 @@ describe("matching the search box", () => {
   it("is case insensitive for latin file names", () => {
     const haystack = mediaSearchHaystack({ asset: asset({ original_filename: "BIM-Training.MP4" }) });
     expect(matchesMediaSearch("bim-training", haystack)).toBe(true);
+  });
+});
+
+describe("filter panel behind the search box", () => {
+  const nowSec = Date.UTC(2026, 8, 13, 4, 0, 0) / 1000; // 2026-09-13T04:00Z
+  const matches = (item: MediaAsset, filters = DEFAULT_MEDIA_PANEL_FILTERS, job?: TranscriptionJob) =>
+    matchesMediaPanelFilters({ asset: item, job, filters, nowSec });
+
+  it("counts only non-default filters, including the status shortcut", () => {
+    expect(countMediaPanelFilters(DEFAULT_MEDIA_PANEL_FILTERS, false)).toBe(0);
+    expect(countMediaPanelFilters(DEFAULT_MEDIA_PANEL_FILTERS, true)).toBe(1);
+    expect(
+      countMediaPanelFilters({ scheme: "scheme-1", category: "cat-1", submitted: "week" }, true),
+    ).toBe(4);
+  });
+
+  it("filters by transcription scheme, including the deleted marker", () => {
+    const assigned = asset({ media_id: "a", transcription_scheme_id: "scheme-1", transcription_scheme_name: "受控中文转录" });
+    const deleted = asset({ media_id: "b", transcription_scheme_id: "scheme-old", transcription_scheme_deleted: true });
+    const none = asset({ media_id: "c" });
+
+    expect(matches(assigned, { scheme: "scheme-1", category: "", submitted: "" })).toBe(true);
+    expect(matches(deleted, { scheme: "scheme-1", category: "", submitted: "" })).toBe(false);
+    expect(matches(deleted, { scheme: MEDIA_SCHEME_DELETED_VALUE, category: "", submitted: "" })).toBe(true);
+    expect(matches(none, { scheme: MEDIA_SCHEME_DELETED_VALUE, category: "", submitted: "" })).toBe(false);
+    expect(mediaSchemeOf(assigned)).toEqual({ schemeId: "scheme-1", name: "受控中文转录", deleted: false });
+    // The latest job wins over the asset snapshot.
+    expect(mediaSchemeOf(assigned, job({ scheme_id: "scheme-2", scheme_name: "  工程转录  ", scheme_deleted: true }))).toEqual({
+      schemeId: "scheme-2",
+      name: "工程转录",
+      deleted: true,
+    });
+  });
+
+  it("filters by archive folder, including rows without one", () => {
+    const filed = asset({ media_id: "a", category_id: "cat-05" });
+    const unfiled = asset({ media_id: "b", category_id: null });
+
+    expect(matches(filed, { scheme: "", category: "cat-05", submitted: "" })).toBe(true);
+    expect(matches(unfiled, { scheme: "", category: "cat-05", submitted: "" })).toBe(false);
+    expect(matches(unfiled, { scheme: "", category: MEDIA_CATEGORY_NONE_VALUE, submitted: "" })).toBe(true);
+    expect(matches(filed, { scheme: "", category: MEDIA_CATEGORY_NONE_VALUE, submitted: "" })).toBe(false);
+  });
+
+  it("buckets submission time by local day and rolling windows", () => {
+    const today = nowSec - 3600;
+    const sixDaysAgo = nowSec - 6 * 24 * 3600;
+    const twentyDaysAgo = nowSec - 20 * 24 * 3600;
+    const longAgo = nowSec - 90 * 24 * 3600;
+
+    expect(mediaSubmittedBucket(today, nowSec)).toBe("today");
+    expect(mediaSubmittedBucket(sixDaysAgo, nowSec)).toBe("week");
+    expect(mediaSubmittedBucket(twentyDaysAgo, nowSec)).toBe("month");
+    expect(mediaSubmittedBucket(longAgo, nowSec)).toBe("older");
+    expect(mediaSubmittedBucket(0, nowSec)).toBe("older");
+
+    expect(matches(asset({ created_at: today }), { scheme: "", category: "", submitted: "today" })).toBe(true);
+    expect(matches(asset({ created_at: longAgo }), { scheme: "", category: "", submitted: "today" })).toBe(false);
+  });
+
+  it("combines every panel filter with AND semantics", () => {
+    const item = asset({ category_id: "cat-05", created_at: nowSec - 3600, transcription_scheme_id: "scheme-1" });
+
+    expect(matches(item, { scheme: "scheme-1", category: "cat-05", submitted: "today" })).toBe(true);
+    expect(matches(item, { scheme: "scheme-1", category: "cat-09", submitted: "today" })).toBe(false);
+    expect(matches(item)).toBe(true);
   });
 });
