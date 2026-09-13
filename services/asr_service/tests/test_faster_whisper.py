@@ -199,13 +199,57 @@ def test_model_load_failure_is_unavailable_not_malformed_output(monkeypatch):
         segment(0.0, float("inf")),
         segment(-0.1, 1.0),
         segment(1.0, 1.0),
-        segment(0.0, 2.001),
         segment(True, 1.0),
         segment(0.0, 1.0, "   "),
     ],
 )
 def test_invalid_segment_boundaries_fail_closed(bad_segment):
     result = transcribe(FasterWhisperEngine(_model=Model((bad_segment,))))
+    assert type(result) is ProviderFailure
+    assert result.error_code is ProviderErrorCode.invalid_provider_output
+
+
+def test_segment_past_the_window_is_clamped_instead_of_failing_the_chunk():
+    """2026-09-13：共享语料里的 57.72 秒自然长音频会让解码末段越过窗口边界
+    （实测 faster-whisper 资格验证因此以 permanent_provider_error 失败）。与 whisperx
+    引擎同一契约：裁剪越界末端并保留句子，而不是让整单永久失败。"""
+    engine = FasterWhisperEngine(_model=Model((segment(0.0, 2.001, "越界末端"),)))
+    result = transcribe(engine)
+
+    assert type(result) is EngineChunkCandidate
+    assert [item.text for item in result.segments] == ["越界末端"]
+    assert result.segments[0].end_value == "2000"
+    assert engine.last_clamped_segments == 1
+    assert engine.last_dropped_segments == 0
+
+
+def test_clamping_keeps_the_healthy_segments_and_drops_only_degenerate_ones():
+    engine = FasterWhisperEngine(
+        _model=Model(
+            (
+                segment(0.0, 0.5, "第一段"),
+                segment(1.0, 2.5, "越界段"),
+                segment(2.0, 2.0, "零长度"),
+                segment(1.5, 1.9, "   "),
+                segment(1.0, 1.5, "第二段"),
+            )
+        )
+    )
+    result = transcribe(engine)
+
+    assert type(result) is EngineChunkCandidate
+    assert [item.text for item in result.segments] == ["第一段", "越界段", "第二段"]
+    assert result.segments[1].end_value == "2000"
+    assert engine.last_clamped_segments == 1
+    assert engine.last_dropped_segments == 2
+
+
+def test_every_segment_dropped_still_fails_the_chunk_closed():
+    engine = FasterWhisperEngine(
+        _model=Model((segment(2.0, 2.0, "零长度"), segment(0.0, 1.0, "  ")))
+    )
+    result = transcribe(engine)
+
     assert type(result) is ProviderFailure
     assert result.error_code is ProviderErrorCode.invalid_provider_output
 

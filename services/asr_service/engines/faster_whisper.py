@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import importlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from io import BytesIO
 from pathlib import Path
@@ -46,6 +46,8 @@ class FasterWhisperEngine:
     model_cache_ready: Callable[[], bool] = lambda: False
     model_path: Path | None = None
     unavailable_reason_code: str = "model-cache-unavailable"
+    last_clamped_segments: int = field(default=0, init=False)
+    last_dropped_segments: int = field(default=0, init=False)
 
     def capabilities(self) -> ServiceEngineCapabilities:
         if self._model is not None:
@@ -112,6 +114,8 @@ class FasterWhisperEngine:
         chunk: PreparedAudioChunk,
         config: ServiceProfileConfig,
     ) -> EngineChunkCandidate | ProviderFailure:
+        self.last_clamped_segments = 0
+        self.last_dropped_segments = 0
         if (
             config.provider_key != self.provider_key
             or config.service_profile_id != self.service_profile_id
@@ -164,13 +168,25 @@ class FasterWhisperEngine:
                 start_ms = _milliseconds(getattr(raw, "start", None))
                 end_ms = _milliseconds(getattr(raw, "end", None))
                 text = getattr(raw, "text", None)
-                if (
-                    type(text) is not str
-                    or not text.strip()
-                    or end_ms <= start_ms
-                    or end_ms > duration_ms
-                ):
-                    raise ValueError("invalid engine segment")
+                if type(text) is not str or not text.strip():
+                    # There is nothing to transcribe in this segment; drop only it.
+                    self.last_dropped_segments += 1
+                    continue
+                if end_ms <= start_ms:
+                    self.last_dropped_segments += 1
+                    continue
+                if end_ms > duration_ms:
+                    # The decoder can report a segment that ends past the audio it was
+                    # given (whisperx alignment showed 119960-149940 ms inside a
+                    # 120000 ms window). Trimming keeps the sentence and the rest of the
+                    # recording; failing the chunk loses the whole job permanently
+                    # because invalid_provider_output is not retryable. Same contract as
+                    # the whisperx engine so both engines accept the shared corpus.
+                    end_ms = duration_ms
+                    self.last_clamped_segments += 1
+                    if end_ms <= start_ms:
+                        self.last_dropped_segments += 1
+                        continue
                 segments.append(
                     CandidateSegment(
                         position,
