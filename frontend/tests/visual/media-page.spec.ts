@@ -3,6 +3,68 @@ import { installAdminRoutes } from "./fixtures/admin-fixtures";
 import { expectInViewport, expectNoBodyOverflow } from "./helpers/layout";
 
 test.describe("转录任务", () => {
+  test("任务列表支持列排序与搜索过滤", async ({ page }, testInfo) => {
+    await installAdminRoutes(page);
+    await page.goto("/admin/content?view=transcription");
+    await expect(page.getByRole("heading", { name: "转录任务" })).toBeVisible();
+
+    const rows = page.getByTestId("media-record-row");
+    const rowTitles = () =>
+      rows.evaluateAll((nodes) => nodes.map((node) => node.querySelector("p")?.textContent?.trim() ?? ""));
+
+    // Default: newest submission first.
+    await expect.poll(rowTitles).toEqual(["机电协同培训录像", "机电协同培训录像（重复提交）", "项目交付培训"]);
+
+    const viewport = page.viewportSize()!;
+    const desktopHeaders = viewport.width >= 1024;
+    const newestFirst = ["机电协同培训录像", "机电协同培训录像（重复提交）", "项目交付培训"];
+    const oldestFirst = ["项目交付培训", "机电协同培训录像（重复提交）", "机电协同培训录像"];
+
+    if (desktopHeaders) {
+      // 媒体信息 header toggles ascending → descending.
+      await expect(page.getByTestId("media-record-header")).toBeVisible();
+      await page.getByTestId("media-sort-media").click();
+      await expect(page.getByTestId("media-sort-media")).toHaveAttribute("aria-label", /当前升序/);
+      await expect(page.getByTestId("media-list-sort-status")).toContainText("已按媒体信息升序排序");
+      await page.getByTestId("media-sort-media").click();
+      await expect(page.getByTestId("media-sort-media")).toHaveAttribute("aria-label", /当前降序/);
+      await expect.poll(rowTitles).toEqual(oldestFirst);
+
+      // 最近提交 sorts by submission time in both directions.
+      await page.getByTestId("media-sort-submitted").click();
+      await expect(page.getByTestId("media-sort-submitted")).toHaveAttribute("aria-label", /当前升序/);
+      await expect.poll(rowTitles).toEqual(oldestFirst);
+      await page.getByTestId("media-sort-submitted").click();
+      await expect.poll(rowTitles).toEqual(newestFirst);
+    } else {
+      // Narrow viewports hide the column header, so the toolbar control drives it.
+      await expect(page.getByTestId("media-record-header")).toBeHidden();
+      await page.getByLabel("排序字段").selectOption("media");
+      await expect.poll(rowTitles).toEqual(oldestFirst);
+      await page.getByTestId("media-sort-direction").click();
+      await expect.poll(rowTitles).toEqual(newestFirst);
+      await page.getByLabel("排序字段").selectOption("submitted");
+      await expect(page.getByTestId("media-list-sort-status")).toContainText("已按最近提交升序排序");
+    }
+
+    // The search box filters by status wording, file name and title.
+    // 「失败」matches both failed rows (「转录失败」/「失败」) but not the review row.
+    await page.getByLabel("搜索转录任务").fill("失败");
+    await expect(rows).toHaveCount(2);
+    await expect(page.getByText("项目交付培训", { exact: true })).toHaveCount(0);
+    await expect(page.getByText(/搜索「失败」/)).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath(`transcription-search-filter-${viewport.width}x${viewport.height}.png`) });
+
+    await page.getByLabel("搜索转录任务").fill("project-delivery");
+    await expect(rows).toHaveCount(1);
+    await expect(rows.locator("p").first()).toHaveText("项目交付培训");
+
+    await page.getByRole("button", { name: "清空搜索" }).click();
+    await expect(rows).toHaveCount(3);
+
+    await expectNoBodyOverflow(page);
+  });
+
   test("旧入口保留深链参数并进入资料管理子页", async ({ page }) => {
     await installAdminRoutes(page);
     await page.goto("/admin/media?media_id=media-ready&workbench=1");
