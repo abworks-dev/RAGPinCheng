@@ -113,6 +113,7 @@ class WhisperXEngine:
     last_failure_type: str | None = field(default=None, init=False)
     last_clamped_segments: int = field(default=0, init=False)
     last_dropped_segments: int = field(default=0, init=False)
+    last_silent_windows: int = field(default=0, init=False)
 
     def capabilities(self) -> ServiceEngineCapabilities:
         if self._model is not None and self._align_model is not None:
@@ -174,6 +175,7 @@ class WhisperXEngine:
         self.last_failure_type = None
         self.last_clamped_segments = 0
         self.last_dropped_segments = 0
+        self.last_silent_windows = 0
         if config.provider_key != self.provider_key or config.service_profile_id != self.service_profile_id:
             return ProviderFailure(self.provider_key, ProviderErrorCode.service_contract_mismatch, ProviderFailureClassification.permanent)
         if not self.capabilities().available:
@@ -219,14 +221,20 @@ class WhisperXEngine:
                 {"id": i, "start": seg.start, "end": seg.end, "text": seg.text}
                 for i, seg in enumerate(seg_iter)
             ]
+            duration_ms = chunk.end_ms - chunk.start_ms
             if not transcribe_segments:
-                raise ValueError("invalid transcription output")
+                # VAD removed the whole window: intro music, screen-only stretches and
+                # silent tails carry no speech. That is not malformed engine output, so
+                # report an empty window instead of failing. Production lost 37-minute
+                # and 2-hour recordings to a single silent 120 s window, because
+                # invalid_provider_output is permanent and therefore never retried.
+                self.last_silent_windows += 1
+                return EngineChunkCandidate(self.provider_key, "zh-CN", duration_ms, ())
             stage = "align"
             aligned = whisperx.align(transcribe_segments, align_model, align_metadata, audio, "cuda", return_char_alignments=False)
             stage = "validate-alignment"
             if type(aligned) is not dict or type(aligned.get("segments")) is not list:
                 raise ValueError("invalid alignment output")
-            duration_ms = chunk.end_ms - chunk.start_ms
             segments: list[CandidateSegment] = []
             stage = "map-segments"
             for position, item in enumerate(aligned["segments"]):
