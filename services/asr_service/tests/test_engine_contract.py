@@ -111,3 +111,13 @@ def test_exact_qwen_identity_includes_forced_aligner():
             "Qwen/Qwen3-ForcedAligner-0.6B",
             "0" * 40,
         )
+
+
+def test_chunk_candidate_accepts_a_silent_window_and_rejects_malformed_segments():
+    silent = EngineChunkCandidate("funasr-sensevoice", "zh-CN", 1000, ())
+    assert silent.segments == ()
+
+    with pytest.raises(ContractValidationError, match="invalid_candidate_segments"):
+        EngineChunkCandidate("funasr-sensevoice", "zh-CN", 1000, [])
+    with pytest.raises(ContractValidationError, match="invalid_candidate_segment"):
+        EngineChunkCandidate("funasr-sensevoice", "zh-CN", 1000, (object(),))

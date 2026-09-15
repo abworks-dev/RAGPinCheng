@@ -381,6 +381,12 @@ class Scheduler:
                     self.repo.save_checkpoint(checkpoint)
                     start_index += 1
 
+            if not segments:
+                # Every window of this upload was silent. There is no transcript to
+                # build and ProviderCandidate requires at least one segment, so fail
+                # explicitly instead of letting a contract error escape run_next.
+                return self._fail(running, ServiceFailureCode.engine_failure_permanent)
+
             with self._state_lock:
                 current = self.repo.get(job_id)
                 if current.state is ServiceJobState.cancelled:

@@ -284,7 +284,10 @@ def test_oom_invalid_output_and_profile_mismatch(monkeypatch):
     assert engine.last_failure_type is None
 
 
-def test_invalid_output_exposes_only_allowlisted_stage_and_exception_type(monkeypatch):
+def test_silent_window_reports_an_empty_candidate_instead_of_failing_the_job(monkeypatch):
+    # Production evidence: VAD removed the whole 120 s window ("VAD filter removed
+    # 02:00.000 of audio") and the permanent invalid_provider_output lost the entire
+    # 37-minute / 2-hour recording. An empty window is not malformed output.
     install_fake(monkeypatch)
 
     class Empty:
@@ -301,9 +304,67 @@ def test_invalid_output_exposes_only_allowlisted_stage_and_exception_type(monkey
         WHISPERX_SERVICE_CONFIG,
     )
 
+    assert type(result) is EngineChunkCandidate
+    assert result.provider_key == "whisperx"
+    assert result.language == "zh-CN"
+    assert result.duration_ms == 2000
+    assert result.segments == ()
+    assert engine.last_silent_windows == 1
+    assert engine.last_failure_stage is None
+    assert engine.last_failure_type is None
+
+
+def test_malformed_decoder_output_still_fails_closed(monkeypatch):
+    install_fake(monkeypatch)
+
+    class NotIterable:
+        def transcribe(self, *_args, **_kwargs):
+            return None, SimpleNamespace(language="zh")
+
+    engine = WhisperXEngine(
+        _model=NotIterable(),
+        _align_model=object(),
+        _align_metadata=object(),
+    )
+    result = engine.transcribe_chunk(
+        PreparedAudioChunk(0, 0, 2000, b"wav"),
+        WHISPERX_SERVICE_CONFIG,
+    )
+
     assert type(result) is ProviderFailure
     assert result.error_code is ProviderErrorCode.invalid_provider_output
     assert engine.last_failure_stage == "transcribe"
+    assert engine.last_failure_type == "TypeError"
+    assert engine.last_silent_windows == 0
+
+
+def test_misaligned_alignment_payload_still_fails_closed(monkeypatch):
+    install_fake(monkeypatch)
+    monkeypatch.setattr(
+        whisperx_engine,
+        "importlib",
+        SimpleNamespace(
+            import_module=lambda _name: SimpleNamespace(
+                align=lambda *_args, **_kwargs: {"segments": None}
+            )
+        ),
+    )
+    model = SimpleNamespace(
+        transcribe=lambda *_args, **_kwargs: (
+            iter([SimpleNamespace(start=0.0, end=1.0, text="测试")]),
+            SimpleNamespace(language="zh"),
+        )
+    )
+    engine = WhisperXEngine(_model=model, _align_model=object(), _align_metadata=object())
+
+    result = engine.transcribe_chunk(
+        PreparedAudioChunk(0, 0, 2000, b"wav"),
+        WHISPERX_SERVICE_CONFIG,
+    )
+
+    assert type(result) is ProviderFailure
+    assert result.error_code is ProviderErrorCode.invalid_provider_output
+    assert engine.last_failure_stage == "validate-alignment"
     assert engine.last_failure_type == "ValueError"
 
 

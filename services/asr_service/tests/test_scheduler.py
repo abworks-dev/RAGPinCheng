@@ -6,7 +6,10 @@ from threading import Event, Thread
 
 import pytest
 
-from services.asr_service.engine_protocol import SENSEVOICE_SERVICE_CONFIG
+from services.asr_service.engine_protocol import (
+    SENSEVOICE_SERVICE_CONFIG,
+    EngineChunkCandidate,
+)
 from services.asr_service.engine_registry import EngineRegistration, EngineRegistry
 from services.asr_service.engines.fake import FakeEngine
 from services.asr_service.scheduler import (
@@ -15,9 +18,17 @@ from services.asr_service.scheduler import (
     Scheduler,
 )
 from services.asr_service.storage import LocalJobRepository
-from src.transcription.asr_service_contract import ASR_API_VERSION, CreateJobRequest, ServiceJobState, ServicePauseReason
+from src.transcription.asr_service_contract import (
+    ASR_API_VERSION,
+    CreateJobRequest,
+    ServiceFailureCode,
+    ServiceJobState,
+    ServicePauseReason,
+)
+from src.transcription.candidate import CandidateSegment
+from src.transcription.provider_protocol import ProviderCandidate
 from src.transcription.runtime_ports import InputPart
-from src.transcription.types import ContractValidationError, TranscriptionInputRef
+from src.transcription.types import ContractValidationError, TimeUnit, TranscriptionInputRef
 
 
 def identity_window_extractor(content, **kwargs):
@@ -277,5 +288,88 @@ def test_cancel_during_engine_execution_never_writes_result_or_success(tmp_path)
     )
     completed = service.run_next()
     assert completed.state is ServiceJobState.cancelled
+    with pytest.raises(ContractValidationError, match="storage_not_found"):
+        repo.result(job.job_id)
+
+
+class SilentWindowEngine:
+    """Returns an empty candidate for windows listed in ``silent_indexes``."""
+
+    provider_key = "funasr-sensevoice"
+    service_profile_id = "funasr-sensevoice-small-v1"
+
+    def __init__(self, silent_indexes=()):
+        self.silent_indexes = set(silent_indexes)
+        self.seen: list[int] = []
+
+    def capabilities(self):
+        return FakeEngine().capabilities()
+
+    def transcribe_chunk(self, chunk, config):
+        self.seen.append(chunk.chunk_index)
+        duration_ms = chunk.end_ms - chunk.start_ms
+        if chunk.chunk_index in self.silent_indexes:
+            return EngineChunkCandidate(self.provider_key, "zh-CN", duration_ms, ())
+        return EngineChunkCandidate(
+            self.provider_key,
+            "zh-CN",
+            duration_ms,
+            (
+                CandidateSegment(
+                    0,
+                    "0",
+                    str(duration_ms),
+                    TimeUnit.milliseconds,
+                    f"window-{chunk.chunk_index}",
+                ),
+            ),
+        )
+
+
+def _silent_window_scheduler(repo, engine):
+    return Scheduler(
+        repo,
+        EngineRegistry((EngineRegistration(engine, SENSEVOICE_SERVICE_CONFIG),)),
+        FixedBgePriorityProbe(BgePriorityDecision.allow),
+        enabled=True,
+        chunk_duration_ms=400,
+        audio_window_extractor=identity_window_extractor,
+        audio_decoder=identity_audio_decoder,
+    )
+
+
+def test_silent_window_is_skipped_and_the_rest_of_the_job_still_succeeds(tmp_path):
+    repo = LocalJobRepository(tmp_path, 1024)
+    job = queued_job(repo, data=b"windowed")
+    engine = SilentWindowEngine(silent_indexes={1})
+    service = _silent_window_scheduler(repo, engine)
+    service.enqueue(job.job_id)
+
+    completed = service.run_next()
+
+    assert engine.seen == [0, 1, 2]
+    assert completed.state is ServiceJobState.succeeded
+    result = repo.result(job.job_id).result
+    assert type(result) is ProviderCandidate
+    assert [segment.text for segment in result.segments] == ["window-0", "window-2"]
+    assert [segment.start_value for segment in result.segments] == ["0", "800"]
+    checkpoint = repo.checkpoint(job.job_id)
+    assert checkpoint.next_chunk_index == 3
+    assert checkpoint.processed_ms == 1000
+    assert len(checkpoint.partial_segments) == 2
+
+
+def test_all_silent_windows_fail_the_job_without_writing_an_invalid_candidate(tmp_path):
+    repo = LocalJobRepository(tmp_path, 1024)
+    job = queued_job(repo, data=b"silent")
+    engine = SilentWindowEngine(silent_indexes={0, 1, 2})
+    service = _silent_window_scheduler(repo, engine)
+    service.enqueue(job.job_id)
+
+    completed = service.run_next()
+
+    assert engine.seen == [0, 1, 2]
+    assert completed.state is ServiceJobState.failed
+    assert completed.failure_code is ServiceFailureCode.engine_failure_permanent
     with pytest.raises(ContractValidationError, match="storage_not_found"):
         repo.result(job.job_id)

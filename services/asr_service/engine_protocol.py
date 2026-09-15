@@ -58,7 +58,11 @@ class EngineChunkCandidate:
         validate_provider_key(self.provider_key)
         validate_language(self.language)
         require_int(self.duration_ms, "duration_ms", positive=True)
-        if type(self.segments) is not tuple or not self.segments:
+        # An empty tuple is a valid window result: it means the window carried no
+        # speech (WhisperX VAD removed the whole window). The scheduler skips such a
+        # window and keeps the rest of the recording; it owns the decision about an
+        # upload whose every window is empty.
+        if type(self.segments) is not tuple:
             raise ContractValidationError("invalid_candidate_segments", "segments")
         if any(type(item) is not CandidateSegment for item in self.segments):
             raise ContractValidationError("invalid_candidate_segment", "segments")
