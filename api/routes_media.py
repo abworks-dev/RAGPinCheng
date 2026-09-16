@@ -12,7 +12,8 @@ from fastapi.responses import Response, StreamingResponse
 
 from .auth import require_user
 from .db import connect as db_connect
-from src.config import MEDIA_DIR
+from .media_storage import MediaStorageError, resolve_media_path
+from src.config import EXTERNAL_MEDIA_ROOTS, MEDIA_DIR
 from .schemas import MediaAssetDTO
 
 router = APIRouter(prefix="/media", tags=["media"])
@@ -168,7 +169,12 @@ def get_media(
     except ValueError:
         raise HTTPException(status_code=404, detail="Media not found")
 
-    # Look up in database
+    # Look up in database and resolve the physical file through the storage
+    # adapter while the connection is still open, so both managed uploads
+    # (under MEDIA_DIR) and read-only external media (shared roots via
+    # EXTERNAL_MEDIA_ROOTS / UNC mappings) stream through the same
+    # authenticated Range path. The adapter re-checks size/timestamp identity
+    # for external files and rejects symlinks/reparse points.
     conn = db_connect()
     try:
         row = conn.execute(
@@ -182,28 +188,29 @@ def get_media(
                FROM media_assets m WHERE m.media_id=?""",
             (media_id,),
         ).fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Media not found")
+
+        if row["status"] == "archived" or (
+            row["status"] != "ready" and not row["has_published_transcript"]
+        ):
+            raise HTTPException(status_code=404, detail="Media not ready")
+
+        try:
+            resolved = resolve_media_path(
+                conn,
+                media_id,
+                media_root=MEDIA_DIR,
+                external_roots=EXTERNAL_MEDIA_ROOTS,
+            )
+        except MediaStorageError:
+            raise HTTPException(status_code=404, detail="Media file missing")
     finally:
         conn.close()
 
-    if not row:
-        raise HTTPException(status_code=404, detail="Media not found")
-
-    if row["status"] == "archived" or (
-        row["status"] != "ready" and not row["has_published_transcript"]
-    ):
-        raise HTTPException(status_code=404, detail="Media not ready")
-
-    # Safe path resolution with traversal protection
-    try:
-        file_path = safe_join(MEDIA_DIR, row["storage_rel_path"])
-    except ValueError:
-        raise HTTPException(status_code=404, detail="Media not found")
-
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=404, detail="Media file missing")
-
     return stream_media_file(
-        file_path,
+        resolved.path,
         row["mime_type"],
         request.headers.get("range"),
     )
