@@ -369,6 +369,28 @@ export type SystemPromptItem = {
   updated_at: number | null;
 };
 
+export type TranscriptAiHistoryItem = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+export type TranscriptSummaryResult = {
+  points: string[];
+  mismatch_note: string | null;
+};
+
+export type TranscriptReviewSuggestion = {
+  timestamp: string;
+  original: string;
+  corrected: string;
+  reason: string;
+  confidence: "high" | "medium" | "low";
+};
+
+export type TranscriptReviewSuggestionsResult = {
+  suggestions: TranscriptReviewSuggestion[];
+};
+
 export type ManagedCategory = {
   id: string;
   category_key: string;

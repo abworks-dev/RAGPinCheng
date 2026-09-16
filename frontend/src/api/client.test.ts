@@ -768,3 +768,59 @@ describe("Phase 5 transcript publication API contracts", () => {
     );
   });
 });
+
+describe("Transcript AI assistant contracts", () => {
+  it("sends summary with base hash and history and parses points", async () => {
+    setCsrfToken("csrf-ai");
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ points: ["要点一", "要点二"], mismatch_note: null }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await api.transcriptSummary("version-1", "a".repeat(64), [{ role: "user", content: "指正" }]);
+
+    expect(result).toMatchObject({ points: ["要点一", "要点二"] });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/transcription/versions/version-1/summary",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-ai" },
+        body: JSON.stringify({ base_markdown_sha256: "a".repeat(64), history: [{ role: "user", content: "指正" }] }),
+      }),
+    );
+  });
+
+  it("sends review suggestions with base hash and parses suggestions", async () => {
+    setCsrfToken("csrf-ai");
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({
+      suggestions: [{ timestamp: "00:01:00", original: "广进", corrected: "管径", reason: "同音字", confidence: "high" }],
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await api.transcriptReviewSuggestions("version-1", "b".repeat(64));
+
+    expect(result.suggestions[0]).toMatchObject({ original: "广进", corrected: "管径" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/transcription/versions/version-1/review-suggestions",
+      expect.objectContaining({
+        body: JSON.stringify({ base_markdown_sha256: "b".repeat(64), history: [] }),
+      }),
+    );
+  });
+
+  it("sends bulk AI optimize with media ids", async () => {
+    setCsrfToken("csrf-ai");
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ items: [{ media_id: "media-1", status: "succeeded" }], succeeded: 1, failed: 0 }, 202));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await api.bulkTranscriptAiOptimize(["media-1"]);
+
+    expect(result.succeeded).toBe(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/transcription/media/bulk-review-optimize",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ items: [{ media_id: "media-1" }] }),
+      }),
+    );
+  });
+});

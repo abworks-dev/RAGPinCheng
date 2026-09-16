@@ -12,6 +12,7 @@ import { IconButton } from "./ui/icon-button";
 import { Input } from "./ui/input";
 import { TranscriptMarkdownEditor } from "./TranscriptMarkdownEditor";
 import { SynchronizedVideoTranscript } from "./SynchronizedVideoTranscript";
+import { TranscriptAiAssistPanel } from "./TranscriptAiAssistPanel";
 
 function statusLabel(status: string) {
   return ({
@@ -689,6 +690,24 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
               disabled={busy}
               onSave={() => void saveRevision()}
               dirty={editorDirty}
+            />
+            <TranscriptAiAssistPanel
+              mediaTitle={mediaId}
+              versionId={selectedVersion.version_id}
+              markdown={editor.markdown}
+              baseMarkdownSha256={editor.baseMarkdownSha256}
+              onAccept={async (appliedMarkdown: string) => {
+                await adminMediaApi.createRevision(
+                  editor.baseVersionId,
+                  appliedMarkdown,
+                  editor.baseMarkdownSha256,
+                  newIdempotencyKey(),
+                );
+                await loadVersions();
+                setSaveSuccess("AI 优化后的新草稿已保存，发布状态已重置为待发布。");
+                await onChanged?.();
+              }}
+              onStale={() => setSaveSuccess(null)}
             />
           </section>
         );
