@@ -325,7 +325,7 @@ const mediaAssets = [
   {
     media_id: "media-failed-1", title: "机电协同培训录像", original_filename: "mep-training-recording.mp4",
     mime_type: "video/mp4", file_size: 3_456_789, transcript_origin: "generated", status: "failed",
-    review_status: "not_required", publication_status: "not_published", publication_index_status: "pending",
+    review_status: "not_required", publication_status: "pending", publication_index_status: "pending",
     current_phase: "failed", transcription_job_id: "media-failed-job", transcription_job_status: "failed", transcription_stage: null,
     available_actions: ["retry_transcription"],
     disabled_actions: { cancel_transcription: "当前没有运行中的转录任务", delete_failed: "仅从未创建转录任务的失败视频可删除" },
@@ -334,7 +334,7 @@ const mediaAssets = [
   {
     media_id: "media-failed-2", title: "机电协同培训录像（重复提交）", original_filename: "mep-training-recording.mp4",
     mime_type: "video/mp4", file_size: 3_456_789, transcript_origin: "generated", status: "failed",
-    review_status: "not_required", publication_status: "not_published", publication_index_status: "pending",
+    review_status: "not_required", publication_status: "pending", publication_index_status: "pending",
     current_phase: "failed", transcription_job_id: null, transcription_job_status: null, transcription_stage: null,
     available_actions: ["delete_failed"],
     disabled_actions: { retry_transcription: "仅可重试失败或已取消且允许恢复的转录任务" },
@@ -343,9 +343,9 @@ const mediaAssets = [
   {
     media_id: "media-ready", title: "项目交付培训", original_filename: "project-delivery-training.mp4",
     mime_type: "video/mp4", file_size: 8_765_432, transcript_origin: "generated", status: "transcript_ready",
-    review_status: "awaiting_review", publication_status: "not_published", publication_index_status: "pending",
+    review_status: "awaiting_review", publication_status: "pending", publication_index_status: "pending",
     current_phase: "review", transcription_job_id: null, transcription_job_status: null, transcription_stage: null,
-    available_actions: ["review_transcript"], disabled_actions: {},
+    available_actions: ["publish_transcript", "reject_transcript"], disabled_actions: {},
     transcription_job_id: "media-ready-job", transcription_job_status: "succeeded",
     created_at: 1700000200, updated_at: 1700000200, error: null,
   },
@@ -475,7 +475,7 @@ const baseTranscriptVersion = {
   profile_id: "synthetic-profile", provider_key: "synthetic-asr", model_id: "synthetic-model", model_revision: "r1",
   markdown_storage_kind: "managed_artifact",
   review_status: "awaiting_review", reviewed_by: null, reviewed_at: null, review_note: null,
-  publication_status: "not_published", published_at: null, supersedes_version_id: null,
+  publication_status: "pending", published_at: null, supersedes_version_id: null,
   derived_from_version_id: null, edited_by: null,
   markdown_sha256: "a".repeat(64), created_at: 1700000200, updated_at: 1700000200, is_current: false,
 };
