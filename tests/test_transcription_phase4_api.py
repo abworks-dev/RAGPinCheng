@@ -1570,7 +1570,14 @@ class _FakeConnection:
         self.versions_by_media = versions_by_media
         self.closed = False
 
-    def execute(self, _sql, params=()):
+    def execute(self, sql, params=()):
+        # Specified-version publish query: (version_id, media_id)
+        if "AND media_id=?" in sql:
+            version_id, media_id = params[0], params[1]
+            version = self.versions_by_media.get(media_id)
+            if version is None or version != version_id:
+                return _FakeCursor(None)
+            return _FakeCursor(_FakeRow({"id": version}))
         media_id = params[0] if params else None
         version = self.versions_by_media.get(media_id)
         if version is None:
@@ -1627,7 +1634,7 @@ def test_bulk_review_and_publish_return_itemized_partial_results(monkeypatch):
     assert review_result.items[1].message == "该视频没有待发布或已拒绝的转录版本。"
 
     publish_result = routes_transcription.bulk_publish_transcripts(
-        publish_request(media_ids=[MEDIA_ID, other]),
+        publish_request(items=[schemas.BulkPublishTranscriptionItem(media_id=MEDIA_ID, version_id="version-1"), schemas.BulkPublishTranscriptionItem(media_id=other)]),
         ADMIN,
     )
     assert (publish_result.succeeded, publish_result.failed) == (1, 1)
@@ -1662,7 +1669,7 @@ def test_bulk_review_and_publish_contain_unexpected_item_failures(monkeypatch):
     assert "sensitive" not in review_result.items[0].message
 
     publish_result = routes_transcription.bulk_publish_transcripts(
-        schemas.BulkPublishTranscriptionRequest(media_ids=[MEDIA_ID]),
+        schemas.BulkPublishTranscriptionRequest(items=[schemas.BulkPublishTranscriptionItem(media_id=MEDIA_ID)]),
         ADMIN,
     )
     assert (publish_result.succeeded, publish_result.failed) == (0, 1)

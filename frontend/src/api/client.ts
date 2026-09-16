@@ -1183,10 +1183,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ items, review_note: reviewNote, approved }),
     }),
-  bulkPublishTranscriptions: (mediaIds: string[]) =>
+  bulkPublishTranscriptions: (items: Array<{ media_id: string; version_id?: string | null }>) =>
     jsonFetch<BulkTranscriptionActionResult>("/api/admin/transcription/media/bulk-publish", {
       method: "POST",
-      body: JSON.stringify({ media_ids: mediaIds }),
+      body: JSON.stringify({ items }),
     }),
   listTranscriptVersions: (mediaId: string) =>
     jsonFetch<TranscriptVersion[]>(`/api/admin/transcription/media/${mediaId}/versions`),

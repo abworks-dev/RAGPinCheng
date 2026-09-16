@@ -287,9 +287,6 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const [reviewVersionOptions, setReviewVersionOptions] = useState<Record<string, TranscriptVersion[]>>({});
   const [reviewVersionsLoading, setReviewVersionsLoading] = useState(false);
   const [reviewBusy, setReviewBusy] = useState(false);
-  const [publishDialogMediaIds, setPublishDialogMediaIds] = useState<string[]>([]);
-  const [publishSelectedIds, setPublishSelectedIds] = useState<string[]>([]);
-  const [publishBusy, setPublishBusy] = useState(false);
   const [startDialogMediaIds, setStartDialogMediaIds] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
     const params = new URLSearchParams(window.location.search);
@@ -505,9 +502,6 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const reviewDialogAssets = reviewDialogMediaIds
     .map((id) => mediaAssets.find((asset) => asset.media_id === id))
     .filter((asset): asset is MediaAsset => Boolean(asset));
-  const publishDialogAssets = publishDialogMediaIds
-    .map((id) => mediaAssets.find((asset) => asset.media_id === id))
-    .filter((asset): asset is MediaAsset => Boolean(asset));
   const selectedJobs = selectedMediaIds.map((id) => jobsByMediaId.get(id)).filter((job): job is TranscriptionJob => Boolean(job));
   const retryableSelectedAssets = selectedAssets.filter((asset) =>
     asset.available_actions.includes("retry_transcription")
@@ -516,7 +510,6 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const reviewableSelectedAssets = selectedAssets.filter((asset) =>
     asset.available_actions.includes("publish_transcript") || asset.available_actions.includes("reject_transcript"),
   );
-  const publishableSelectedAssets = selectedAssets.filter((asset) => asset.available_actions.includes("publish_transcript"));
   const cleanableSelectedAssets = selectedAssets.filter((asset) =>
     asset.available_actions.includes("delete_failed")
     || asset.available_actions.includes("finalize_failed_cleanup"),
@@ -697,14 +690,22 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const runBatchDecision = async (approved: boolean) => {
     if (!reviewDialogMediaIds.length || reviewBusy) return;
     setReviewBusy(true);
-    const actionLabel = approved ? "允许发布" : "拒绝发布";
     try {
-      const result = await adminMediaApi.bulkReviewTranscripts(
-        reviewDialogMediaIds.map((mediaId) => ({ media_id: mediaId, version_id: reviewVersionChoices[mediaId] || null })),
-        reviewNote.trim() || null,
-        approved,
-      );
-      showBatchToast(`批量${actionLabel}`, result.succeeded, result.items.filter((item) => item.status === "failed").map((item) => item.message || `${actionLabel}失败`));
+      const items = reviewDialogMediaIds.map((mediaId) => ({ media_id: mediaId, version_id: reviewVersionChoices[mediaId] || null }));
+      const note = reviewNote.trim() || null;
+      if (!approved) {
+        const result = await adminMediaApi.bulkReviewTranscripts(items, note, false);
+        showBatchToast("批量拒绝发布", result.succeeded, result.items.filter((item) => item.status === "failed").map((item) => item.message || "拒绝发布失败"));
+      } else {
+        const decision = await adminMediaApi.bulkReviewTranscripts(items, note, true);
+        const allowedItems = items.filter((item) => decision.items.find((entry) => entry.media_id === item.media_id)?.status === "succeeded");
+        const published = allowedItems.length
+          ? await adminMediaApi.bulkPublishTranscripts(allowedItems)
+          : { succeeded: 0, failed: 0, items: [] as Array<{ media_id: string; status: string; message?: string | null }> };
+        const decisionFailures = decision.items.filter((item) => item.status === "failed").map((item) => item.message || "允许发布失败");
+        const publishFailures = published.items.filter((item) => item.status === "failed").map((item) => item.message || "发布失败");
+        showBatchToast("批量允许发布", published.succeeded, [...decisionFailures, ...publishFailures]);
+      }
     } catch (cause) {
       setUploadError(cause instanceof Error ? cause.message : String(cause));
       return;
@@ -714,33 +715,6 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
     setReviewDialogMediaIds([]);
     setReviewVersionChoices({});
     setReviewNote("");
-    await refreshMediaState();
-  };
-  const openPublishDialog = (assets: MediaAsset[]) => {
-    const ids = assets.map((asset) => asset.media_id);
-    setPublishDialogMediaIds(ids);
-    setPublishSelectedIds(ids);
-    setBatchMenuOpen(false);
-  };
-  const closePublishDialog = () => {
-    if (publishBusy) return;
-    setPublishDialogMediaIds([]);
-    setPublishSelectedIds([]);
-  };
-  const runBatchPublish = async () => {
-    if (!publishSelectedIds.length || publishBusy) return;
-    setPublishBusy(true);
-    try {
-      const result = await adminMediaApi.bulkPublishTranscripts(publishSelectedIds);
-      showBatchToast("批量发布", result.succeeded, result.items.filter((item) => item.status === "failed").map((item) => item.message || "发布失败"));
-    } catch (cause) {
-      setUploadError(cause instanceof Error ? cause.message : String(cause));
-      return;
-    } finally {
-      setPublishBusy(false);
-    }
-    setPublishDialogMediaIds([]);
-    setPublishSelectedIds([]);
     await refreshMediaState();
   };
   useEffect(() => { setMediaPage(0); setSelectedMediaIds([]); }, [mediaFilter, mediaPageSize, mediaQuery, mediaPanelFilters, mediaSort.key, mediaSort.direction]);
@@ -1425,7 +1399,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
 <a className={buttonVariants({ variant: "outline" })} href="/admin/asr"><Settings2 className="size-4" />转录配置</a>
               <Button variant="outline" aria-label="刷新媒体资源" title="刷新媒体资源" disabled={loading} onClick={() => void refreshMediaState()}><RefreshCw className="size-4" aria-hidden="true" />刷新列表</Button>
-              <div className="relative"><Button variant="outline" disabled={!selectedMediaIds.length || batchActionBusy} aria-haspopup="menu" aria-expanded={batchMenuOpen} onClick={() => setBatchMenuOpen((open) => !open)}>批量操作<ChevronDown className="size-4" /></Button>{batchMenuOpen && <div role="menu" aria-label="批量操作" className="absolute right-0 top-full z-dropdown mt-1 w-48 rounded-ui-md border border-border bg-popover p-1 shadow-overlay"><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={startableSelectedAssets.length ? undefined : "所选视频均不可开始转录"} disabled={!startableSelectedAssets.length || batchActionBusy} onClick={() => openStartDialog(startableSelectedAssets)}><Rocket className="size-4" />开始转录（{startableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={retranscribableSelectedAssets.length ? undefined : "所选视频均不可重新转录"} disabled={!retranscribableSelectedAssets.length || batchActionBusy} onClick={() => openReTranscribeDialog(retranscribableSelectedAssets)}><RefreshCcw className="size-4" />重新转录所选（{retranscribableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={reviewableSelectedAssets.length ? undefined : "所选视频均不可决策"} disabled={!reviewableSelectedAssets.length || batchActionBusy} onClick={() => openReviewDialog(reviewableSelectedAssets)}><ClipboardCheck className="size-4" />发布决策所选（{reviewableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={publishableSelectedAssets.length ? undefined : "所选视频均不可发布"} disabled={!publishableSelectedAssets.length || batchActionBusy} onClick={() => openPublishDialog(publishableSelectedAssets)}><Send className="size-4" />发布所选（{publishableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={retryableSelectedAssets.length ? undefined : "所选视频均不可重试"} disabled={!retryableSelectedAssets.length || batchActionBusy} onClick={() => void runBatchRetry()}><RotateCcw className="size-4" />重试所选（{retryableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={cancellableSelectedJobs.length ? undefined : "没有正在运行的转录任务可取消"} disabled={!cancellableSelectedJobs.length || batchActionBusy} onClick={() => void runBatchCancel()}><Ban className="size-4" />取消所选（{cancellableSelectedJobs.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm text-destructive hover:bg-destructive/10 disabled:opacity-40" title={cleanableSelectedAssets.length ? undefined : "所选视频均不可清理"} disabled={!cleanableSelectedAssets.length || batchActionBusy} onClick={() => { setBatchCleanupTargetIds(cleanableSelectedAssets.map((asset) => asset.media_id)); setBatchMenuOpen(false); }}><Trash2 className="size-4" />清理所选（{cleanableSelectedAssets.length}）</button></div>}</div>
+              <div className="relative"><Button variant="outline" disabled={!selectedMediaIds.length || batchActionBusy} aria-haspopup="menu" aria-expanded={batchMenuOpen} onClick={() => setBatchMenuOpen((open) => !open)}>批量操作<ChevronDown className="size-4" /></Button>{batchMenuOpen && <div role="menu" aria-label="批量操作" className="absolute right-0 top-full z-dropdown mt-1 w-48 rounded-ui-md border border-border bg-popover p-1 shadow-overlay"><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={startableSelectedAssets.length ? undefined : "所选视频均不可开始转录"} disabled={!startableSelectedAssets.length || batchActionBusy} onClick={() => openStartDialog(startableSelectedAssets)}><Rocket className="size-4" />开始转录（{startableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={retranscribableSelectedAssets.length ? undefined : "所选视频均不可重新转录"} disabled={!retranscribableSelectedAssets.length || batchActionBusy} onClick={() => openReTranscribeDialog(retranscribableSelectedAssets)}><RefreshCcw className="size-4" />重新转录所选（{retranscribableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={reviewableSelectedAssets.length ? undefined : "所选视频均不可发布或拒绝"} disabled={!reviewableSelectedAssets.length || batchActionBusy} onClick={() => openReviewDialog(reviewableSelectedAssets)}><Send className="size-4" />发布所选（{reviewableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={retryableSelectedAssets.length ? undefined : "所选视频均不可重试"} disabled={!retryableSelectedAssets.length || batchActionBusy} onClick={() => void runBatchRetry()}><RotateCcw className="size-4" />重试所选（{retryableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={cancellableSelectedJobs.length ? undefined : "没有正在运行的转录任务可取消"} disabled={!cancellableSelectedJobs.length || batchActionBusy} onClick={() => void runBatchCancel()}><Ban className="size-4" />取消所选（{cancellableSelectedJobs.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm text-destructive hover:bg-destructive/10 disabled:opacity-40" title={cleanableSelectedAssets.length ? undefined : "所选视频均不可清理"} disabled={!cleanableSelectedAssets.length || batchActionBusy} onClick={() => { setBatchCleanupTargetIds(cleanableSelectedAssets.map((asset) => asset.media_id)); setBatchMenuOpen(false); }}><Trash2 className="size-4" />清理所选（{cleanableSelectedAssets.length}）</button></div>}</div>
               {!embedded && <Button onClick={() => setUploadDialogOpen(true)}><Upload className="size-4" />{hasUploadDraft ? `继续上传${pending.length ? `（${pending.length}）` : ""}` : "上传视频"}</Button>}
             </div>
           </div>
@@ -1595,8 +1569,8 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
       <Dialog open={reviewDialogMediaIds.length > 0} onOpenChange={(open) => { if (!open) closeReviewDialog(); }}>
         <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>发布决策</DialogTitle>
-            <DialogDescription>为每个视频选择要决策的转录版本（默认最新一版）。允许发布后转录稿进入候选索引并成为正式版本；拒绝发布可填写原因。</DialogDescription>
+            <DialogTitle>发布所选</DialogTitle>
+            <DialogDescription>为每个视频选择要处理的转录版本（默认最新一版）。允许发布后转录稿进入候选索引并成为正式版本，可填写原因；拒绝发布将标记为已拒绝，不再进入发布。</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <label className="block text-ui-sm font-medium">原因（可选）
@@ -1629,27 +1603,6 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
             <Button variant="destructive" disabled={reviewBusy || reviewDialogAssets.some((asset) => !reviewVersionChoices[asset.media_id])} onClick={() => void runBatchDecision(false)}>{reviewBusy ? "处理中…" : `拒绝发布（${reviewDialogMediaIds.length}）`}</Button>
             <Button variant="default" disabled={reviewBusy || reviewDialogAssets.some((asset) => !reviewVersionChoices[asset.media_id])} onClick={() => void runBatchDecision(true)}>{reviewBusy ? "处理中…" : `允许发布（${reviewDialogMediaIds.length}）`}</Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={publishDialogMediaIds.length > 0} onOpenChange={(open) => { if (!open) closePublishDialog(); }}>
-        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>确认批量发布</DialogTitle>
-            <DialogDescription>发布后转录稿进入候选索引，成功后自动成为正式版本并对外可见。取消勾选可跳过对应视频。</DialogDescription>
-          </DialogHeader>
-          <ul className="divide-y divide-border rounded-ui-md border border-border" aria-label="将要发布的视频">
-            {publishDialogAssets.map((asset) => (
-              <li key={asset.media_id} className="flex items-start gap-3 p-3">
-                <Checkbox aria-label={`发布“${asset.title}”`} checked={publishSelectedIds.includes(asset.media_id)} disabled={publishBusy} onChange={() => setPublishSelectedIds((current) => current.includes(asset.media_id) ? current.filter((id) => id !== asset.media_id) : [...current, asset.media_id])} />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-ui-sm font-medium">{asset.title}</p>
-                  <p className="truncate text-ui-xs text-muted-foreground">{asset.original_filename}</p>
-                  <p className="text-ui-xs text-muted-foreground">发布后转录稿进入候选索引，成功后成为正式版本并对外可见。</p>
-                </div>
-              </li>
-            ))}
-          </ul>
-          <DialogFooter><Button variant="outline" disabled={publishBusy} onClick={closePublishDialog}>取消</Button><Button disabled={publishBusy || publishSelectedIds.length === 0} onClick={() => void runBatchPublish()}>{publishBusy ? "发布中…" : `确认发布（${publishSelectedIds.length}）`}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
       <Dialog open={Boolean(moveTarget)} onOpenChange={(open) => { if (!open && !moveBusy) { setMoveTarget(null); setMoveCategoryId(""); setMoveError(null); } }}>
