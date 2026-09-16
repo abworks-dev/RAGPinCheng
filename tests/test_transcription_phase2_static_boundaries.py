@@ -15,7 +15,7 @@ ADAPTERS = (
 PROTECTED = {
     # Includes Range responses plus published-transcript preview access while
     # archived and unpublished media remain hidden; normalize_hash is portable.
-    "api/routes_media.py": "be62e86673fa78adaa4db8a253c106b0698dd0460ecda75538716dad74f487f7",
+    "api/routes_media.py": "6bb4bca5f98a7843261feb1f18753062593572c4d27259de8be818f09417c432",
     "api/indexing.py": "048559281160fa3c6ca4ee611cfb5757b0854e84b8bd90e912fbd51a4d299b21",
     "src/chunk.py": "560d3d20e878c17c8052ba84cf91b89752d5f2fde4b64db6852bd9d17aaae15e",
     "src/index.py": "eeb1a6adb5811dd2082ddbfaeccb56a4dca6242b25ea9f578d4f69c01a00054f",
