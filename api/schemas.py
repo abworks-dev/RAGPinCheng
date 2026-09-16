@@ -1843,10 +1843,17 @@ class BulkReviewTranscriptionRequest(BaseModel):
     approved: bool = True
 
 
+class BulkPublishTranscriptionItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    media_id: str
+    version_id: str | None = None
+
+
 class BulkPublishTranscriptionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    media_ids: list[str] = Field(min_length=1, max_length=100)
+    items: list[BulkPublishTranscriptionItem] = Field(min_length=1, max_length=100)
 
 
 class FailedMediaCleanupDTO(BaseModel):

@@ -926,7 +926,7 @@ describe("AdminMediaPage wizard", () => {
     expect(within(dialog).getAllByText(/跟随默认方案：正式中文转录/)).toHaveLength(2);
   });
 
-  it("batch decision picks a version per video, sends an optional note and reports partial failures", async () => {
+  it("batch publish allows the selected version per video and reports partial failures", async () => {
     const awaiting = [
       { ...assets[0], media_id: "media-one", title: "待发布一", publication_status: "pending", publication_request_status: "ready_to_publish", available_actions: ["publish_transcript", "reject_transcript"], disabled_actions: {} },
       { ...assets[0], media_id: "media-two", title: "待发布二", publication_status: "pending", publication_request_status: "ready_to_publish", available_actions: ["publish_transcript", "reject_transcript"], disabled_actions: {} },
@@ -945,12 +945,17 @@ describe("AdminMediaPage wizard", () => {
       succeeded: 1,
       failed: 1,
     });
+    mocks.bulkPublishTranscriptions.mockResolvedValue({
+      items: [{ media_id: "media-one", status: "succeeded" }],
+      succeeded: 1,
+      failed: 0,
+    });
     render(<AdminMediaPage embedded />);
 
     fireEvent.click(await screen.findByRole("checkbox", { name: "选择当前页视频" }));
     fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "发布决策所选（2）" }));
-    const dialog = screen.getByRole("dialog", { name: "发布决策" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "发布所选（2）" }));
+    const dialog = screen.getByRole("dialog", { name: "发布所选" });
 
     await waitFor(() => expect(within(dialog).getByRole("combobox", { name: "待发布一的发布决策版本" })).toHaveValue("version-2"));
     fireEvent.change(within(dialog).getByRole("combobox", { name: "待发布一的发布决策版本" }), { target: { value: "version-1" } });
@@ -965,34 +970,46 @@ describe("AdminMediaPage wizard", () => {
       "术语复核通过",
       true,
     ));
+    await waitFor(() => expect(mocks.bulkPublishTranscriptions).toHaveBeenCalledWith(
+      [{ media_id: "media-one", version_id: "version-1" }],
+    ));
     await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(
       "批量允许发布：成功 1 项，失败 1 项",
       expect.objectContaining({ description: expect.stringContaining("当前版本状态不可决策") }),
     ));
   });
 
-  it("batch publish shows every affected file and skips unchecked ones on confirm", async () => {
-    const approved = [
-      { ...assets[0], media_id: "media-a", title: "待发布视频A", publication_status: "pending", publication_request_status: "ready_to_publish", available_actions: ["publish_transcript"], disabled_actions: {} },
-      { ...assets[0], media_id: "media-b", title: "待发布视频B", publication_status: "pending", publication_request_status: "ready_to_publish", available_actions: ["publish_transcript"], disabled_actions: {} },
+  it("batch publish rejects the selected version without starting publication", async () => {
+    const awaiting = [
+      { ...assets[0], media_id: "media-one", title: "待发布一", publication_status: "pending", publication_request_status: "ready_to_publish", available_actions: ["publish_transcript", "reject_transcript"], disabled_actions: {} },
     ];
-    mocks.listMediaAssets.mockResolvedValue(approved);
+    mocks.listMediaAssets.mockResolvedValue(awaiting);
     mocks.listTranscriptionJobs.mockResolvedValue([]);
+    mocks.listTranscriptVersions.mockResolvedValue([
+      { version_id: "version-1", media_id: "media-one", source: "automatic", review_status: "awaiting_review", publication_status: "pending", created_at: 100, updated_at: 100, is_current: false },
+    ]);
+    mocks.bulkReviewTranscriptions.mockResolvedValue({
+      items: [{ media_id: "media-one", status: "succeeded" }],
+      succeeded: 1,
+      failed: 0,
+    });
     render(<AdminMediaPage embedded />);
 
     fireEvent.click(await screen.findByRole("checkbox", { name: "选择当前页视频" }));
     fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "发布所选（2）" }));
-    const dialog = screen.getByRole("dialog", { name: "确认批量发布" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "发布所选（1）" }));
+    const dialog = screen.getByRole("dialog", { name: "发布所选" });
 
-    expect(within(dialog).getByText("待发布视频A")).toBeInTheDocument();
-    expect(within(dialog).getByText("待发布视频B")).toBeInTheDocument();
+    await waitFor(() => expect(within(dialog).getByRole("combobox", { name: "待发布一的发布决策版本" })).toHaveValue("version-1"));
+    fireEvent.change(within(dialog).getByLabelText("发布决策原因"), { target: { value: "转录质量问题" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "拒绝发布（1）" }));
 
-    fireEvent.click(within(dialog).getByRole("checkbox", { name: "发布“待发布视频B”" }));
-    expect(within(dialog).getByRole("button", { name: "确认发布（1）" })).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: "确认发布（1）" }));
-
-    await waitFor(() => expect(mocks.bulkPublishTranscriptions).toHaveBeenCalledWith(["media-a"]));
+    await waitFor(() => expect(mocks.bulkReviewTranscriptions).toHaveBeenCalledWith(
+      [{ media_id: "media-one", version_id: "version-1" }],
+      "转录质量问题",
+      false,
+    ));
+    expect(mocks.bulkPublishTranscriptions).not.toHaveBeenCalled();
   });
 
   it("uses the managed-content upload entry when embedded as transcription tasks", async () => {

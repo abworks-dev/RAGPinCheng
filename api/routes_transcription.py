@@ -962,80 +962,98 @@ def bulk_publish_transcripts(
     body: BulkPublishTranscriptionRequest,
     _admin: CurrentUser = Depends(require_csrf_admin),
 ) -> BulkTranscriptionActionResponse:
-    """Publish the latest decidable transcript version per media.
+    """Publish the selected (or latest decidable) transcript version per media.
 
-    Each media is handled independently: publication intent, candidate index
-    job and queue enqueue reuse the exact single-item contract, so a busy or
-    conflicting row only fails itself.
+    Each item carries a media id and an optional version id.  When a version
+    id is given it must belong to the media; otherwise the latest decidable
+    version (pending/rejected/publication_failed) is used.  Publication intent,
+    candidate index job and queue enqueue reuse the exact single-item contract,
+    so a busy or conflicting row only fails itself.
     """
     items: list[TranscriptionActionItemDTO] = []
     seen: set[str] = set()
     conn = connect()
     try:
         service = _build_publication_service(conn)
-        for media_id in body.media_ids:
-            if media_id in seen:
+        for entry in body.items:
+            if entry.media_id in seen:
                 continue
-            seen.add(media_id)
+            seen.add(entry.media_id)
             try:
-                row = conn.execute(
-                    """SELECT id FROM transcript_versions
-                       WHERE media_id=?
-                         AND publication_status IN ('pending','rejected','publication_failed')
-                       ORDER BY created_at DESC,id DESC LIMIT 1""",
-                    (media_id,),
-                ).fetchone()
-                if row is None:
-                    raise HTTPException(
-                        status_code=409,
-                        detail={
-                            "code": "no_version_to_publish",
-                            "message": "该视频没有待发布或发布失败的转录版本。",
-                        },
-                    )
+                if entry.version_id:
+                    row = conn.execute(
+                        """SELECT id FROM transcript_versions
+                           WHERE id=? AND media_id=?
+                             AND publication_status IN ('pending','rejected','publication_failed')""",
+                        (entry.version_id, entry.media_id),
+                    ).fetchone()
+                    if row is None:
+                        raise HTTPException(
+                            status_code=409,
+                            detail={
+                                "code": "no_version_to_publish",
+                                "message": "所选转录版本不存在或不是待发布状态。",
+                            },
+                        )
+                else:
+                    row = conn.execute(
+                        """SELECT id FROM transcript_versions
+                           WHERE media_id=?
+                             AND publication_status IN ('pending','rejected','publication_failed')
+                           ORDER BY created_at DESC,id DESC LIMIT 1""",
+                        (entry.media_id,),
+                    ).fetchone()
+                    if row is None:
+                        raise HTTPException(
+                            status_code=409,
+                            detail={
+                                "code": "no_version_to_publish",
+                                "message": "该视频没有待发布或发布失败的转录版本。",
+                            },
+                        )
                 result = service.publish(str(row["id"]))
                 job = result["job"]
                 if job is not None and not result["reused"]:
                     enqueue_publication(str(job["id"]))
                 items.append(TranscriptionActionItemDTO(
-                    media_id=media_id,
+                    media_id=entry.media_id,
                     status="succeeded",
                 ))
             except HTTPException as exc:
                 message = exc.detail.get("message") if isinstance(exc.detail, dict) else str(exc.detail)
                 items.append(TranscriptionActionItemDTO(
-                    media_id=media_id,
+                    media_id=entry.media_id,
                     status="failed",
                     message=message,
                 ))
             except KeyError:
                 items.append(TranscriptionActionItemDTO(
-                    media_id=media_id,
+                    media_id=entry.media_id,
                     status="failed",
                     message="转录版本不存在",
                 ))
             except StoreConflictError:
                 items.append(TranscriptionActionItemDTO(
-                    media_id=media_id,
+                    media_id=entry.media_id,
                     status="failed",
                     message="发布命令发生并发冲突，请刷新列表后重试",
                 ))
             except PromptEchoPublicationBlocked as exc:
                 items.append(TranscriptionActionItemDTO(
-                    media_id=media_id,
+                    media_id=entry.media_id,
                     status="failed",
                     message=exc.message,
                 ))
             except ContractValidationError:
                 items.append(TranscriptionActionItemDTO(
-                    media_id=media_id,
+                    media_id=entry.media_id,
                     status="failed",
                     message="当前版本尚不满足发布条件",
                 ))
             except Exception:
-                logger.exception("unexpected transcription publish error for %s", media_id)
+                logger.exception("unexpected transcription publish error for %s", entry.media_id)
                 items.append(TranscriptionActionItemDTO(
-                    media_id=media_id,
+                    media_id=entry.media_id,
                     status="failed",
                     message="操作失败，请稍后重试",
                 ))
