@@ -153,7 +153,7 @@ def test_automatic_and_manual_version_contracts_are_distinct():
         None,
         None,
         None,
-        PublicationStatus.not_published,
+        PublicationStatus.pending,
         None,
         None,
         1,

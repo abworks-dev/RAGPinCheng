@@ -578,8 +578,6 @@ class TranscriptVersionRecord:
                     raise ContractValidationError("incomplete_manual_edit_lineage", "version")
                 if not self.markdown_ref.relative_path.startswith("markdown/"):
                     raise ContractValidationError("invalid_managed_artifact_path", "version.markdown_ref")
-                if self.review_status is ReviewStatus.not_required:
-                    raise ContractValidationError("manual_revision_requires_review", "version.review_status")
             else:
                 raise ContractValidationError("invalid_manual_storage", "version.markdown_storage_kind")
         if (self.model_id is None) != (self.model_revision is None):
@@ -587,11 +585,11 @@ class TranscriptVersionRecord:
         for field, value in (("model_id", self.model_id), ("model_revision", self.model_revision)):
             if value is not None:
                 validate_single_line(value, f"version.{field}", maximum=128)
-        if self.review_status in (ReviewStatus.review_approved, ReviewStatus.review_rejected):
-            if self.reviewed_by is None or self.reviewed_at is None:
-                raise ContractValidationError("incomplete_review", "version.review")
-        elif any(item is not None for item in (self.reviewed_by, self.reviewed_at, self.review_note)):
-            raise ContractValidationError("unexpected_review", "version.review")
+        # Decision metadata (reviewed_by/reviewed_at/review_note) is optional
+        # audit data in the unified flow: a version may be published without a
+        # separate reviewer (the publish command *is* the decision), and a
+        # migrated version may carry legacy values.  Only the published state
+        # is strict, and only about its own publication timestamp.
         if self.publication_status is PublicationStatus.published:
             if self.published_at is None:
                 raise ContractValidationError("published_without_timestamp", "version.published_at")

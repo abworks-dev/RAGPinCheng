@@ -68,17 +68,25 @@ def effective_release_policy(
     return EffectiveReleasePolicy(requires_review, auto_publish, auto_index)
 
 
-def review_gate_satisfied(review_status: ReviewStatus, policy: EffectiveReleasePolicy) -> bool:
-    if type(review_status) is not ReviewStatus or type(policy) is not EffectiveReleasePolicy:
-        raise ContractValidationError("invalid_review_gate_input", "review_gate")
-    return review_status is ReviewStatus.review_approved or (
-        review_status is ReviewStatus.not_required and not policy.requires_review
+def publication_decision_satisfied(publication_status: PublicationStatus) -> bool:
+    """True when a version has been allowed to publish.
+
+    The unified flow no longer keeps a separate review gate: an admin decision
+    moves the version to ``pending`` (allowed, waiting for the publish
+    command) or ``rejected`` (declined).  Publishing is only permitted from
+    those decision states (or a previous failed attempt, which may retry).
+    """
+    if type(publication_status) is not PublicationStatus:
+        raise ContractValidationError("invalid_decision_gate_input", "publication_gate")
+    return publication_status in (
+        PublicationStatus.pending,
+        PublicationStatus.rejected,
+        PublicationStatus.publication_failed,
     )
 
 
 def promote_allowed(
     *,
-    review_status: ReviewStatus,
     effective_policy: EffectiveReleasePolicy,
     current_admission: ProfileAdmission,
     explicit_admin_action: bool,
@@ -101,8 +109,6 @@ def promote_allowed(
     if current_admission is ProfileAdmission.disabled:
         return False
     if current_admission is ProfileAdmission.deprecated and not explicit_admin_action:
-        return False
-    if not review_gate_satisfied(review_status, effective_policy):
         return False
     if type(publication_status) is not PublicationStatus or type(index_status) is not PublicationIndexStatus:
         raise ContractValidationError("invalid_state_type", "promotion")

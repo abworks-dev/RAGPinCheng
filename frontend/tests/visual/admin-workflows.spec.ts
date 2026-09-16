@@ -776,8 +776,9 @@ test.describe("转录任务", () => {
     const workbench = page.getByRole("dialog", { name: "项目交付培训" });
     await expect(workbench).toBeVisible();
     await expect(workbench.getByRole("button", { name: /自动转录/ }).first()).toBeVisible();
-    await expect(workbench.getByRole("textbox", { name: /审核备注/ })).toBeVisible();
-    await expect(workbench.getByText("审核通过后可发布").first()).toBeVisible();
+    const decisionNote = workbench.getByRole("textbox", { name: /发布决策原因/ });
+    await expect(decisionNote.first()).toBeVisible({ timeout: 15_000 });
+    await expect(workbench.getByRole("button", { name: "发布到知识库" }).first()).toBeEnabled();
     await expect(workbench.getByText("synthetic-asr")).toBeHidden();
     await workbench.getByRole("button", { name: "校对内容" }).first().click();
     await expect(workbench.getByRole("textbox", { name: "转录 Markdown 编辑器" })).toBeVisible();

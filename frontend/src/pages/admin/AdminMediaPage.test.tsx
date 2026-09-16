@@ -82,13 +82,13 @@ const assets = [{
   transcript_origin: "generated",
   status: "transcript_ready",
   review_status: "awaiting_review",
-  publication_status: "not_published",
+  publication_status: "pending",
   latest_version_id: "version-1",
   index_status: null,
   created_at: 1785686400,
   updated_at: 1785686400,
   error: null,
-  available_actions: ["review_transcript"],
+  available_actions: ["publish_transcript", "reject_transcript"],
   disabled_actions: {},
 }];
 
@@ -198,14 +198,13 @@ describe("AdminMediaPage wizard", () => {
     expect(screen.queryByText("资料管理 / 转录任务")).not.toBeInTheDocument();
   });
 
-  it("shows review and publication while indexing stays inside publication", async () => {
+  it("shows the unified publication state while indexing stays inside publication", async () => {
     render(<AdminMediaPage />);
     fireEvent.click(screen.getByRole("button", { name: /上传视频/ }));
     expect(screen.getByLabelText("上传步骤")).toHaveTextContent("1. 上传视频");
     expect(await screen.findByText("项目交付培训")).toBeInTheDocument();
-    expect(screen.getByText("待人工审核")).toBeInTheDocument();
-    expect(screen.getByText("未发布")).toBeInTheDocument();
-    expect(screen.getByLabelText("审核、发布流程")).not.toHaveTextContent("索引");
+    expect(screen.getByText("待发布")).toBeInTheDocument();
+    expect(screen.getByLabelText("发布流程")).not.toHaveTextContent("索引");
     expect(screen.getByText("草稿已生成，等待后续审核与发布。")).toBeInTheDocument();
   });
 
@@ -267,7 +266,7 @@ describe("AdminMediaPage wizard", () => {
     await screen.findByText("项目交付培训");
 
     expect(screen.getByRole("button", { name: "全部任务 1" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "待审核 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "待发布（含发布中） 1" })).toBeInTheDocument();
     const mediaLoads = mocks.listMediaAssets.mock.calls.length;
     const jobLoads = mocks.listTranscriptionJobs.mock.calls.length;
     fireEvent.click(screen.getByRole("button", { name: "刷新媒体资源" }));
@@ -927,21 +926,21 @@ describe("AdminMediaPage wizard", () => {
     expect(within(dialog).getAllByText(/跟随默认方案：正式中文转录/)).toHaveLength(2);
   });
 
-  it("batch review picks a version per video, sends an optional note and reports partial failures", async () => {
+  it("batch decision picks a version per video, sends an optional note and reports partial failures", async () => {
     const awaiting = [
-      { ...assets[0], media_id: "media-one", title: "待审核一", review_status: "awaiting_review", publication_request_status: "ready_to_publish", available_actions: ["review_transcript"], disabled_actions: {} },
-      { ...assets[0], media_id: "media-two", title: "待审核二", review_status: "awaiting_review", publication_request_status: "ready_to_publish", available_actions: ["review_transcript"], disabled_actions: {} },
+      { ...assets[0], media_id: "media-one", title: "待发布一", publication_status: "pending", publication_request_status: "ready_to_publish", available_actions: ["publish_transcript", "reject_transcript"], disabled_actions: {} },
+      { ...assets[0], media_id: "media-two", title: "待发布二", publication_status: "pending", publication_request_status: "ready_to_publish", available_actions: ["publish_transcript", "reject_transcript"], disabled_actions: {} },
     ];
     mocks.listMediaAssets.mockResolvedValue(awaiting);
     mocks.listTranscriptionJobs.mockResolvedValue([]);
     mocks.listTranscriptVersions.mockResolvedValue([
-      { version_id: "version-2", media_id: "media-one", source: "automatic", review_status: "awaiting_review", publication_status: "not_published", created_at: 200, updated_at: 200, is_current: false },
-      { version_id: "version-1", media_id: "media-one", source: "automatic", review_status: "awaiting_review", publication_status: "not_published", created_at: 100, updated_at: 100, is_current: false },
+      { version_id: "version-2", media_id: "media-one", source: "automatic", review_status: "awaiting_review", publication_status: "pending", created_at: 200, updated_at: 200, is_current: false },
+      { version_id: "version-1", media_id: "media-one", source: "automatic", review_status: "awaiting_review", publication_status: "pending", created_at: 100, updated_at: 100, is_current: false },
     ]);
     mocks.bulkReviewTranscriptions.mockResolvedValue({
       items: [
         { media_id: "media-one", status: "succeeded" },
-        { media_id: "media-two", status: "failed", message: "当前版本状态不可审核，请刷新列表后重试" },
+        { media_id: "media-two", status: "failed", message: "当前版本状态不可决策，请刷新列表后重试" },
       ],
       succeeded: 1,
       failed: 1,
@@ -950,13 +949,13 @@ describe("AdminMediaPage wizard", () => {
 
     fireEvent.click(await screen.findByRole("checkbox", { name: "选择当前页视频" }));
     fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "审核通过所选（2）" }));
-    const dialog = screen.getByRole("dialog", { name: "批量审核通过" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "发布决策所选（2）" }));
+    const dialog = screen.getByRole("dialog", { name: "发布决策" });
 
-    await waitFor(() => expect(within(dialog).getByRole("combobox", { name: "待审核一的审核版本" })).toHaveValue("version-2"));
-    fireEvent.change(within(dialog).getByRole("combobox", { name: "待审核一的审核版本" }), { target: { value: "version-1" } });
-    fireEvent.change(within(dialog).getByLabelText("批量审核备注"), { target: { value: "术语复核通过" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "审核通过（2）" }));
+    await waitFor(() => expect(within(dialog).getByRole("combobox", { name: "待发布一的发布决策版本" })).toHaveValue("version-2"));
+    fireEvent.change(within(dialog).getByRole("combobox", { name: "待发布一的发布决策版本" }), { target: { value: "version-1" } });
+    fireEvent.change(within(dialog).getByLabelText("发布决策原因"), { target: { value: "术语复核通过" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "允许发布（2）" }));
 
     await waitFor(() => expect(mocks.bulkReviewTranscriptions).toHaveBeenCalledWith(
       [
@@ -964,17 +963,18 @@ describe("AdminMediaPage wizard", () => {
         { media_id: "media-two", version_id: "version-2" },
       ],
       "术语复核通过",
+      true,
     ));
     await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(
-      "批量审核通过：成功 1 项，失败 1 项",
-      expect.objectContaining({ description: expect.stringContaining("当前版本状态不可审核") }),
+      "批量允许发布：成功 1 项，失败 1 项",
+      expect.objectContaining({ description: expect.stringContaining("当前版本状态不可决策") }),
     ));
   });
 
   it("batch publish shows every affected file and skips unchecked ones on confirm", async () => {
     const approved = [
-      { ...assets[0], media_id: "media-a", title: "已审核视频A", review_status: "review_approved", publication_status: "not_published", publication_request_status: "ready_to_publish", available_actions: ["publish_transcript"], disabled_actions: {} },
-      { ...assets[0], media_id: "media-b", title: "已审核视频B", review_status: "review_approved", publication_status: "not_published", publication_request_status: "ready_to_publish", available_actions: ["publish_transcript"], disabled_actions: {} },
+      { ...assets[0], media_id: "media-a", title: "待发布视频A", publication_status: "pending", publication_request_status: "ready_to_publish", available_actions: ["publish_transcript"], disabled_actions: {} },
+      { ...assets[0], media_id: "media-b", title: "待发布视频B", publication_status: "pending", publication_request_status: "ready_to_publish", available_actions: ["publish_transcript"], disabled_actions: {} },
     ];
     mocks.listMediaAssets.mockResolvedValue(approved);
     mocks.listTranscriptionJobs.mockResolvedValue([]);
@@ -985,10 +985,10 @@ describe("AdminMediaPage wizard", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "发布所选（2）" }));
     const dialog = screen.getByRole("dialog", { name: "确认批量发布" });
 
-    expect(within(dialog).getByText("已审核视频A")).toBeInTheDocument();
-    expect(within(dialog).getByText("已审核视频B")).toBeInTheDocument();
+    expect(within(dialog).getByText("待发布视频A")).toBeInTheDocument();
+    expect(within(dialog).getByText("待发布视频B")).toBeInTheDocument();
 
-    fireEvent.click(within(dialog).getByRole("checkbox", { name: "发布“已审核视频B”" }));
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "发布“待发布视频B”" }));
     expect(within(dialog).getByRole("button", { name: "确认发布（1）" })).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "确认发布（1）" }));
 

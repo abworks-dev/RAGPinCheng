@@ -126,9 +126,8 @@ def test_reviewed_managed_revision_publishes_without_replacing_head_early(tmp_pa
         edited_by=1,
         request_idempotency_key="123e4567-e89b-42d3-a456-426614174083",
     )
-    with pytest.raises(ContractValidationError, match="manual_revision_review_required"):
-        service.publish(revision.id)
-    service.review(revision.id, approved=True, reviewed_by=1, review_note="已校对")
+    # Unified flow: publishing a managed manual revision is itself the
+    # decision; no separate review step is required.
     revision_job = service.publish(revision.id)["job"]
     assert revision_job is not None
     assert store.current_head(base.media_id) == base.id

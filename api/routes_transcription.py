@@ -876,11 +876,13 @@ def bulk_review_transcripts(
     body: BulkReviewTranscriptionRequest,
     admin: CurrentUser = Depends(require_csrf_admin),
 ) -> BulkTranscriptionActionResponse:
-    """Approve transcript versions in bulk, one row per media.
+    """Record an allow/reject publication decision in bulk, one row per media.
 
-    Each media either names an explicit version or falls back to its latest
-    version still awaiting review; every item is evaluated independently so a
-    single conflicting version never fails the whole batch.
+    ``approved=True`` allows the selected (or latest pending) version to be
+    published; ``approved=False`` rejects it and stores the optional reason.
+    A rejected version may be allowed again by a later decision.  Each media is
+    evaluated independently so a single conflicting version never fails the
+    whole batch.
     """
     items: list[TranscriptionActionItemDTO] = []
     seen: set[str] = set()
@@ -896,7 +898,7 @@ def bulk_review_transcripts(
                 if not version_id:
                     row = conn.execute(
                         """SELECT id FROM transcript_versions
-                           WHERE media_id=? AND review_status='awaiting_review'
+                           WHERE media_id=? AND publication_status IN ('pending','rejected')
                            ORDER BY created_at DESC,id DESC LIMIT 1""",
                         (entry.media_id,),
                     ).fetchone()
@@ -904,14 +906,14 @@ def bulk_review_transcripts(
                         raise HTTPException(
                             status_code=409,
                             detail={
-                                "code": "no_version_awaiting_review",
-                                "message": "该视频没有待审核的转录版本。",
+                                "code": "no_version_decidable",
+                                "message": "该视频没有待发布或已拒绝的转录版本。",
                             },
                         )
                     version_id = str(row["id"])
                 service.review(
                     version_id,
-                    approved=True,
+                    approved=body.approved,
                     reviewed_by=admin.id,
                     review_note=body.review_note,
                 )
@@ -960,7 +962,7 @@ def bulk_publish_transcripts(
     body: BulkPublishTranscriptionRequest,
     _admin: CurrentUser = Depends(require_csrf_admin),
 ) -> BulkTranscriptionActionResponse:
-    """Publish the latest approved, unpublished transcript version per media.
+    """Publish the latest decidable transcript version per media.
 
     Each media is handled independently: publication intent, candidate index
     job and queue enqueue reuse the exact single-item contract, so a busy or
@@ -978,8 +980,8 @@ def bulk_publish_transcripts(
             try:
                 row = conn.execute(
                     """SELECT id FROM transcript_versions
-                       WHERE media_id=? AND review_status='review_approved'
-                         AND publication_status IN ('not_published','publication_failed')
+                       WHERE media_id=?
+                         AND publication_status IN ('pending','rejected','publication_failed')
                        ORDER BY created_at DESC,id DESC LIMIT 1""",
                     (media_id,),
                 ).fetchone()
@@ -988,7 +990,7 @@ def bulk_publish_transcripts(
                         status_code=409,
                         detail={
                             "code": "no_version_to_publish",
-                            "message": "该视频没有审核通过且未发布的转录版本。",
+                            "message": "该视频没有待发布或发布失败的转录版本。",
                         },
                     )
                 result = service.publish(str(row["id"]))
@@ -1390,9 +1392,9 @@ def _transcript_version_unavailable_reason(
     normal chain supersedes the previous one, so treating that reference as a
     blocker made the whole batch-delete feature unusable. The caller clears
     those references in the same transaction before deleting the row.
-    A version *awaiting review* is deletable too: an unreviewed attempt is
-    disposable, and the product decision is that deleting it withdraws the
-    attempt rather than forcing the reviewer to finish the review first.
+    A version still pending (or rejected/declined) is deletable too: an
+    undecided attempt is disposable, and the product decision is that deleting
+    it withdraws the attempt rather than forcing the admin to decide first.
     A `derived_from_version_id` reference still refuses the delete, because a
     manual revision keeps deriving from its source version.
     """
@@ -1404,7 +1406,7 @@ def _transcript_version_unavailable_reason(
         return "not_found"
     if str(row["media_id"]) != media_id:
         return "not_in_media"
-    if str(row["publication_status"]) != "not_published":
+    if str(row["publication_status"]) not in ("pending", "rejected", "publication_failed"):
         return "published"
     if conn.execute(
         "SELECT 1 FROM media_transcript_heads WHERE media_id=? AND current_version_id=?",

@@ -1207,7 +1207,8 @@ export type TranscriptReviewStatus =
   | "review_rejected";
 
 export type TranscriptPublicationStatus =
-  | "not_published"
+  | "pending"
+  | "rejected"
   | "publishing"
   | "published"
   | "publication_failed";

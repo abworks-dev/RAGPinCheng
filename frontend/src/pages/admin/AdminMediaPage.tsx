@@ -55,7 +55,7 @@ import { toast } from "../../components/ui/toast";
 type UploadMode = "manual" | "automatic";
 type UploadState = "waiting" | "uploading" | "preparing" | "succeeded" | "skipped" | "failed";
 type StatusVariant = "secondary" | "success" | "warning" | "destructive" | "info";
-type MediaFilter = "all" | "processing" | "review" | "published" | "failed";
+type MediaFilter = "all" | "processing" | "pending_publish" | "published" | "failed";
 
 type PendingVideo = {
   id: string;
@@ -89,16 +89,10 @@ const mediaStatusMeta: Record<string, { label: string; variant: StatusVariant }>
   failed: { label: "失败", variant: "destructive" },
 };
 
-const reviewMeta: Record<string, { label: string; variant: StatusVariant }> = {
-  not_required: { label: "无需审核", variant: "secondary" },
-  awaiting_review: { label: "待人工审核", variant: "warning" },
-  review_approved: { label: "审核通过", variant: "success" },
-  review_rejected: { label: "审核驳回", variant: "destructive" },
-};
-
 const publicationMeta: Record<string, { label: string; variant: StatusVariant }> = {
-  not_published: { label: "未发布", variant: "secondary" },
-  publishing: { label: "发布中", variant: "warning" },
+  pending: { label: "待发布", variant: "warning" },
+  rejected: { label: "已拒绝发布", variant: "destructive" },
+  publishing: { label: "发布中", variant: "info" },
   published: { label: "已发布", variant: "success" },
   publication_failed: { label: "发布失败", variant: "destructive" },
 };
@@ -219,18 +213,12 @@ function JobSummary({ job }: { job: TranscriptionJob }) {
 }
 
 function LifecycleRail({ asset }: { asset: MediaAsset }) {
-  const stages = [
-    { label: "审核", value: asset.review_status, meta: reviewMeta },
-    { label: "发布", value: asset.publication_status, meta: publicationMeta },
-  ];
   return (
-    <ol className="grid gap-1.5 sm:grid-cols-2" aria-label="审核、发布流程">
-      {stages.map((stage) => (
-        <li key={stage.label} className="flex min-w-0 items-center justify-between gap-2 rounded-ui-sm border border-border/70 bg-background/60 px-2 py-1.5" aria-label={`${stage.label}：${stage.value ? stage.meta[stage.value]?.label || stage.value : "未开始"}`}>
-          <span className="text-ui-xs font-medium text-muted-foreground">{stage.label}</span>
-          <StatusBadge value={stage.value} meta={stage.meta} />
-        </li>
-      ))}
+    <ol className="grid gap-1.5 sm:grid-cols-1" aria-label="发布流程">
+      <li className="flex min-w-0 items-center justify-between gap-2 rounded-ui-sm border border-border/70 bg-background/60 px-2 py-1.5" aria-label={`发布：${asset.publication_status ? publicationMeta[asset.publication_status]?.label || asset.publication_status : "未开始"}`}>
+        <span className="text-ui-xs font-medium text-muted-foreground">发布</span>
+        <StatusBadge value={asset.publication_status} meta={publicationMeta} />
+      </li>
     </ol>
   );
 }
@@ -440,7 +428,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const mediaFilterOptions = [
     ["all", "全部任务"],
     ["processing", "处理中"],
-    ["review", "待审核"],
+    ["pending_publish", "待发布（含发布中）"],
     ["published", "已发布"],
     ["failed", "失败"],
   ] as const;
@@ -448,7 +436,9 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
     if (filter === "all") return true;
     const job = jobsByMediaId.get(asset.media_id);
     if (filter === "processing") return job?.status === "pending" || job?.status === "running";
-    if (filter === "review") return asset.review_status === "awaiting_review";
+    if (filter === "pending_publish") {
+      return ["pending", "rejected", "publishing"].includes(asset.publication_status || "");
+    }
     if (filter === "published") return asset.publication_status === "published";
     return job?.status === "failed" || asset.status === "failed" || asset.publication_status === "publication_failed" || asset.publication_index_status === "failed";
   };
@@ -460,7 +450,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
     || asset.available_actions.includes("finalize_failed_cleanup"),
   );
   // Search covers the operator-visible wording of a row: title, file name,
-  // archive folder and the Chinese status labels, so typing「失败」or「待审核」
+  // archive folder and the Chinese status labels, so typing「失败」or「待发布」
   // narrows the list exactly like the quick filters do.
   const mediaAssetSearchHaystack = (asset: MediaAsset) => {
     const job = jobsByMediaId.get(asset.media_id);
@@ -471,7 +461,6 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
       statusLabels: [
         job ? jobStatusMeta[job.status]?.label : null,
         mediaStatusMeta[asset.status]?.label,
-        asset.review_status ? reviewMeta[asset.review_status]?.label : null,
         asset.publication_status ? publicationMeta[asset.publication_status]?.label : null,
       ],
     });
@@ -525,7 +514,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
       && !asset.available_actions.includes("re_transcribe"),
   );
   const reviewableSelectedAssets = selectedAssets.filter((asset) =>
-    asset.available_actions.includes("review_transcript") && asset.review_status === "awaiting_review",
+    asset.available_actions.includes("publish_transcript") || asset.available_actions.includes("reject_transcript"),
   );
   const publishableSelectedAssets = selectedAssets.filter((asset) => asset.available_actions.includes("publish_transcript"));
   const cleanableSelectedAssets = selectedAssets.filter((asset) =>
@@ -694,7 +683,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
       setReviewVersionOptions(options);
       setReviewVersionChoices(Object.fromEntries(ids.map((mediaId) => {
         const versions = options[mediaId] || [];
-        const earliestWaiting = versions.find((version) => version.review_status === "awaiting_review");
+        const earliestWaiting = versions.find((version) => version.publication_status === "pending" || version.publication_status === "rejected");
         return [mediaId, earliestWaiting?.version_id || versions[0]?.version_id || ""];
       })));
     }).finally(() => setReviewVersionsLoading(false));
@@ -705,15 +694,17 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
     setReviewVersionChoices({});
     setReviewNote("");
   };
-  const runBatchReview = async () => {
+  const runBatchDecision = async (approved: boolean) => {
     if (!reviewDialogMediaIds.length || reviewBusy) return;
     setReviewBusy(true);
+    const actionLabel = approved ? "允许发布" : "拒绝发布";
     try {
       const result = await adminMediaApi.bulkReviewTranscripts(
         reviewDialogMediaIds.map((mediaId) => ({ media_id: mediaId, version_id: reviewVersionChoices[mediaId] || null })),
         reviewNote.trim() || null,
+        approved,
       );
-      showBatchToast("批量审核通过", result.succeeded, result.items.filter((item) => item.status === "failed").map((item) => item.message || "审核失败"));
+      showBatchToast(`批量${actionLabel}`, result.succeeded, result.items.filter((item) => item.status === "failed").map((item) => item.message || `${actionLabel}失败`));
     } catch (cause) {
       setUploadError(cause instanceof Error ? cause.message : String(cause));
       return;
@@ -778,7 +769,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const filterCounts = mediaFilterOptions.reduce<Record<MediaFilter, number>>((counts, [value]) => {
     counts[value] = transcriptionTaskAssets.filter((asset) => matchesMediaFilter(asset, value)).length;
     return counts;
-  }, { all: 0, processing: 0, review: 0, published: 0, failed: 0 });
+  }, { all: 0, processing: 0, pending_publish: 0, published: 0, failed: 0 });
   const selectedAsset = selectedMediaId ? mediaAssets.find((asset) => asset.media_id === selectedMediaId) ?? null : null;
   const replaceSourceAsset = replaceSourceMediaId ? mediaAssets.find((asset) => asset.media_id === replaceSourceMediaId) ?? null : null;
   const refreshMediaState = useCallback(async () => {
@@ -888,7 +879,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   }
 
   async function archiveMedia(asset: MediaAsset) { setDeletingMediaId(asset.media_id); try { await adminMediaApi.archiveAsset(asset.media_id); removeAsset(asset.media_id); setArchiveTarget(null); setArchiveAcknowledged(false); await refreshMediaState(); } catch (e: any) { setUploadError(e?.message || String(e)); } finally { setDeletingMediaId(null); } }
-  async function returnToReview(asset: MediaAsset) { if (!asset.latest_version_id) return; setDeletingMediaId(asset.media_id); try { await adminMediaApi.returnToReview(asset.latest_version_id); toast.success("已退回审核"); await refreshMediaState(); } catch (e: any) { setUploadError(e?.message || String(e)); } finally { setDeletingMediaId(null); } }
+  async function returnToReview(asset: MediaAsset) { if (!asset.latest_version_id) return; setDeletingMediaId(asset.media_id); try { await adminMediaApi.returnToReview(asset.latest_version_id); toast.success("已退回待发布"); await refreshMediaState(); } catch (e: any) { setUploadError(e?.message || String(e)); } finally { setDeletingMediaId(null); } }
   async function moveMediaAsset() {
     if (!moveTarget?.catalog_item_id || !moveTarget.current_version_id || !moveCategoryId) return;
     setMoveBusy(true); setMoveError(null);
@@ -1374,7 +1365,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
 
       <section className="space-y-5" aria-labelledby="media-assets-title">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="媒体快捷筛选">
-          {mediaFilterOptions.map(([value, label]) => { const icons = { all: <Film className="size-4" />, processing: <LoaderCircle className="size-4" />, review: <ClipboardCheck className="size-4" />, published: <Rocket className="size-4" />, failed: <XCircle className="size-4" /> }; return <ManagedSummaryCard key={value} label={label} value={filterCounts[value]} icon={icons[value]} tone={value === "failed" ? "destructive" : value === "review" ? "warning" : value === "published" ? "success" : "primary"} active={mediaFilter === value} onClick={() => setMediaFilter(value)} />; })}
+          {mediaFilterOptions.map(([value, label]) => { const icons = { all: <Film className="size-4" />, processing: <LoaderCircle className="size-4" />, pending_publish: <ClipboardCheck className="size-4" />, published: <Rocket className="size-4" />, failed: <XCircle className="size-4" /> }; return <ManagedSummaryCard key={value} label={label} value={filterCounts[value]} icon={icons[value]} tone={value === "failed" ? "destructive" : value === "pending_publish" ? "warning" : value === "published" ? "success" : "primary"} active={mediaFilter === value} onClick={() => setMediaFilter(value)} />; })}
         </div>
         <Card className="overflow-hidden shadow-surface">
           <div className="grid gap-3 border-b border-border px-4 py-4 sm:px-5 lg:grid-cols-[minmax(13rem,1fr)_18rem_auto] lg:items-end">
@@ -1434,7 +1425,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
 <a className={buttonVariants({ variant: "outline" })} href="/admin/asr"><Settings2 className="size-4" />转录配置</a>
               <Button variant="outline" aria-label="刷新媒体资源" title="刷新媒体资源" disabled={loading} onClick={() => void refreshMediaState()}><RefreshCw className="size-4" aria-hidden="true" />刷新列表</Button>
-              <div className="relative"><Button variant="outline" disabled={!selectedMediaIds.length || batchActionBusy} aria-haspopup="menu" aria-expanded={batchMenuOpen} onClick={() => setBatchMenuOpen((open) => !open)}>批量操作<ChevronDown className="size-4" /></Button>{batchMenuOpen && <div role="menu" aria-label="批量操作" className="absolute right-0 top-full z-dropdown mt-1 w-48 rounded-ui-md border border-border bg-popover p-1 shadow-overlay"><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={startableSelectedAssets.length ? undefined : "所选视频均不可开始转录"} disabled={!startableSelectedAssets.length || batchActionBusy} onClick={() => openStartDialog(startableSelectedAssets)}><Rocket className="size-4" />开始转录（{startableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={retranscribableSelectedAssets.length ? undefined : "所选视频均不可重新转录"} disabled={!retranscribableSelectedAssets.length || batchActionBusy} onClick={() => openReTranscribeDialog(retranscribableSelectedAssets)}><RefreshCcw className="size-4" />重新转录所选（{retranscribableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={reviewableSelectedAssets.length ? undefined : "所选视频均不可审核"} disabled={!reviewableSelectedAssets.length || batchActionBusy} onClick={() => openReviewDialog(reviewableSelectedAssets)}><ClipboardCheck className="size-4" />审核通过所选（{reviewableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={publishableSelectedAssets.length ? undefined : "所选视频均不可发布"} disabled={!publishableSelectedAssets.length || batchActionBusy} onClick={() => openPublishDialog(publishableSelectedAssets)}><Send className="size-4" />发布所选（{publishableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={retryableSelectedAssets.length ? undefined : "所选视频均不可重试"} disabled={!retryableSelectedAssets.length || batchActionBusy} onClick={() => void runBatchRetry()}><RotateCcw className="size-4" />重试所选（{retryableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={cancellableSelectedJobs.length ? undefined : "没有正在运行的转录任务可取消"} disabled={!cancellableSelectedJobs.length || batchActionBusy} onClick={() => void runBatchCancel()}><Ban className="size-4" />取消所选（{cancellableSelectedJobs.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm text-destructive hover:bg-destructive/10 disabled:opacity-40" title={cleanableSelectedAssets.length ? undefined : "所选视频均不可清理"} disabled={!cleanableSelectedAssets.length || batchActionBusy} onClick={() => { setBatchCleanupTargetIds(cleanableSelectedAssets.map((asset) => asset.media_id)); setBatchMenuOpen(false); }}><Trash2 className="size-4" />清理所选（{cleanableSelectedAssets.length}）</button></div>}</div>
+              <div className="relative"><Button variant="outline" disabled={!selectedMediaIds.length || batchActionBusy} aria-haspopup="menu" aria-expanded={batchMenuOpen} onClick={() => setBatchMenuOpen((open) => !open)}>批量操作<ChevronDown className="size-4" /></Button>{batchMenuOpen && <div role="menu" aria-label="批量操作" className="absolute right-0 top-full z-dropdown mt-1 w-48 rounded-ui-md border border-border bg-popover p-1 shadow-overlay"><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={startableSelectedAssets.length ? undefined : "所选视频均不可开始转录"} disabled={!startableSelectedAssets.length || batchActionBusy} onClick={() => openStartDialog(startableSelectedAssets)}><Rocket className="size-4" />开始转录（{startableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={retranscribableSelectedAssets.length ? undefined : "所选视频均不可重新转录"} disabled={!retranscribableSelectedAssets.length || batchActionBusy} onClick={() => openReTranscribeDialog(retranscribableSelectedAssets)}><RefreshCcw className="size-4" />重新转录所选（{retranscribableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={reviewableSelectedAssets.length ? undefined : "所选视频均不可决策"} disabled={!reviewableSelectedAssets.length || batchActionBusy} onClick={() => openReviewDialog(reviewableSelectedAssets)}><ClipboardCheck className="size-4" />发布决策所选（{reviewableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={publishableSelectedAssets.length ? undefined : "所选视频均不可发布"} disabled={!publishableSelectedAssets.length || batchActionBusy} onClick={() => openPublishDialog(publishableSelectedAssets)}><Send className="size-4" />发布所选（{publishableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={retryableSelectedAssets.length ? undefined : "所选视频均不可重试"} disabled={!retryableSelectedAssets.length || batchActionBusy} onClick={() => void runBatchRetry()}><RotateCcw className="size-4" />重试所选（{retryableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={cancellableSelectedJobs.length ? undefined : "没有正在运行的转录任务可取消"} disabled={!cancellableSelectedJobs.length || batchActionBusy} onClick={() => void runBatchCancel()}><Ban className="size-4" />取消所选（{cancellableSelectedJobs.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm text-destructive hover:bg-destructive/10 disabled:opacity-40" title={cleanableSelectedAssets.length ? undefined : "所选视频均不可清理"} disabled={!cleanableSelectedAssets.length || batchActionBusy} onClick={() => { setBatchCleanupTargetIds(cleanableSelectedAssets.map((asset) => asset.media_id)); setBatchMenuOpen(false); }}><Trash2 className="size-4" />清理所选（{cleanableSelectedAssets.length}）</button></div>}</div>
               {!embedded && <Button onClick={() => setUploadDialogOpen(true)}><Upload className="size-4" />{hasUploadDraft ? `继续上传${pending.length ? `（${pending.length}）` : ""}` : "上传视频"}</Button>}
             </div>
           </div>
@@ -1505,7 +1496,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
                       <IconButton label="调整目录" title={asset.catalog_item_id && asset.current_version_id ? "调整资料库中的归档目录" : "该视频尚未发布正式转录稿，无法调整目录"} tooltip={asset.catalog_item_id && asset.current_version_id ? "调整资料库中的归档目录" : "该视频尚未发布正式转录稿，无法调整目录"} className="border border-border max-sm:size-control-md" disabled={!asset.catalog_item_id || !asset.current_version_id || deletingMediaId === asset.media_id} onClick={() => { setMoveTarget(asset); setMoveCategoryId(""); setMoveError(null); }}><FolderInput className="size-4" /></IconButton>
                       <IconButton label="取消" title={canCancel ? "取消当前转录任务" : disabledActions.cancel_transcription || "当前状态不可取消"} tooltip={canCancel ? "取消当前转录任务" : disabledActions.cancel_transcription || "当前状态不可取消"} className="border border-border max-sm:size-control-md" disabled={!canCancel || deletingMediaId === asset.media_id} onClick={() => job && void cancelJob(job)}><Ban className="size-4" /></IconButton>
                       {!canReTranscribe && <IconButton label="重试" title={canRetry ? "恢复尚未创建转录任务的共享来源失败" : disabledActions.retry_transcription || "当前状态不可重试"} tooltip={canRetry ? "恢复尚未创建转录任务的共享来源失败" : disabledActions.retry_transcription || "当前状态不可重试"} className="border border-border max-sm:size-control-md" disabled={!canRetry || deletingMediaId === asset.media_id} onClick={() => void retryMedia(asset)}><RotateCcw className="size-4" /></IconButton>}
-                      <IconButton label="退回审核" title={canReturnToReview ? "将未发布转录稿退回待审核状态" : disabledActions.return_to_review || "仅审核通过且未发布的转录稿可退回审核"} tooltip={canReturnToReview ? "将未发布转录稿退回待审核状态" : disabledActions.return_to_review || "仅审核通过且未发布的转录稿可退回审核"} className="border border-border max-sm:size-control-md" disabled={!canReturnToReview || !asset.latest_version_id || deletingMediaId === asset.media_id} onClick={() => void returnToReview(asset)}><ArrowLeft className="size-4" /></IconButton>
+                      <IconButton label="退回待发布" title={canReturnToReview ? "将未发布转录稿退回待发布状态" : disabledActions.return_to_review || "仅待发布或已拒绝的转录稿可退回待发布"} tooltip={canReturnToReview ? "将未发布转录稿退回待发布状态" : disabledActions.return_to_review || "仅待发布或已拒绝的转录稿可退回待发布"} className="border border-border max-sm:size-control-md" disabled={!canReturnToReview || !asset.latest_version_id || deletingMediaId === asset.media_id} onClick={() => void returnToReview(asset)}><ArrowLeft className="size-4" /></IconButton>
                       <IconButton label="替换视频" title={canReplace ? "上传候选视频并创建转录任务" : disabledActions.replace_media || "当前状态不可替换"} tooltip={canReplace ? "上传候选视频并创建转录任务" : disabledActions.replace_media || "当前状态不可替换"} className="border border-border max-sm:size-control-md" disabled={!canReplace || deletingMediaId === asset.media_id} onClick={() => setReplaceSourceMediaId(asset.media_id)}><Repeat2 className="size-4" /></IconButton>
                       <IconButton label={isStaleExternalCleanup ? "完成缓存清理" : "清理失败任务"} title={isStaleExternalCleanup ? "只删除上次清理遗留的暂存缓存" : canDelete ? (isExternal ? "清理本地任务和缓存，保留共享原文件" : "删除失败媒体和本地任务历史") : disabledActions.delete_failed || "当前失败任务不可清理"} tooltip={isStaleExternalCleanup ? "只删除上次清理遗留的暂存缓存" : canDelete ? (isExternal ? "清理本地任务和缓存，保留共享原文件" : "删除失败媒体和本地任务历史") : disabledActions.delete_failed || "当前失败任务不可清理"} className={canDelete || canFinalizeCleanup ? "border border-destructive/40 text-destructive max-sm:size-control-md" : "border border-border max-sm:size-control-md"} disabled={(!canDelete && !canFinalizeCleanup) || deletingMediaId === asset.media_id} onClick={() => setDeleteTarget(asset)}><Trash2 className="size-4" /></IconButton>
                       <IconButton label="移入回收站" title={canArchive ? "移入资料回收站" : disabledActions.archive_media || "当前状态不可归档"} tooltip={canArchive ? "移入资料回收站" : disabledActions.archive_media || "当前状态不可归档"} className="border border-border max-sm:size-control-md" disabled={!canArchive || deletingMediaId === asset.media_id} onClick={() => { setArchiveTarget(asset); setArchiveAcknowledged(false); }}><Archive className="size-4" /></IconButton>
@@ -1604,17 +1595,17 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
       <Dialog open={reviewDialogMediaIds.length > 0} onOpenChange={(open) => { if (!open) closeReviewDialog(); }}>
         <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>批量审核通过</DialogTitle>
-            <DialogDescription>为每个视频选择要审核通过的转录版本（默认最新一版）；只有待审核的版本可以被通过。</DialogDescription>
+            <DialogTitle>发布决策</DialogTitle>
+            <DialogDescription>为每个视频选择要决策的转录版本（默认最新一版）。允许发布后转录稿进入候选索引并成为正式版本；拒绝发布可填写原因。</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <label className="block text-ui-sm font-medium">审核备注（可选）
-              <Input aria-label="批量审核备注" className="mt-1" placeholder="留空则不填写备注" value={reviewNote} disabled={reviewBusy} onChange={(event) => setReviewNote(event.target.value)} />
+            <label className="block text-ui-sm font-medium">原因（可选）
+              <Input aria-label="发布决策原因" className="mt-1" placeholder="留空则不填写原因（拒绝发布时建议填写）" value={reviewNote} disabled={reviewBusy} onChange={(event) => setReviewNote(event.target.value)} />
             </label>
-            <ul className="divide-y divide-border rounded-ui-md border border-border" aria-label="批量审核的视频与版本">
+            <ul className="divide-y divide-border rounded-ui-md border border-border" aria-label="发布决策的视频与版本">
               {reviewDialogAssets.map((asset) => {
                 const versions = reviewVersionOptions[asset.media_id] || [];
-                const eligible = versions.filter((version) => version.review_status === "awaiting_review");
+                const eligible = versions.filter((version) => version.publication_status === "pending" || version.publication_status === "rejected");
                 return (
                   <li key={asset.media_id} className="grid gap-3 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(14rem,20rem)] sm:items-center">
                     <div className="min-w-0">
@@ -1624,8 +1615,8 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
                     {reviewVersionsLoading
                       ? <p className="text-ui-xs text-muted-foreground">正在加载转录版本…</p>
                       : eligible.length === 0
-                        ? <p className="text-ui-xs text-destructive">没有待审核的转录版本</p>
-                        : <Select aria-label={`${asset.title}的审核版本`} value={reviewVersionChoices[asset.media_id] || ""} disabled={reviewBusy} onChange={(event) => setReviewVersionChoices((current) => ({ ...current, [asset.media_id]: event.target.value }))}>
+                        ? <p className="text-ui-xs text-destructive">没有待发布或已拒绝的转录版本</p>
+                        : <Select aria-label={`${asset.title}的发布决策版本`} value={reviewVersionChoices[asset.media_id] || ""} disabled={reviewBusy} onChange={(event) => setReviewVersionChoices((current) => ({ ...current, [asset.media_id]: event.target.value }))}>
                             {eligible.map((version, index) => <option key={version.version_id} value={version.version_id}>{transcriptionVersionOptionLabel(version, index, eligible.length)}</option>)}
                           </Select>}
                   </li>
@@ -1633,7 +1624,11 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
               })}
             </ul>
           </div>
-          <DialogFooter><Button variant="outline" disabled={reviewBusy} onClick={closeReviewDialog}>取消</Button><Button disabled={reviewBusy || reviewDialogAssets.some((asset) => !reviewVersionChoices[asset.media_id])} onClick={() => void runBatchReview()}>{reviewBusy ? "审核中…" : `审核通过（${reviewDialogMediaIds.length}）`}</Button></DialogFooter>
+          <DialogFooter>
+            <Button variant="outline" disabled={reviewBusy} onClick={closeReviewDialog}>取消</Button>
+            <Button variant="destructive" disabled={reviewBusy || reviewDialogAssets.some((asset) => !reviewVersionChoices[asset.media_id])} onClick={() => void runBatchDecision(false)}>{reviewBusy ? "处理中…" : `拒绝发布（${reviewDialogMediaIds.length}）`}</Button>
+            <Button variant="default" disabled={reviewBusy || reviewDialogAssets.some((asset) => !reviewVersionChoices[asset.media_id])} onClick={() => void runBatchDecision(true)}>{reviewBusy ? "处理中…" : `允许发布（${reviewDialogMediaIds.length}）`}</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
       <Dialog open={publishDialogMediaIds.length > 0} onOpenChange={(open) => { if (!open) closePublishDialog(); }}>
@@ -1649,7 +1644,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-ui-sm font-medium">{asset.title}</p>
                   <p className="truncate text-ui-xs text-muted-foreground">{asset.original_filename}</p>
-                  <p className="text-ui-xs text-muted-foreground">转录稿已审核通过，发布后将进入索引并成为正式版本。</p>
+                  <p className="text-ui-xs text-muted-foreground">发布后转录稿进入候选索引，成功后成为正式版本并对外可见。</p>
                 </div>
               </li>
             ))}

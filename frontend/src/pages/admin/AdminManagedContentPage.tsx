@@ -1419,9 +1419,9 @@ const statusLabel: Record<string, string> = {
   awaiting_transcription: "待转录",
   transcribing: "转录中",
   transcription_failed: "转录失败",
-  transcript_ready: "转录稿待审核",
-  transcript_awaiting_review: "转录稿待审核",
-  transcript_rejected: "审核退回",
+  transcript_ready: "转录稿待发布",
+  transcript_awaiting_review: "转录稿待发布",
+  transcript_rejected: "已拒绝发布",
   transcript_approved: "待发布",
 };
 const sourceLabel: Record<string, string> = {

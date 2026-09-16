@@ -5,7 +5,7 @@ import pytest
 from api.transcription_publication import TranscriptionPublicationApplicationService
 from api.transcription_store import SQLiteTranscriptionStore
 from src.transcription.profile import ProfileRegistry
-from src.transcription.types import ContractValidationError, ProfileQualification, ReviewStatus, PublicationIndexStatus
+from src.transcription.types import ContractValidationError, ProfileQualification, PublicationIndexStatus
 from tests.test_transcription_publication_transaction import persist_candidate
 from tests.transcription_fixture_helpers import make_profile, seed_admin_user
 
@@ -20,13 +20,14 @@ def _service(conn, artifacts, profile, tmp_path):
     )
 
 
-def test_automatic_version_requires_review_before_publish(tmp_path):
+def test_automatic_version_is_publishable_directly_from_pending(tmp_path):
     profile = make_profile(qualification=ProfileQualification.experimental)
     conn, store, _workflow, _port, profile, version = persist_candidate(tmp_path, profile=profile)
     service = _service(conn, _workflow.artifacts, profile, tmp_path)
-    assert version.review_status is ReviewStatus.awaiting_review
-    with pytest.raises(ContractValidationError):
-        service.publish(version.id)
+    assert version.publication_status.value == "pending"
+    # Unified flow: publishing an automatic version is itself the decision.
+    result = service.publish(version.id)
+    assert result["reused"] is False
     conn.close()
 
 
@@ -35,7 +36,9 @@ def test_review_publish_worker_path_is_idempotent(tmp_path, monkeypatch):
     conn, store, workflow, _port, profile, version = persist_candidate(tmp_path, profile=profile)
     service = _service(conn, workflow.artifacts, profile, tmp_path)
     seed_admin_user(conn)
-    store.review_version(version.id, approved=True, reviewed_by=1, review_note="ok", now=40)
+    # Reject then allow again, proving a rejected version may be republished.
+    store.review_version(version.id, approved=False, reviewed_by=1, review_note="需要修订", now=39)
+    store.review_version(version.id, approved=True, reviewed_by=1, review_note="已修订完成", now=40)
     result = service.publish(version.id)
     assert result["reused"] is False
     job = result["job"]

@@ -25,23 +25,21 @@ from src.config import parse_external_unc_roots, resolve_external_unc_path
 
 
 @pytest.mark.parametrize(
-    ("media_status", "job_status", "review_status", "publication_status", "index_status", "expected"),
+    ("media_status", "job_status", "publication_status", "index_status", "expected"),
     [
-        ("uploaded", None, None, None, None, "awaiting_transcription"),
-        ("transcribing", "running", None, None, None, "transcribing"),
-        ("failed", "failed", None, None, None, "transcription_failed"),
-        ("transcript_ready", "succeeded", "awaiting_review", "not_published", None, "transcript_awaiting_review"),
-        ("transcript_ready", "succeeded", "review_rejected", "not_published", None, "transcript_rejected"),
-        ("transcript_ready", "succeeded", "review_approved", "not_published", None, "transcript_approved"),
-        ("transcript_ready", "succeeded", "review_approved", "publishing", "embedding", "publishing"),
-        ("transcript_ready", "succeeded", "review_approved", "publication_failed", "failed", "publication_failed"),
-        ("ready", "succeeded", "review_approved", "published", "done", "published"),
+        ("uploaded", None, None, None, "awaiting_transcription"),
+        ("transcribing", "running", None, None, "transcribing"),
+        ("failed", "failed", None, None, "transcription_failed"),
+        ("transcript_ready", "succeeded", "pending", None, "transcript_ready"),
+        ("transcript_ready", "succeeded", "rejected", None, "transcript_rejected"),
+        ("transcript_ready", "succeeded", "publishing", "embedding", "publishing"),
+        ("transcript_ready", "succeeded", "publication_failed", "failed", "publication_failed"),
+        ("ready", "succeeded", "published", "done", "published"),
     ],
 )
 def test_external_lifecycle_matches_managed_video_statuses(
     media_status: str,
     job_status: str | None,
-    review_status: str | None,
     publication_status: str | None,
     index_status: str | None,
     expected: str,
@@ -49,7 +47,6 @@ def test_external_lifecycle_matches_managed_video_statuses(
     assert project_external_lifecycle(
         media_status=media_status,
         transcription_job_status=job_status,
-        review_status=review_status,
         publication_status=publication_status,
         index_status=index_status,
     ) == expected
@@ -59,8 +56,7 @@ def test_external_lifecycle_prefers_published_head_over_newer_revision() -> None
     assert project_external_lifecycle(
         media_status="transcript_ready",
         transcription_job_status="succeeded",
-        review_status="awaiting_review",
-        publication_status="not_published",
+        publication_status="pending",
         index_status=None,
         has_published_head=True,
     ) == "published"

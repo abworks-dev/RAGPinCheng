@@ -1178,10 +1178,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ media_ids: mediaIds, request_idempotency_key: requestIdempotencyKey }),
     }),
-  bulkReviewTranscriptions: (items: Array<{ media_id: string; version_id?: string | null }>, reviewNote: string | null = null) =>
+  bulkReviewTranscriptions: (items: Array<{ media_id: string; version_id?: string | null }>, reviewNote: string | null = null, approved = true) =>
     jsonFetch<BulkTranscriptionActionResult>("/api/admin/transcription/media/bulk-review", {
       method: "POST",
-      body: JSON.stringify({ items, review_note: reviewNote }),
+      body: JSON.stringify({ items, review_note: reviewNote, approved }),
     }),
   bulkPublishTranscriptions: (mediaIds: string[]) =>
     jsonFetch<BulkTranscriptionActionResult>("/api/admin/transcription/media/bulk-publish", {

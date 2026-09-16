@@ -187,7 +187,6 @@ def _media_action_state(
     status: str,
     job_status: str | None,
     job_failure_classification: str | None = None,
-    review_status: str | None,
     publication_status: str | None,
     publication_index_status: str | None,
     publication_request_status: str | None = None,
@@ -275,19 +274,20 @@ def _media_action_state(
             disabled["retry_transcription"] = "当前没有可用的转录方案，请先调整共享目录的默认转录方案"
     else:
         disabled["retry_transcription"] = "仅可重试失败或已取消且允许恢复的转录任务"
-    if review_status in {"awaiting_review", "review_rejected"}:
-        available.append("review_transcript")
-    else:
-        disabled["review_transcript"] = "当前没有待审核转录稿"
-    if review_status == "review_approved" and publication_status in {"not_published", "publication_failed"}:
+    if publication_status in {"pending", "rejected", "publication_failed"}:
         available.append("publish_transcript")
+        available.append("reject_transcript")
         available.append("return_to_review")
+    elif publication_status == "publishing":
+        disabled["publish_transcript"] = "转录稿专属索引正在处理"
+        disabled["reject_transcript"] = "转录稿正在发布中，不能拒绝"
+        disabled["return_to_review"] = "转录稿正在发布中，不能退回待发布"
     else:
-        disabled["publish_transcript"] = "转录稿需审核通过且未处于发布中"
-        disabled["return_to_review"] = "仅审核通过且未发布的转录稿可退回审核"
+        disabled["publish_transcript"] = "仅待发布或发布失败的转录稿可以发布"
+        disabled["reject_transcript"] = "仅待发布或发布失败的转录稿可以拒绝发布"
+        disabled["return_to_review"] = "仅待发布或已拒绝的转录稿可退回待发布"
     archiveable_unpublished = (
-        review_status in {"awaiting_review", "review_rejected", "review_approved"}
-        and publication_status in {"not_published", "publication_failed"}
+        publication_status in {"pending", "rejected", "publication_failed"}
         and not has_active_job
         and not has_active_index_job
     )
@@ -328,7 +328,6 @@ def _media_current_phase(
     *,
     status: str,
     job_status: str | None,
-    review_status: str | None,
     publication_status: str | None,
     publication_index_status: str | None,
 ) -> str:
@@ -340,7 +339,9 @@ def _media_current_phase(
         return "publication"
     if publication_status == "published" or status == "ready":
         return "ready"
-    if review_status in {"awaiting_review", "review_approved", "review_rejected"}:
+    # Unified flow: a transcript waiting for (or declined) an admin publish
+    # decision is reported as the pending-publication phase.
+    if publication_status in {"pending", "rejected"}:
         return "review"
     if job_status in {"pending", "running", "succeeded", "cancelled"}:
         return "transcription"
@@ -2122,7 +2123,6 @@ def list_media_assets(
             status=str(r["status"]),
             job_status=r["transcription_job_status"],
             job_failure_classification=r["transcription_failure_classification"],
-            review_status=r["review_status"],
             publication_status=r["publication_status"],
             publication_index_status=r["publication_index_status"],
             publication_request_status=r["publication_request_status"],
@@ -2167,7 +2167,6 @@ def list_media_assets(
             current_phase=_media_current_phase(
                 status=str(r["status"]),
                 job_status=r["transcription_job_status"],
-                review_status=r["review_status"],
                 publication_status=r["publication_status"],
                 publication_index_status=r["publication_index_status"],
             ),

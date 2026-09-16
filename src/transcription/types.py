@@ -69,6 +69,15 @@ class TranscriptionJobStage(Enum):
 
 
 class ReviewStatus(Enum):
+    """Legacy review states kept only for historical/audit reading.
+
+    The unified publication flow no longer performs a separate review step:
+    an admin decision is expressed directly through ``PublicationStatus``
+    (``pending`` = awaiting decision, ``rejected`` = declined).  These values
+    still appear in old rows written before the unification migration and are
+    mapped once by ``db_migrations``.  New code must not branch on this enum.
+    """
+
     not_required = "not_required"
     awaiting_review = "awaiting_review"
     review_approved = "review_approved"
@@ -76,7 +85,12 @@ class ReviewStatus(Enum):
 
 
 class PublicationStatus(Enum):
-    not_published = "not_published"
+    # Pre-decision state: transcript is ready and waiting for an admin
+    # allow/reject decision (replaces review_status awaiting/review_approved).
+    pending = "pending"
+    # Admin explicitly declined publication; the version may be published
+    # again after a later decision (replaces review_status review_rejected).
+    rejected = "rejected"
     publishing = "publishing"
     published = "published"
     publication_failed = "publication_failed"

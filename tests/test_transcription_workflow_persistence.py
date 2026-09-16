@@ -44,7 +44,7 @@ def test_workflow_persists_formatter_bytes_without_advancing_publication(tmp_pat
     )
     assert artifacts.load_verified(version.markdown_ref) == markdown
     assert store.load_job(JOB_ID).status is TranscriptionJobStatus.succeeded
-    assert version.publication_status.value == "not_published"
+    assert version.publication_status.value == "pending"
     assert store.current_head(version.media_id) is None
     conn.close()
 

@@ -5,13 +5,13 @@
 
 ## 用户可观察能力
 
-教学视频转录稿可以被索引和检索，回答能够显示带时间戳的视频引用；点击引用定位到来源卡片，引用悬浮卡和来源详情中的独立播放按钮可打开视频播放器并跳到引用时间点。系统管理员从资料管理的统一上传入口选择 MP4；视频上传后以“待发布”状态进入资料列表，不在上传阶段创建转录或索引任务。管理员在资料列表单个或批量“发布”后，系统创建发布意图，并把同一视频同时投影到发布任务和转录任务。转录方案选择、批量启动、逐视频方案覆盖、转写工作台、审核修改及最终发布全部在“转录任务”页完成。
+教学视频转录稿可以被索引和检索，回答能够显示带时间戳的视频引用；点击引用定位到来源卡片，引用悬浮卡和来源详情中的独立播放按钮可打开视频播放器并跳到引用时间点。系统管理员从资料管理的统一上传入口选择 MP4；视频上传后以“待发布”状态进入资料列表，不在上传阶段创建转录或索引任务。管理员在资料列表单个或批量“发布”后，系统创建发布意图，并把同一视频同时投影到发布任务和转录任务。转录方案选择、批量启动、逐视频方案覆盖、转写工作台、发布决策及最终发布全部在“转录任务”页完成。
 
 系统管理员可在 `/admin/asr` 的“转录配置”页比较三个服务器固定的 WhisperX v2 分段 Profile，查看固定工程词、Prompt 资产和应用/服务配置哈希，并提交只写审计记录的发布申请。页面不接受自由 Prompt、模型路径或任意解码参数；发布申请不持有部署凭据，也不直接触发生产 workflow。
 
-Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审核、显式发布、候选索引与正式 head 检索过滤。校对保存始终创建新的受管人工修订稿，不覆盖 ASR 或历史版本；新稿必须重新审核。用户可见流程为“审核 → 发布”，索引是发布的内部阶段：点击最终发布后资料状态才从待发布变为发布中，索引成功后自动切换正式 head 并变为已发布。真实 ASR/GPU/Qdrant 资格与生产准入状态只以当前 deployment workflow、capabilities 和本文件的“当前边界”核对，不以历史 run 数字推断。
+Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、统一发布决策、显式发布、候选索引与正式 head 检索过滤。校对保存始终创建新的受管人工修订稿，不覆盖 ASR 或历史版本；新稿必须重新作出发布决策。审核与发布已合并为单一“发布决策”流程：管理员对每个候选版本选择“允许发布”或“拒绝发布”（原因可选，拒绝发布时建议填写），拒绝的版本保留为“已拒绝发布”并可退回待发布、修订后重新作出决策。用户可见流程为“发布决策 → 发布”，索引是发布的内部阶段：点击最终发布后资料状态才从待发布变为发布中，索引成功后自动切换正式 head 并变为已发布。真实 ASR/GPU/Qdrant 资格与生产准入状态只以当前 deployment workflow、capabilities 和本文件的“当前边界”核对，不以历史 run 数字推断。
 
-已发布的视频转录稿会通过 `content_items(content_kind=media_transcript)` 目录壳进入受管资料库，但不替代本链路。视频原件、转录版本、审核发布和正式 head 仍以 `media_assets`、`transcript_versions`、`transcript_publication_index_jobs` 与 `media_transcript_heads` 为唯一权威；目录壳不复制文件、版本、发布或索引记录，普通资料的 `content_item_heads` 仍是另一条独立可见性边界。
+已发布的视频转录稿会通过 `content_items(content_kind=media_transcript)` 目录壳进入受管资料库，但不替代本链路。视频原件、转录版本、发布决策和正式 head 仍以 `media_assets`、`transcript_versions`、`transcript_publication_index_jobs` 与 `media_transcript_heads` 为唯一权威；目录壳不复制文件、版本、发布或索引记录，普通资料的 `content_item_heads` 仍是另一条独立可见性边界。
 
 ## 当前边界
 
@@ -30,7 +30,7 @@ Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审�
 - 播放器下方提供交互式转录稿，按播放进度高亮当前分段并自动跟随；点击分段可跳转，用户主动滚动时暂停跟随并可一键回到当前进度；
 - 资料管理页的视频转写行在存在唯一 `media_id` 时复用同一播放器抽屉，从视频起点打开上方视频与下方转写稿；
 - 正式 head 切换成功时在同一 SQLite 事务中创建或更新视频目录壳；历史正式视频由 Schema 16 幂等回填到 `05 培训资料`，之后可由具备发布权限的人员只调整资料库目录；
-- 资料库列出未归档媒体目录壳；没有转录版本时显示“待转录”，有运行任务时显示“转录中”，失败时显示“转录失败”。有正式 head 后仍只展示当前正式版本；较新的待审核或待发布稿不会替换旧条目，只显示待处理提醒；媒体归档后条目从资料库和分类计数中消失；
+- 资料库列出未归档媒体目录壳；没有转录版本时显示“待转录”，有运行任务时显示“转录中”，失败时显示“转录失败”。有正式 head 后仍只展示当前正式版本；较新的待发布（含被拒绝）稿不会替换旧条目，只显示待处理提醒；媒体归档后条目从资料库和分类计数中消失；
 - 普通登录用户可通过只读接口读取当前已发布转录版本；无版本头的既有人工上传媒体兼容读取其已登记、受控且完成索引的人工稿；
 - 具备 `media_id` 的引用在悬浮卡中显示独立播放按钮，并跳转对应时间点；
 - 来源卡片显示”从 HH:MM:SS 播放”按钮；
@@ -39,12 +39,12 @@ Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审�
 - 新视频上传成功后创建 `media_assets` 和 `content_items(content_kind=media_transcript)` 目录壳，资料库状态为 `pending_publication`，不会创建转录或索引任务；首次发布只创建 `media_publication_requests` 意图，管理员随后在转录任务页选择方案才创建 `transcription_jobs`，视频与后续转录稿始终通过 `media_id` 绑定；
 - 发布任务列表（`/admin/content?view=index` 的“发布任务”）对处于 `pending_transcription`（待转录）或 `ready_to_publish`（转录稿就绪待发布）的发布意图提供“取消发布”：`POST /api/admin/content/publication-jobs/{job_id}/cancel` 要求管理员 + CSRF，并在同一 SQLite 事务内将意图置为 `cancelled`、取消该视频进行中的转录任务（`pending`/`running` → `cancelled`）、把媒体重置回 `uploaded` 并写入 `content.publication_cancelled` 审计事件；取消后资料列表恢复“待发布”，可从资料列表重新发布，已在 `publishing`/`published` 的意图返回 409 拒绝取消；
 - “转录任务”位于 `/admin/content?view=transcription`，复用原媒体工作台但隐藏旧上传向导；旧 `/admin/media` 保留为带查询参数的兼容重定向；
-- 旧式人工 MP4+Markdown API 保持兼容；统一上传入口先创建待转录媒体目录壳，只有管理员在资料列表选择方案后才创建自动转录任务，experimental Profile 强制审核策略不由前端放宽；
-- 媒体列表分别展示媒体、转录、审核、发布和索引状态，并保留快捷筛选与转写版本工作台；资料库视频状态投影为“待转录、转录中、转录失败、转录稿待审核、审核通过、发布中、发布失败、已发布”，播放和下载在正式 head 产生前禁用。
+- 旧式人工 MP4+Markdown API 保持兼容；统一上传入口先创建待转录媒体目录壳，只有管理员在资料列表选择方案后才创建自动转录任务，experimental Profile 强制发布决策策略不由前端放宽；
+- 媒体列表分别展示媒体、转录、发布决策、发布和索引状态，并保留快捷筛选与转写版本工作台；资料库视频状态投影为“待转录、转录中、转录失败、待发布（含发布中与已拒绝发布）、发布失败、已发布”，播放和下载在正式 head 产生前禁用。
 - 转写工作台支持桌面双栏 Markdown 编辑/渲染预览，移动端使用“编辑/预览”切换；关闭、收起或切换版本前会保护未保存内容；不启用 raw HTML、自动保存或 WYSIWYG。
 - 管理员在转写工作台展开“校对内容”后可同时查看视频和指定转录版本的同步时间轴；点击时间戳跳转视频，播放时自动高亮当前段落，时间轴支持自动跟随和手动暂停跟随。
 - 管理员显式“保存为新草稿”时，服务端统一 LF、校验 UTF-8 编码后的 2 MiB 上限、说话人时间戳和非空正文，并以基础版本 SHA-256 与请求幂等键防止并发误写。
-- 修订稿登记为 `source=manual`、`markdown_storage_kind=managed_artifact`，记录基础版本、编辑人和保存幂等键，审核状态重置为 `awaiting_review`；legacy 人工上传稿仍保持独立且不能通过受管发布流程发布。
+- 修订稿登记为 `source=manual`、`markdown_storage_kind=managed_artifact`，记录基础版本、编辑人和保存幂等键，发布状态重置为 `pending`（待发布）；legacy 人工上传稿仍保持独立且不能通过受管发布流程发布。
 - WhisperX v2 提供自然、均衡和细分三个只读 Profile：自然分段不强制时长，均衡/细分最长分别为 30/15 秒，字符上限分别为 500/240/120，短段合并间隔分别为 1000/750/500 ms；超限段按换行、句末标点、逗号、空格和字符边界确定性切分，段内时间按字符比例计算。
 - v2 固定工程词包括 `Revit`、`Navisworks`、`AutoCAD`、`BIM`、`BIM-2026-0805`、`12.5`、`208`、`95%`；`Auto CAD`、`B I M`、大小写、标准编号空格/连字符、小数和百分号仅按明确模式做确定性校正，不做模糊替换。
 - schema 17 添加 `asr_profile_release_requests` 与 `asr_profile_audit_events`。读取要求管理员，创建要求管理员 CSRF、UUID 幂等键、实时 capability 和受认证 `/v1/profile-identities` 服务配置哈希匹配；申请与审计在同一 SQLite 事务写入。
@@ -59,14 +59,14 @@ Phase 5A/5B 已接通版本列表、Markdown 校对与渲染预览、人工审�
 - Phase 2 的 `transcription_jobs`、`transcript_versions`、artifact refs、publication-only index jobs 和正式版本 head 已由应用层 Store/服务使用；
 - Phase 3 remote Provider 仍只返回严格 `ProviderCandidate | ProviderFailure`，由 `pipeline.py` 独占 normalizer/Canonical 结果流；
 - 管理端单 MP4 + `profile_id` 上传、任务状态/取消/恢复已接入应用 API 和后台 worker；人工 MP4+Markdown 路径保持独立；
-- 管理端按媒体 lazy 加载版本历史，可校对并渲染预览不可变版本的 Markdown、将修改保存为新的受管人工修订、提交审核备注、批准/拒绝并显式发布；legacy 人工版本不提供可用的受管发布动作；
-- 管理端媒体列表使用真实审核枚举计算唯一当前阶段，独立展示索引状态，并提供处理中、待审核、已发布和失败快捷筛选（发布处理中的视频通过行内状态和关键词搜索查看）；媒体与最近任务窗口统一为 500 条，避免 500 条媒体响应因只加载 100 条任务而遗漏旧任务状态；
+- 管理端按媒体 lazy 加载版本历史，可校对并渲染预览不可变版本的 Markdown、将修改保存为新的受管人工修订、提交发布决策原因、允许/拒绝并显式发布；legacy 人工版本不提供可用的受管发布动作；
+- 管理端媒体列表使用统一的发布决策状态计算唯一当前阶段，独立展示索引状态，并提供全部任务、处理中、待发布（含发布中）、已发布和失败快捷筛选（发布处理中的视频通过行内状态和关键词搜索查看）；媒体与最近任务窗口统一为 500 条，避免 500 条媒体响应因只加载 100 条任务而遗漏旧任务状态；
 - Canonical normalizer 在唯一的 `ProviderCandidate → CanonicalTranscript` 边界过滤高置信 ASR Prompt 回吐：仅当片段同时含“请准确识别/要准确识别”“以下是/以下为”骨架并密集出现至少 3 个受控工程术语时丢弃，普通包含 Revit/BIM 的真实语句保留，并复用既有 `empty_segment_dropped` warning 记录审核证据，保持 `canonical-transcript/1` 旧读取器兼容。faster-whisper 与 WhisperX 的 ServiceProfile 不再把 Prompt 资产注入 `initial_prompt`，保留 hotwords、beam、temperature 与应用层术语纠正；`src/transcription/service_profiles.py` 纳入对应 ASR runtime contract，防止旧 qualification 证据复用，必须重新 qualification 后才能生产启用。相邻片段若前段至少 8 字、没有句末标点、间隔在方案 `merge_gap_ms` 内且合并后仍满足字符/时长上限，则在 normalizer 中合并，减少半句分段，但不伪造标点或缺失正文。
 - 自动稿格式中的 `说话人 N` 是历史解析兼容标记，`N` 为 Canonical 片段序号，并非声纹/说话人识别结果；当前 ProviderCandidate/Canonical schema 没有 diarization 字段。改名会影响既有 transcript parser、检索 chunk 与历史稿兼容，因此本次保留格式并明确语义。
-- 转录任务的转录版本列表按 `created_at DESC, rowid DESC` 返回（同一秒完成的批量稿用插入顺序兜底，不再由随机 UUID 决定），保持“最新一稿在最上”。`transcript_versions` DTO 新增 `completed_at` 与 `attempt_number`：自动稿的 `completed_at` 取任务 `finished_at`（版本行与任务置为 succeeded 在同一事务、同一时刻写入），人工稿回退为版本自身 `created_at`，`attempt_number` 为产出该稿的转录尝试序号（人工稿为 `null`）；转写工作台版本行与“审核/发布所选”的版本选择项据此显示“完成于 <本地时间> · 第 N 次尝试”，替代此前无时间、且版本号会随新稿整体漂移的展示。该列表只包含成功产出的版本，失败或取消的尝试仅在任务历史中体现，因此“版本 N”不等于“第 N 次尝试”。
+- 转录任务的转录版本列表按 `created_at DESC, rowid DESC` 返回（同一秒完成的批量稿用插入顺序兜底，不再由随机 UUID 决定），保持“最新一稿在最上”。`transcript_versions` DTO 新增 `completed_at` 与 `attempt_number`：自动稿的 `completed_at` 取任务 `finished_at`（版本行与任务置为 succeeded 在同一事务、同一时刻写入），人工稿回退为版本自身 `created_at`，`attempt_number` 为产出该稿的转录尝试序号（人工稿为 `null`）；转写工作台版本行与“发布决策/发布所选”的版本选择项据此显示“完成于 <本地时间> · 第 N 次尝试”，替代此前无时间、且版本号会随新稿整体漂移的展示。该列表只包含成功产出的版本，失败或取消的尝试仅在任务历史中体现，因此“版本 N”不等于“第 N 次尝试”。
 - 媒体列表 API 同时返回 `current_phase`、`available_actions` 和逐动作 `disabled_actions` 原因，前端只消费服务端能力而不重建权限规则。运行中的任务可取消；失败或取消且非永久失败的既有任务使用原任务运行配置和方案快照重试；共享来源在任务创建前仅 `media_assets` 标记失败时，优先使用来源当前默认方案，其运行 Profile 未被应用实际准入时回退到首个可用方案。ASR 全局不可用或没有任何已准入方案时，后端隐藏重试能力并返回结构化原因；真正的并发状态变化单独返回可重试的状态冲突。单项和批量重试均由后端逐项返回结果。媒体列表还返回 `transcription_scheme_id`、`transcription_scheme_name` 与 `transcription_scheme_deleted`（方案已归档或纪录缺失），转录任务与转写工作台据此展示“转录方案：<名称>”并在方案被删除时标记“原转录配置已删除”，仅进入转录或已完成的记录显示；`transcription_jobs` 与 `transcript_versions` DTO 同步返回 `scheme_name`/`scheme_deleted`。
-- “转录”与“重新转录”作为服务端动作键（`start_transcription`、`re_transcribe`）与其余行操作按钮一样全部常显，不满足条件时禁用并以 `disabled_actions` 原因悬浮提示。“重新转录”复用 `POST /api/admin/transcription/media/{id}/start`（已允许已完成/已取消媒体创建新 attempt）：有历史任务的媒体统一通过“重新转录”弹窗恢复或重做，默认保留每个视频的原转录方案，批量场景可选择一个方案并一键应用到全部视频，应用后仍可逐项覆盖。若后端同时提供 `retry_transcription`，前端不再重复展示“重试”；只有共享来源在任务创建前失败、没有历史任务且无法进入重新转录弹窗时才保留“重试”恢复入口。后端 retry 契约继续保留用于兼容与内部恢复；新的转录成功只产生待审核新版本，正式 head 保留到新稿审核并发布之后。永久失败的既有任务仍不允许 `retry_transcription`（该动作是恢复原任务本身），但允许“重新转录”：永久失败通常源于服务端缺陷，重新转录会以显式选择的方案新建一次 attempt，不覆盖任何已完成版本，是修复服务端后的恢复入口。发布前防线：`api/transcript_prompt_echo_guard.py` 在 `TranscriptionPublicationApplicationService.publish` 内校验 canonical 文本，凡仍含 ASR prompt 回吐片段（判定词表仍由 `src/transcription/normalizer.py` 单一持有）的版本一律拒绝进入正式 head 与索引，单条、批量与内容页重试三条发布路径返回同一条结构化原因并提示重新转录；已发布版本的幂等复用不受影响。该防线用于阻断修复上线前产生的历史版本被误发布。
-- 转录任务页批量子操作新增"审核通过所选"与"发布所选"："审核通过所选"支持一条共享的可选审核备注，并为每个视频单独选择要审核的转录版本（默认最新一版待审核版本，只有一个版本时即该版本），后端逐项校验版本归属与可审核状态并返回结构化失败原因；"发布所选"先弹出确认框展示实际会被发布的所有视频与版本影响说明，可逐个取消勾选后仅发布保留项，发布复用既有候选索引与正式 head 原子切换契约，绝不误改动未勾选视频。两项均为管理员 + CSRF 写入接口，逐项失败不阻塞其余项。
+- “转录”与“重新转录”作为服务端动作键（`start_transcription`、`re_transcribe`）与其余行操作按钮一样全部常显，不满足条件时禁用并以 `disabled_actions` 原因悬浮提示。“重新转录”复用 `POST /api/admin/transcription/media/{id}/start`（已允许已完成/已取消媒体创建新 attempt）：有历史任务的媒体统一通过“重新转录”弹窗恢复或重做，默认保留每个视频的原转录方案，批量场景可选择一个方案并一键应用到全部视频，应用后仍可逐项覆盖。若后端同时提供 `retry_transcription`，前端不再重复展示“重试”；只有共享来源在任务创建前失败、没有历史任务且无法进入重新转录弹窗时才保留“重试”恢复入口。后端 retry 契约继续保留用于兼容与内部恢复；新的转录成功只产生待发布新版本，正式 head 保留到新稿作出发布决策并发布之后。永久失败的既有任务仍不允许 `retry_transcription`（该动作是恢复原任务本身），但允许“重新转录”：永久失败通常源于服务端缺陷，重新转录会以显式选择的方案新建一次 attempt，不覆盖任何已完成版本，是修复服务端后的恢复入口。发布前防线：`api/transcript_prompt_echo_guard.py` 在 `TranscriptionPublicationApplicationService.publish` 内校验 canonical 文本，凡仍含 ASR prompt 回吐片段（判定词表仍由 `src/transcription/normalizer.py` 单一持有）的版本一律拒绝进入正式 head 与索引，单条、批量与内容页重试三条发布路径返回同一条结构化原因并提示重新转录；已发布版本的幂等复用不受影响。该防线用于阻断修复上线前产生的历史版本被误发布。
+- 转录任务页批量子操作新增"发布决策所选"与"发布所选"："发布决策所选"支持一条共享的可选发布决策原因，并为每个视频单独选择要决策的转录版本（默认最新一版待发布版本，只有一个版本时即该版本），随后统一选择"允许发布"或"拒绝发布"，后端逐项校验版本归属与可决策状态并返回结构化失败原因；"发布所选"先弹出确认框展示实际会被发布的所有视频与版本影响说明，可逐个取消勾选后仅发布保留项，发布复用既有候选索引与正式 head 原子切换契约，绝不误改动未勾选视频。两项均为管理员 + CSRF 写入接口，逐项失败不阻塞其余项。
 - `transcription_jobs` 通过新增式迁移加入可空阶段时间戳 `audio_started_at`/`audio_finished_at`/`transcribing_at`（无需索引重建或 Reset，历史任务仍兼容）。任务列表按任务阶段展示分段进度：音频提取期间 4%→15% 随耗时爬升、提取完成约 18%、开始转录约 25%、转录中按 `processed_ms/total_ms` 或耗时递增但运行中最高 96% 永不触顶、成功才到 100%；同时对"音频提取用时"与"转录用时"做每秒计时，阶段完成即冻结并展示最终用时。重试任务若复用已备好的音轨，会继承上一尝试的音频时段时间戳。
 - 失败对象只有在没有活动转录/索引任务、转录版本、正式 head、发布索引历史或活动替换时才开放清理。受管媒体清理会删除本地媒体与失败历史；共享来源只删除本地任务和派生缓存，并把媒体重置为可重新入队状态，不删除共享原文件或 `external_media_entries`。文件暂存使用事务前 `.cleanup-pending-*` 与提交后 `.cleanup-*` 两阶段标记；前者在数据库仍失败时必须恢复并重新走完整清理，后者由服务端优先投影独立的 `finalize_failed_cleanup` 收尾能力，即使媒体已重新入队或再次失败也不会删除当前缓存或任务。前端以这两个服务端动作区分完整失败清理与旧缓存收尾；单项和批量操作均由后端执行相同预检并逐项返回结果，发布索引处理中不会重复开放发布或普通失败清理动作。
 - Remote Provider 的服务请求身份绑定应用任务、媒体与执行指纹；同一应用任务网络重试保持稳定，同一媒体新建应用重试任务生成新身份；
@@ -244,7 +244,7 @@ candidate manifest 和 promotion workflow evidence 为准，不能把代码就�
 → ProviderCandidate | ProviderFailure
 → pipeline.py → normalize_candidate → CanonicalTranscript
 → deterministic Markdown + candidate transcript version
-→ 管理员审核
+→ 管理员发布决策（允许发布 / 拒绝发布，原因可选）
 → publication-only candidate index
 → SQLiteTranscriptionStore.promote（单事务 head 切换）
 → 检索按同一 head snapshot 过滤 Qdrant Child 与 parents.sqlite Parent
@@ -313,7 +313,7 @@ candidate manifest 和 promotion workflow evidence 为准，不能把代码就�
 
 - 依赖文档索引、检索、回答生成、引用与来源面板；
 - 依赖认证（`require_user`）和可配置媒体存储；代码默认仍使用 `media/` 兼容目录，T12-B 受控切换目标为 `CONTENT_ROOT/media`；旧媒体记录归档后从管理列表隐藏，历史 transcript version 和任务继续保留审计；
-- 可选的只读外部媒体源通过服务端根别名和相对路径解析原视频；ASR 仍只接收应用在本地媒体目录准备的音频，Provider、Canonical、Profile admission、审核、发布和索引契约不变；
+- 可选的只读外部媒体源通过服务端根别名和相对路径解析原视频；ASR 仍只接收应用在本地媒体目录准备的音频，Provider、Canonical、Profile admission、发布决策、发布和索引契约不变；
 - 依赖 `media_assets` 表（`app.sqlite`）和 `media_id` 列迁移。
 
 ## 不变量与安全边界
@@ -334,7 +334,7 @@ candidate manifest 和 promotion workflow evidence 为准，不能把代码就�
 - T12-B 仅删除既有 `media_transcript_heads` 正式指针和其精确旧索引，不删除 `transcript_versions`、`transcription_jobs` 或 `transcript_publication_index_jobs`；后续视频需在新媒体目录重新上传、转录和发布后才产生新的正式 head。
 - experimental Profile 不能自动发布或自动索引；人工 Markdown 路径不经过 Provider。
 - `published` 只在候选索引成功并完成正式 head 原子切换后成立；不存在“已发布、稍后再手动索引”的稳定状态。
-- 受管人工修订必须审核通过并由管理员显式发布；创建修订、审核通过或候选索引处理中均不改变既有正式 head，发布失败时旧 head 继续可见。
+- 受管人工修订必须经管理员发布决策允许并由管理员显式发布；创建修订、发布决策或候选索引处理中均不改变既有正式 head，发布失败时旧 head 继续可见。
 
 ## 验证
 
@@ -344,7 +344,7 @@ candidate manifest 和 promotion workflow evidence 为准，不能把代码就�
 - Phase 2：临时 SQLite migration/backup、Store 事务、artifact hash、publication head、recovery、人工稿不回填和静态依赖边界；
 - Phase 3/4：纯 Python service/remote、应用任务/worker、mock engine、存储恢复、取消/恢复和静态依赖边界；
 - Phase 5：Store/事务/manual/visibility/index metadata/static 本地 29 项通过；版本管理定向前端 31 项通过；API、worker、candidate index、Qdrant Filter 与完整前端 build 由独立 CI job 验证；
-- Markdown 校对：schema 10→11、修订幂等/冲突、格式验证、审核发布、旧 head 保留和公开读取后端定向通过；前端完整 259 项通过，production build 通过；媒体页 Playwright 12 项在 `1440x900`、`1280x720`、`768x1024` 和 `390x844` 全部通过，并完成校对抽屉截图复核。
+- Markdown 校对：schema 10→11、修订幂等/冲突、格式验证、发布决策与显式发布、旧 head 保留和公开读取后端定向通过；前端完整 259 项通过，production build 通过；媒体页 Playwright 12 项在 `1440x900`、`1280x720`、`768x1024` 和 `390x844` 全部通过，并完成校对抽屉截图复核。
 - Phase 5C 真实 ffmpeg/ASR/GPU/Qdrant E2E 未运行。
 - 管理流程加固：Provider/应用/API 定向 40 项通过；变基到最新 master 后 Provider/应用身份定向 31 项与前端定向 34 项通过，前端 production build 通过；远端 CI、真实服务和生产回归未执行。
 - faster-whisper R2：无 FastAPI、无真实引擎的 ASR/Provider/应用回归

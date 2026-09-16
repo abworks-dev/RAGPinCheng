@@ -14,7 +14,7 @@ from .persistence import (
     TranscriptionJobRecord,
     compute_persisted_execution_identity,
 )
-from .policy import effective_release_policy, review_gate_satisfied
+from .policy import publication_decision_satisfied
 from .profile import ProfileSnapshot, TranscriptionExecutionConfig, TranscriptionProfileDefinition
 from .scheme import TranscriptionSchemeSnapshot
 from .provider_protocol import ProviderFailure, ProviderFailureClassification
@@ -250,8 +250,8 @@ class TranscriptionPersistenceWorkflow:
         if managed_manual:
             if current_profile is not None:
                 raise ContractValidationError("manual_revision_profile_forbidden", "current_profile")
-            if not explicit_admin_action or version.review_status is not ReviewStatus.review_approved:
-                raise ContractValidationError("manual_revision_review_required", "review_status")
+            if not explicit_admin_action or not publication_decision_satisfied(version.publication_status):
+                raise ContractValidationError("manual_revision_decision_required", "publication_status")
             target = candidate_target_index_id(version_id, attempt_number)
             self.store.begin_publication(
                 version_id=version_id,
@@ -263,13 +263,12 @@ class TranscriptionPersistenceWorkflow:
             return target
         if version.profile_snapshot is None or current_profile is None:
             raise ContractValidationError("manual_publication_not_connected", "version.source")
-        policy = effective_release_policy(version.profile_snapshot, current_profile)
         if current_profile.admission is ProfileAdmission.disabled:
             raise ContractValidationError("profile_disabled", "current_profile")
         if current_profile.admission is ProfileAdmission.deprecated and not explicit_admin_action:
             raise ContractValidationError("deprecated_requires_explicit_admin", "current_profile")
-        if not review_gate_satisfied(version.review_status, policy):
-            raise ContractValidationError("review_gate_rejected", "review_status")
+        if not publication_decision_satisfied(version.publication_status):
+            raise ContractValidationError("publication_decision_rejected", "publication_status")
         target = candidate_target_index_id(version_id, attempt_number)
         self.store.begin_publication(
             version_id=version_id,

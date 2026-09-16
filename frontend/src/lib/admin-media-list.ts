@@ -50,7 +50,8 @@ export function mediaProgressRank(asset: MediaAsset, job?: TranscriptionJob): nu
   if (failed || job?.status === "cancelled") return TERMINAL_PROGRESS_RANK;
   if (
     asset.current_phase === "review"
-    || asset.review_status === "awaiting_review"
+    || asset.publication_status === "pending"
+    || asset.publication_status === "rejected"
     || asset.status === "transcript_ready"
   ) {
     return 2;

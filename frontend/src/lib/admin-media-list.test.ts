@@ -111,7 +111,7 @@ describe("sortMediaAssets", () => {
 
   it("sorts by lifecycle progress and keeps failed work at the end", () => {
     const items = [
-      asset({ media_id: "review", title: "待审核", review_status: "awaiting_review", current_phase: "review" }),
+      asset({ media_id: "review", title: "待发布", current_phase: "review", publication_status: "pending" }),
       asset({ media_id: "failed", title: "失败任务", status: "failed", current_phase: "failed" }),
       asset({ media_id: "running", title: "转录中", status: "transcribing", current_phase: "transcription" }),
       asset({ media_id: "ready", title: "已完成", status: "ready", publication_status: "published", current_phase: "ready" }),
@@ -120,14 +120,14 @@ describe("sortMediaAssets", () => {
 
     expect(titles(sortMediaAssets(items, { key: "progress", direction: "asc" }, context(jobs)))).toEqual([
       "转录中",
-      "待审核",
+      "待发布",
       "已完成",
       "失败任务",
     ]);
     expect(titles(sortMediaAssets(items, { key: "progress", direction: "desc" }, context(jobs)))).toEqual([
       "失败任务",
       "已完成",
-      "待审核",
+      "待发布",
       "转录中",
     ]);
   });
@@ -162,18 +162,17 @@ describe("matching the search box", () => {
         original_filename: "2.4.10-楼梯.mp4",
         category_path: "公司标准 / 培训视频",
         status: "failed",
-        review_status: "awaiting_review",
-        publication_status: "not_published",
+        publication_status: "pending",
       }),
       job: job({ status: "failed" }),
       categoryPath: "公司标准 / 培训视频",
-      statusLabels: ["转录失败", "待人工审核", "未发布"],
+      statusLabels: ["转录失败", "待发布"],
     });
     expect(matchesMediaSearch("楼梯", haystack)).toBe(true);
     expect(matchesMediaSearch("2.4.10", haystack)).toBe(true);
     expect(matchesMediaSearch("培训视频", haystack)).toBe(true);
     expect(matchesMediaSearch("转录失败", haystack)).toBe(true);
-    expect(matchesMediaSearch("待人工审核", haystack)).toBe(true);
+    expect(matchesMediaSearch("待发布", haystack)).toBe(true);
     expect(matchesMediaSearch("已发布", haystack)).toBe(false);
   });
 
