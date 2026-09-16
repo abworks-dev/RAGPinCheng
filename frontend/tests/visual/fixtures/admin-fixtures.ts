@@ -976,6 +976,15 @@ export async function installAdminRoutes(
     if (request.method() === "GET" && path === "/api/admin/media/media-ready/preview") {
       return route.fulfill({ status: 200, contentType: "video/mp4", body: "" });
     }
+    if (request.method() === "POST" && /\/versions\/[^/]+\/summary$/.test(path)) {
+      return json(route, { points: ["讲解项目交付培训的整体流程", "说明模型命名与交付目录核对要点"], mismatch_note: null });
+    }
+    if (request.method() === "POST" && /\/versions\/[^/]+\/review-suggestions$/.test(path)) {
+      return json(route, { suggestions: [{ timestamp: "00:00:12", original: "核对", corrected: "核对", reason: "样例", confidence: "high" }] });
+    }
+    if (request.method() === "POST" && path === "/api/admin/transcription/media/bulk-review-optimize") {
+      return json(route, { items: [{ media_id: "media-ready", status: "succeeded" }], succeeded: 1, failed: 0 }, 202);
+    }
     if (path === "/api/categories") return json(route, { categories: [], second_level_categories: [] });
     if (path === "/api/knowledge-scopes") return json(route, { scopes: knowledgeScopes });
     if (path === "/api/conversations" && request.method() === "GET") return json(route, { conversations: adminConversations.slice(0, 1) });

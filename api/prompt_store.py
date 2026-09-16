@@ -25,6 +25,10 @@ PROMPT_KEYS: tuple[tuple[str, str, str], ...] = (
     ("table_summary_user", "表格摘要（用户）", "表格转摘要的用户端模板"),
     ("asr_engineering_zh_v1", "ASR 工程术语 v1", "旧版 ASR 工程术语资产（只读参考，运行时默认 v2）"),
     ("asr_engineering_zh_v2", "ASR 工程术语 v2", "当前 ASR 工程术语资产，服务端只读引用"),
+    ("transcript_summary_system", "转录总结（系统）", "AI 视频转录稿要点总结的系统提示词"),
+    ("transcript_summary_user", "转录总结（用户）", "AI 视频转录稿要点总结的用户端模板"),
+    ("transcript_review_system", "转录修正建议（系统）", "AI 转录稿修正建议（同音字/语气词清理）的系统提示词"),
+    ("transcript_review_user", "转录修正建议（用户）", "AI 转录稿修正建议的用户端模板"),
 )
 
 

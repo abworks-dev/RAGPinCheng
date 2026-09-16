@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Archive, ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, Ban, CheckCircle2, ChevronDown, ClipboardCheck, FileUp, Film, FolderInput, LoaderCircle, RefreshCcw, RefreshCw, Repeat2, RotateCcw, Rocket, Search, Send, Settings2, SlidersHorizontal, Trash2, Upload, X, XCircle } from "lucide-react";
+import { Archive, ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, Ban, CheckCircle2, ChevronDown, ClipboardCheck, FileUp, Film, FolderInput, LoaderCircle, RefreshCcw, RefreshCw, Repeat2, RotateCcw, Rocket, Search, Send, Settings2, SlidersHorizontal, Sparkles, Trash2, Upload, X, XCircle } from "lucide-react";
 import { adminMediaApi } from "../../api/admin/media";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
@@ -287,6 +287,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const [reviewVersionOptions, setReviewVersionOptions] = useState<Record<string, TranscriptVersion[]>>({});
   const [reviewVersionsLoading, setReviewVersionsLoading] = useState(false);
   const [reviewBusy, setReviewBusy] = useState(false);
+  const [aiOptimizeDialogMediaIds, setAiOptimizeDialogMediaIds] = useState<string[]>([]);
   const [startDialogMediaIds, setStartDialogMediaIds] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
     const params = new URLSearchParams(window.location.search);
@@ -510,6 +511,9 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
   const reviewableSelectedAssets = selectedAssets.filter((asset) =>
     asset.available_actions.includes("publish_transcript") || asset.available_actions.includes("reject_transcript"),
   );
+  const aiOptimizableSelectedAssets = selectedAssets.filter((asset) =>
+    Boolean(asset.latest_version_id) || asset.available_actions.includes("publish_transcript") || asset.available_actions.includes("reject_transcript"),
+  );
   const cleanableSelectedAssets = selectedAssets.filter((asset) =>
     asset.available_actions.includes("delete_failed")
     || asset.available_actions.includes("finalize_failed_cleanup"),
@@ -715,6 +719,25 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
     setReviewDialogMediaIds([]);
     setReviewVersionChoices({});
     setReviewNote("");
+    await refreshMediaState();
+  };
+  const openAiOptimizeDialog = (assets: MediaAsset[]) => {
+    setAiOptimizeDialogMediaIds(assets.map((asset) => asset.media_id));
+    setBatchMenuOpen(false);
+  };
+  const runBatchAiOptimize = async () => {
+    if (!aiOptimizeDialogMediaIds.length || batchActionBusy) return;
+    setBatchActionBusy(true);
+    setAiOptimizeDialogMediaIds([]);
+    try {
+      const result = await adminMediaApi.bulkTranscriptAiOptimize(aiOptimizeDialogMediaIds);
+      showBatchToast("AI 优化所选", result.succeeded, result.items.filter((item) => item.status === "failed").map((item) => item.message || "AI 优化失败"));
+    } catch (cause) {
+      setUploadError(cause instanceof Error ? cause.message : String(cause));
+      return;
+    } finally {
+      setBatchActionBusy(false);
+    }
     await refreshMediaState();
   };
   useEffect(() => { setMediaPage(0); setSelectedMediaIds([]); }, [mediaFilter, mediaPageSize, mediaQuery, mediaPanelFilters, mediaSort.key, mediaSort.direction]);
@@ -1399,7 +1422,7 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
 <a className={buttonVariants({ variant: "outline" })} href="/admin/asr"><Settings2 className="size-4" />转录配置</a>
               <Button variant="outline" aria-label="刷新媒体资源" title="刷新媒体资源" disabled={loading} onClick={() => void refreshMediaState()}><RefreshCw className="size-4" aria-hidden="true" />刷新列表</Button>
-              <div className="relative"><Button variant="outline" disabled={!selectedMediaIds.length || batchActionBusy} aria-haspopup="menu" aria-expanded={batchMenuOpen} onClick={() => setBatchMenuOpen((open) => !open)}>批量操作<ChevronDown className="size-4" /></Button>{batchMenuOpen && <div role="menu" aria-label="批量操作" className="absolute right-0 top-full z-dropdown mt-1 w-48 rounded-ui-md border border-border bg-popover p-1 shadow-overlay"><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={startableSelectedAssets.length ? undefined : "所选视频均不可开始转录"} disabled={!startableSelectedAssets.length || batchActionBusy} onClick={() => openStartDialog(startableSelectedAssets)}><Rocket className="size-4" />开始转录（{startableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={retranscribableSelectedAssets.length ? undefined : "所选视频均不可重新转录"} disabled={!retranscribableSelectedAssets.length || batchActionBusy} onClick={() => openReTranscribeDialog(retranscribableSelectedAssets)}><RefreshCcw className="size-4" />重新转录所选（{retranscribableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={reviewableSelectedAssets.length ? undefined : "所选视频均不可发布或拒绝"} disabled={!reviewableSelectedAssets.length || batchActionBusy} onClick={() => openReviewDialog(reviewableSelectedAssets)}><Send className="size-4" />发布所选（{reviewableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={retryableSelectedAssets.length ? undefined : "所选视频均不可重试"} disabled={!retryableSelectedAssets.length || batchActionBusy} onClick={() => void runBatchRetry()}><RotateCcw className="size-4" />重试所选（{retryableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={cancellableSelectedJobs.length ? undefined : "没有正在运行的转录任务可取消"} disabled={!cancellableSelectedJobs.length || batchActionBusy} onClick={() => void runBatchCancel()}><Ban className="size-4" />取消所选（{cancellableSelectedJobs.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm text-destructive hover:bg-destructive/10 disabled:opacity-40" title={cleanableSelectedAssets.length ? undefined : "所选视频均不可清理"} disabled={!cleanableSelectedAssets.length || batchActionBusy} onClick={() => { setBatchCleanupTargetIds(cleanableSelectedAssets.map((asset) => asset.media_id)); setBatchMenuOpen(false); }}><Trash2 className="size-4" />清理所选（{cleanableSelectedAssets.length}）</button></div>}</div>
+              <div className="relative"><Button variant="outline" disabled={!selectedMediaIds.length || batchActionBusy} aria-haspopup="menu" aria-expanded={batchMenuOpen} onClick={() => setBatchMenuOpen((open) => !open)}>批量操作<ChevronDown className="size-4" /></Button>{batchMenuOpen && <div role="menu" aria-label="批量操作" className="absolute right-0 top-full z-dropdown mt-1 w-48 rounded-ui-md border border-border bg-popover p-1 shadow-overlay"><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={startableSelectedAssets.length ? undefined : "所选视频均不可开始转录"} disabled={!startableSelectedAssets.length || batchActionBusy} onClick={() => openStartDialog(startableSelectedAssets)}><Rocket className="size-4" />开始转录（{startableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={retranscribableSelectedAssets.length ? undefined : "所选视频均不可重新转录"} disabled={!retranscribableSelectedAssets.length || batchActionBusy} onClick={() => openReTranscribeDialog(retranscribableSelectedAssets)}><RefreshCcw className="size-4" />重新转录所选（{retranscribableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={reviewableSelectedAssets.length ? undefined : "所选视频均不可发布或拒绝"} disabled={!reviewableSelectedAssets.length || batchActionBusy} onClick={() => openReviewDialog(reviewableSelectedAssets)}><Send className="size-4" />发布所选（{reviewableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={aiOptimizableSelectedAssets.length ? undefined : "所选视频均无可优化的转录版本"} disabled={!aiOptimizableSelectedAssets.length || batchActionBusy} onClick={() => openAiOptimizeDialog(aiOptimizableSelectedAssets)}><Sparkles className="size-4" />AI 优化所选（{aiOptimizableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={retryableSelectedAssets.length ? undefined : "所选视频均不可重试"} disabled={!retryableSelectedAssets.length || batchActionBusy} onClick={() => void runBatchRetry()}><RotateCcw className="size-4" />重试所选（{retryableSelectedAssets.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm hover:bg-surface-muted disabled:opacity-40" title={cancellableSelectedJobs.length ? undefined : "没有正在运行的转录任务可取消"} disabled={!cancellableSelectedJobs.length || batchActionBusy} onClick={() => void runBatchCancel()}><Ban className="size-4" />取消所选（{cancellableSelectedJobs.length}）</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-ui-sm text-destructive hover:bg-destructive/10 disabled:opacity-40" title={cleanableSelectedAssets.length ? undefined : "所选视频均不可清理"} disabled={!cleanableSelectedAssets.length || batchActionBusy} onClick={() => { setBatchCleanupTargetIds(cleanableSelectedAssets.map((asset) => asset.media_id)); setBatchMenuOpen(false); }}><Trash2 className="size-4" />清理所选（{cleanableSelectedAssets.length}）</button></div>}</div>
               {!embedded && <Button onClick={() => setUploadDialogOpen(true)}><Upload className="size-4" />{hasUploadDraft ? `继续上传${pending.length ? `（${pending.length}）` : ""}` : "上传视频"}</Button>}
             </div>
           </div>
@@ -1602,6 +1625,24 @@ export function AdminMediaPage({ embedded = false }: { embedded?: boolean }) {
             <Button variant="outline" disabled={reviewBusy} onClick={closeReviewDialog}>取消</Button>
             <Button variant="destructive" disabled={reviewBusy || reviewDialogAssets.some((asset) => !reviewVersionChoices[asset.media_id])} onClick={() => void runBatchDecision(false)}>{reviewBusy ? "处理中…" : `拒绝发布（${reviewDialogMediaIds.length}）`}</Button>
             <Button variant="default" disabled={reviewBusy || reviewDialogAssets.some((asset) => !reviewVersionChoices[asset.media_id])} onClick={() => void runBatchDecision(true)}>{reviewBusy ? "处理中…" : `允许发布（${reviewDialogMediaIds.length}）`}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={aiOptimizeDialogMediaIds.length > 0} onOpenChange={(open) => { if (!open && !batchActionBusy) setAiOptimizeDialogMediaIds([]); }}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>AI 优化所选 {aiOptimizeDialogMediaIds.length} 个视频的转录稿</DialogTitle>
+            <DialogDescription>将取每个视频最后一个成功的转录版本，用 AI 生成修正建议（同音字/语气词清理）并直接保存为新草稿；时间戳与说话人行保持不变，新草稿须重新走发布决策。AI 模型不可用时逐项跳过并提示。</DialogDescription>
+          </DialogHeader>
+          <ul className="max-h-56 space-y-2 overflow-y-auto text-ui-sm">
+            {aiOptimizeDialogMediaIds.map((id) => {
+              const asset = mediaAssets.find((item) => item.media_id === id);
+              return <li key={id} className="flex items-center gap-2"><Sparkles className="size-4 shrink-0 text-primary" /><span className="min-w-0 truncate">{asset?.title || id}</span></li>;
+            })}
+          </ul>
+          <DialogFooter>
+            <Button variant="outline" disabled={batchActionBusy} onClick={() => setAiOptimizeDialogMediaIds([])}>取消</Button>
+            <Button disabled={batchActionBusy} onClick={() => void runBatchAiOptimize()}>{batchActionBusy ? "优化中…" : `确认 AI 优化（${aiOptimizeDialogMediaIds.length}）`}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -76,6 +76,9 @@ import type {
   AsrSettings,
   AsrProfileReleaseRequest,
   SystemPromptItem,
+  TranscriptAiHistoryItem,
+  TranscriptSummaryResult,
+  TranscriptReviewSuggestionsResult,
 } from "../types";
 
 // Mutating methods send X-CSRF-Token. Cookies always go along via credentials.
@@ -1199,6 +1202,21 @@ export const api = {
     jsonFetch<BulkTranscriptionActionResult>("/api/admin/transcription/media/bulk-publish", {
       method: "POST",
       body: JSON.stringify({ items }),
+    }),
+  transcriptSummary: (versionId: string, baseMarkdownSha256: string, history: TranscriptAiHistoryItem[] = []) =>
+    jsonFetch<TranscriptSummaryResult>(`/api/admin/transcription/versions/${versionId}/summary`, {
+      method: "POST",
+      body: JSON.stringify({ base_markdown_sha256: baseMarkdownSha256, history }),
+    }),
+  transcriptReviewSuggestions: (versionId: string, baseMarkdownSha256: string, history: TranscriptAiHistoryItem[] = []) =>
+    jsonFetch<TranscriptReviewSuggestionsResult>(`/api/admin/transcription/versions/${versionId}/review-suggestions`, {
+      method: "POST",
+      body: JSON.stringify({ base_markdown_sha256: baseMarkdownSha256, history }),
+    }),
+  bulkTranscriptAiOptimize: (mediaIds: string[]) =>
+    jsonFetch<BulkTranscriptionActionResult>("/api/admin/transcription/media/bulk-review-optimize", {
+      method: "POST",
+      body: JSON.stringify({ items: mediaIds.map((media_id) => ({ media_id })) }),
     }),
   listTranscriptVersions: (mediaId: string) =>
     jsonFetch<TranscriptVersion[]>(`/api/admin/transcription/media/${mediaId}/versions`),

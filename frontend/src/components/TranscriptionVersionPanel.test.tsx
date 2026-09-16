@@ -11,6 +11,9 @@ const mocks = vi.hoisted(() => ({
   publishTranscriptVersion: vi.fn(),
   getTranscriptPublicationJob: vi.fn(),
   bulkDeleteTranscriptVersions: vi.fn(),
+  transcriptSummary: vi.fn(),
+  transcriptReviewSuggestions: vi.fn(),
+  bulkTranscriptAiOptimize: vi.fn(),
 }));
 vi.mock("../api/client", () => ({ api: mocks }));
 
@@ -99,6 +102,8 @@ describe("TranscriptionVersionPanel", () => {
     mocks.createTranscriptRevision.mockResolvedValue(revisedVersion);
     mocks.reviewTranscriptVersion.mockResolvedValue(approvedVersion);
     mocks.publishTranscriptVersion.mockResolvedValue({ version: { ...approvedVersion, publication_status: "publishing" }, job: null, reused: false });
+    mocks.transcriptSummary.mockResolvedValue({ points: ["示例要点"], mismatch_note: null });
+    mocks.transcriptReviewSuggestions.mockResolvedValue({ suggestions: [] });
   });
 
   it("loads lazily and renders the Markdown preview", async () => {
@@ -654,6 +659,20 @@ describe("TranscriptionVersionPanel", () => {
 
     await waitFor(() => expect(mocks.bulkDeleteTranscriptVersions).toHaveBeenCalledTimes(2));
     expect(mocks.bulkDeleteTranscriptVersions.mock.calls[1][2]).toBe(firstKey);
+  });
+
+  it("renders the AI assistant and generates corrections for the workbench version", async () => {
+    mocks.transcriptSummary.mockResolvedValue({ points: ["一个教学要点"], mismatch_note: null });
+    mocks.transcriptReviewSuggestions.mockResolvedValue({
+      suggestions: [{ timestamp: "00:00:00", original: "广进", corrected: "管径", reason: "同音字", confidence: "high" }],
+    });
+    render(<TranscriptionVersionPanel mediaId="media-1" embedded />);
+    fireEvent.click(await screen.findByRole("button", { name: "校对内容" }));
+    fireEvent.click(await screen.findByRole("button", { name: "生成建议" }));
+
+    await waitFor(() => expect(mocks.transcriptReviewSuggestions).toHaveBeenCalled());
+    expect(await screen.findByText("管径")).toBeInTheDocument();
+    expect(screen.getByLabelText("AI 转录稿助手")).toBeInTheDocument();
   });
 });
 

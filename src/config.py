@@ -213,6 +213,11 @@ DECOMPOSE_FINAL_TOP_K = 8
 # split into sub-queries). Single-query path keeps MAX_CONTEXT_CHARS.
 DECOMPOSE_MAX_CONTEXT_CHARS = 8000
 
+# Character budget for transcript AI (summary / review suggestions / talk).
+# Transcripts longer than this are head-truncated so the prompt stays inside
+# the model window (see src/transcript_ai.py).
+TRANSCRIPT_AI_MAX_CHARS = int(os.getenv("TRANSCRIPT_AI_MAX_CHARS", "60000"))
+
 # Reranker (cross-encoder). Set RERANK_ENABLED=False to disable and fall back
 # to RRF order from Qdrant.
 RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
