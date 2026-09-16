@@ -75,6 +75,7 @@ import type {
   AnswerPolicyAuditEntry,
   AsrSettings,
   AsrProfileReleaseRequest,
+  SystemPromptItem,
 } from "../types";
 
 // Mutating methods send X-CSRF-Token. Cookies always go along via credentials.
@@ -423,6 +424,17 @@ export const api = {
     jsonFetch<CleanupResult>("/api/admin/maintenance/cleanup", { method: "POST" }),
   adminMaintenanceRuns: (limit = 20) =>
     jsonFetch<{ runs: MaintenanceRun[] }>(`/api/admin/maintenance/runs?limit=${limit}`),
+  adminListPrompts: () =>
+    jsonFetch<SystemPromptItem[]>("/api/admin/prompts"),
+  adminUpdatePrompt: (key: string, customBody: string) =>
+    jsonFetch<SystemPromptItem>(`/api/admin/prompts/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      body: JSON.stringify({ custom_body: customBody }),
+    }),
+  adminRestorePrompt: (key: string) =>
+    jsonFetch<SystemPromptItem>(`/api/admin/prompts/${encodeURIComponent(key)}/restore`, {
+      method: "POST",
+    }),
   adminAnswerPolicy: () => jsonFetch<AnswerPolicy>("/api/admin/answer-policy"),
   adminUpdateAnswerPolicy: (settings: Omit<AnswerPolicy, "policy_version" | "updated_at" | "updated_by"> & { change_reason?: string }) =>
     jsonFetch<AnswerPolicy>("/api/admin/answer-policy", {

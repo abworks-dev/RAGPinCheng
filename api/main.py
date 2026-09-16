@@ -56,6 +56,7 @@ from .routes_content import router as content_router
 from .routes_media import router as media_router
 from .routes_media_transcript import router as media_transcript_router
 from .routes_external_media import router as external_media_router, run_due_external_scans
+from .routes_prompts import router as prompts_router
 from .routes_transcription import (
     build_transcription_service,
     recover_publications_on_boot,
@@ -140,6 +141,16 @@ async def lifespan(app: FastAPI):
     init_db()
     seed_trash_settings_from_environment()
     bootstrap_admin_from_env()
+
+    # System prompt management: seed packaged defaults and let runtime loads
+    # prefer admin overrides stored in app.sqlite (management panel).
+    try:
+        from api import prompt_store
+        from src.prompts import register_prompt_override
+        prompt_store.seed_prompts()
+        register_prompt_override(prompt_store.get_active_prompt)
+    except Exception:
+        logger.exception("system prompt store seeding failed (non-fatal; falling back to packaged prompts)")
 
     # Fail fast if Qdrant is unreachable — better an immediate startup error
     # in the logs than a confusing 500 on the first chat request.
@@ -257,6 +268,7 @@ app.include_router(media_router, prefix="/api")
 app.include_router(media_transcript_router, prefix="/api")
 app.include_router(transcription_router, prefix="/api")
 app.include_router(external_media_router, prefix="/api")
+app.include_router(prompts_router, prefix="/api")
 
 
 # ── React SPA hosting ──────────────────────────────────────────────────────

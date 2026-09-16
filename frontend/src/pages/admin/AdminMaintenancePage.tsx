@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { RefreshCw, Save, Trash2 } from "lucide-react";
 import { adminMaintenanceApi } from "../../api/admin/maintenance";
+import { PromptManagementPanel } from "../../components/admin/PromptManagementPanel";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -247,6 +248,8 @@ export function AdminMaintenancePage() {
           <div className="flex flex-col gap-2 sm:flex-row"><Button variant="outline" onClick={() => void refreshPreview(status.settings.conversation_retention_days ?? undefined)} disabled={busy !== null}><RefreshCw className="size-4" />{busy === "preview" ? "刷新中…" : "刷新预览"}</Button><Button variant="destructive" onClick={() => setCleanupOpen(true)} disabled={busy !== null || !preview}><Trash2 className="size-4" />立即执行清理</Button></div>
         </CardContent>
       </Card>
+
+      <PromptManagementPanel />
 
       <section aria-labelledby="maintenance-runs" className="space-y-3">
         <h2 id="maintenance-runs" className="text-ui-base font-semibold">最近运行记录</h2>

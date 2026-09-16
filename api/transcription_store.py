@@ -36,7 +36,7 @@ from src.transcription.profile import (
     provider_config_from_json,
 )
 from src.transcription.scheme import TranscriptionSchemeSnapshot
-from src.transcription.provider_protocol import ProviderFailure, ProviderFailureClassification
+from src.transcription.provider_protocol import ProviderErrorCode, ProviderFailure, ProviderFailureClassification
 from src.transcription.types import (
     ArtifactReference,
     ContractValidationError,
@@ -131,6 +131,17 @@ def _execution_from_json(data: object) -> TranscriptionExecutionConfig:
             else None
         ),
     )
+
+
+def _provider_failure_summary(error_code: ProviderErrorCode) -> str:
+    """User-facing failure summary for a persisted provider failure.
+
+    Kept single-line and length-bounded for the `error_summary` column; the
+    error code remains the machine-readable authority.
+    """
+    if error_code is ProviderErrorCode.no_speech_provider_error:
+        return "原视频无可转录内容（音频全程静音，可能未录制声音或源文件损坏）。"
+    return "provider reported a controlled failure"
 
 
 class SQLiteTranscriptionStore:
@@ -484,7 +495,7 @@ class SQLiteTranscriptionStore:
             job_id,
             error_code=failure.error_code.value,
             classification=failure.classification,
-            error_summary="provider reported a controlled failure",
+            error_summary=_provider_failure_summary(failure.error_code),
             now=now,
         )
 

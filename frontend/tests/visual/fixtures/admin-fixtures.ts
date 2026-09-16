@@ -783,6 +783,20 @@ export async function installAdminRoutes(
     if (request.method() === "POST" && path === "/api/admin/maintenance/cleanup") {
       return json(route, { run_id: 2, retention_days: 30, deleted_conversations: 4, deleted_messages: 12, deleted_auth_sessions: 2, started_at: 1700000200, finished_at: 1700000202 });
     }
+    if (request.method() === "GET" && path === "/api/admin/prompts") {
+      return json(route, [
+        { key: "answer_system", title: "回答生成（系统）", description: "RAG 回答的系统提示词", default_body: "默认回答规则（合成）", custom_body: null, updated_by: null, updated_at: null },
+        { key: "answer_user", title: "回答生成（用户）", description: "RAG 回答的用户端模板", default_body: "默认回答用户模板（合成）", custom_body: null, updated_by: null, updated_at: null },
+        { key: "table_summary_system", title: "表格摘要（系统）", description: "表格转摘要的系统提示词", default_body: "默认表格摘要规则（合成）", custom_body: null, updated_by: null, updated_at: null },
+      ]);
+    }
+    if (request.method() === "PUT" && /^\/api\/admin\/prompts\/[^/]+$/.test(path)) {
+      return json(route, {
+        key: path.split("/").pop(), title: "回答生成（系统）", description: "RAG 回答的系统提示词",
+        default_body: "默认回答规则（合成）", custom_body: (request.postDataJSON() as { custom_body: string }).custom_body,
+        updated_by: 9001, updated_at: 1700000300,
+      });
+    }
     if (request.method() === "GET" && path === "/api/admin/conversations") return json(route, { conversations: scenario === "empty" ? [] : adminConversations });
     if (request.method() === "GET" && /^\/api\/admin\/users\/\d+\/conversations$/.test(path)) return json(route, { conversations: scenario === "empty" ? [] : adminConversations.filter((conversation) => conversation.user_id === 9002) });
     if (request.method() === "GET" && /^\/api\/conversations\/[^/]+$/.test(path)) return json(route, conversationState);

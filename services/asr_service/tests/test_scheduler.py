@@ -370,6 +370,6 @@ def test_all_silent_windows_fail_the_job_without_writing_an_invalid_candidate(tm
 
     assert engine.seen == [0, 1, 2]
     assert completed.state is ServiceJobState.failed
-    assert completed.failure_code is ServiceFailureCode.engine_failure_permanent
+    assert completed.failure_code is ServiceFailureCode.no_speech
     with pytest.raises(ContractValidationError, match="storage_not_found"):
         repo.result(job.job_id)

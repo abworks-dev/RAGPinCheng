@@ -6,4 +6,7 @@ export const adminMaintenanceApi = {
   runs: (...args: Parameters<typeof api.adminMaintenanceRuns>) => api.adminMaintenanceRuns(...args),
   updateSettings: (...args: Parameters<typeof api.adminUpdateMaintenanceSettings>) => api.adminUpdateMaintenanceSettings(...args),
   cleanup: (...args: Parameters<typeof api.adminRunMaintenanceCleanup>) => api.adminRunMaintenanceCleanup(...args),
+  listPrompts: (...args: Parameters<typeof api.adminListPrompts>) => api.adminListPrompts(...args),
+  updatePrompt: (...args: Parameters<typeof api.adminUpdatePrompt>) => api.adminUpdatePrompt(...args),
+  restorePrompt: (...args: Parameters<typeof api.adminRestorePrompt>) => api.adminRestorePrompt(...args),
 };

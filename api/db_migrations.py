@@ -996,6 +996,18 @@ TRANSCRIPTION_SCHEME_STATEMENTS = (
       ('whisperx-large-v3-zh-fine-v2','WhisperX 精细分段','WhisperX v2 精细分段','whisperx-v2','{"decode_preset":"service-default-v1","max_chars":240,"max_duration_ms":15000,"merge_gap_ms":500,"preprocessing_preset":"standard-audio-v1","prompt_asset":"asr_engineering_zh_v2","segmentation_preset":"fine","terminology_profile":"bim-engineering-v1","vad_preset":"service-default-v1"}','82d57ba229516849be26b7068182f67154119606736f2774afc22472401d2cf2',1,0,1,4,1,strftime('%s','now'),strftime('%s','now'))""",
 )
 
+SYSTEM_PROMPTS_STATEMENTS = (
+    """CREATE TABLE IF NOT EXISTS system_prompts (
+        key TEXT PRIMARY KEY,
+        title TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        default_body TEXT NOT NULL,
+        custom_body TEXT,
+        updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        updated_at INTEGER
+    )""",
+)
+
 MIGRATIONS = (
     Migration(1, "multi_engine_transcription_phase2", PHASE2_STATEMENTS),
     Migration(2, "answer_regeneration_versions", ANSWER_VERSION_STATEMENTS),
@@ -1369,6 +1381,7 @@ MIGRATIONS = (
         "unified_publication_status",
         ("REPLACE_TRANSCRIPT_PUBLICATION_STATUSES", "MAP_TRANSCRIPT_PUBLICATION_STATUSES"),
     ),
+    Migration(42, "system_prompts_management", SYSTEM_PROMPTS_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
