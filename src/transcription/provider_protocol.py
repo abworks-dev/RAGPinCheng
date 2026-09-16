@@ -37,6 +37,7 @@ class ProviderErrorCode(Enum):
     provider_contract_violation = "provider_contract_violation"
     provider_oom = "provider_oom"
     provider_cancelled = "provider_cancelled"
+    no_speech_provider_error = "no_speech_provider_error"
     input_too_large = "input_too_large"
     input_unavailable = "input_unavailable"
     service_contract_mismatch = "service_contract_mismatch"

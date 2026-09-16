@@ -200,6 +200,7 @@ _TRANSCRIPTION_FAILURES: dict[str, tuple[str, bool]] = {
     "provider_oom": ("转录资源暂时不足，请稍后重试。", True),
     "transient_provider_error": ("转录服务暂时失败，可以重新转录。", True),
     "permanent_provider_error": ("转录服务执行失败，请联系管理员检查服务配置。", False),
+    "no_speech_provider_error": ("原视频无可转录内容（音频全程静音，可能未录制声音或源文件损坏）。", False),
     "input_too_large": ("视频音频超过转录服务限制。", False),
     "input_unavailable": ("无法读取有效音频，请检查视频文件。", False),
     "service_contract_mismatch": ("应用与转录服务契约不兼容，请联系管理员。", False),

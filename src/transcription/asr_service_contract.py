@@ -62,6 +62,7 @@ class ServiceFailureCode(Enum):
     provider_cancelled = "provider_cancelled"
     engine_failure_transient = "engine_failure_transient"
     engine_failure_permanent = "engine_failure_permanent"
+    no_speech = "no_speech"
     invalid_engine_output = "invalid_engine_output"
     storage_unavailable = "storage_unavailable"
     disk_low = "disk_low"

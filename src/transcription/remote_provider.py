@@ -249,6 +249,7 @@ _FAILURE_MAP = {
     ServiceFailureCode.invalid_engine_output: ProviderErrorCode.invalid_provider_output,
     ServiceFailureCode.engine_failure_transient: ProviderErrorCode.transient_provider_error,
     ServiceFailureCode.engine_failure_permanent: ProviderErrorCode.permanent_provider_error,
+    ServiceFailureCode.no_speech: ProviderErrorCode.no_speech_provider_error,
     ServiceFailureCode.storage_unavailable: ProviderErrorCode.storage_unavailable,
     ServiceFailureCode.disk_low: ProviderErrorCode.disk_low,
 }

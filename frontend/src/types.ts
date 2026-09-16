@@ -359,6 +359,16 @@ export type CleanupResult = {
   finished_at: number;
 };
 
+export type SystemPromptItem = {
+  key: string;
+  title: string;
+  description: string;
+  default_body: string;
+  custom_body: string | null;
+  updated_by: number | null;
+  updated_at: number | null;
+};
+
 export type ManagedCategory = {
   id: string;
   category_key: string;

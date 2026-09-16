@@ -385,7 +385,7 @@ class Scheduler:
                 # Every window of this upload was silent. There is no transcript to
                 # build and ProviderCandidate requires at least one segment, so fail
                 # explicitly instead of letting a contract error escape run_next.
-                return self._fail(running, ServiceFailureCode.engine_failure_permanent)
+                return self._fail(running, ServiceFailureCode.no_speech)
 
             with self._state_lock:
                 current = self.repo.get(job_id)

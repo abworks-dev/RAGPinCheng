@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
   runs: vi.fn(),
   update: vi.fn(),
   cleanup: vi.fn(),
+  listPrompts: vi.fn(),
+  updatePrompt: vi.fn(),
+  restorePrompt: vi.fn(),
 }));
 
 vi.mock("../../api/client", () => ({ api: {
@@ -16,6 +19,9 @@ vi.mock("../../api/client", () => ({ api: {
   adminMaintenanceRuns: mocks.runs,
   adminUpdateMaintenanceSettings: mocks.update,
   adminRunMaintenanceCleanup: mocks.cleanup,
+  adminListPrompts: mocks.listPrompts,
+  adminUpdatePrompt: mocks.updatePrompt,
+  adminRestorePrompt: mocks.restorePrompt,
 } }));
 
 const settings = {
@@ -43,6 +49,9 @@ describe("AdminMaintenancePage", () => {
     mocks.preview.mockResolvedValue(preview);
     mocks.runs.mockResolvedValue({ runs: [] });
     mocks.update.mockResolvedValue(settings);
+    mocks.listPrompts.mockResolvedValue([
+      { key: "answer_system", title: "回答生成（系统）", description: "RAG 回答的系统提示词", default_body: "默认回答规则", custom_body: null, updated_by: null, updated_at: null },
+    ]);
   });
 
   it("loads the persisted default policy and cleanup preview", async () => {
