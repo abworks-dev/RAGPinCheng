@@ -24,7 +24,7 @@
 -> 管理员首次确认或后续自动入队
 -> 本地 prepared-audio-v1.wav
 -> 既有 Profile/Provider/Canonical 转录
--> 人工审核 -> 索引候选 -> 发布 head
+-> 管理员发布决策（允许发布 / 拒绝发布）-> 索引候选 -> 发布 head
 -> content_items(media_transcript) 目录壳
 ```
 
