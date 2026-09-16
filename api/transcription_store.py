@@ -404,7 +404,7 @@ class SQLiteTranscriptionStore:
                     _json_text(job.profile_snapshot.to_json_dict()), canonical_text, canonical.content_sha256,
                     MarkdownStorageKind.managed_artifact.value, markdown_ref.relative_path,
                     markdown_ref.content_sha256, markdown_ref.size_bytes, review_status.value,
-                    None, None, None, PublicationStatus.not_published.value, None, None, now, now,
+                    None, None, None, PublicationStatus.pending.value, None, None, now, now,
                 ),
             )
             for artifact in canonical.artifact_refs:
@@ -533,7 +533,7 @@ class SQLiteTranscriptionStore:
                     markdown_rel_path,markdown_sha256,markdown_size_bytes,review_status,reviewed_by,
                     reviewed_at,review_note,publication_status,published_at,supersedes_version_id,created_at,updated_at
                 ) VALUES (?,?,NULL,'manual',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'legacy_manual',?,?,?,?,
-                          NULL,NULL,NULL,'not_published',NULL,NULL,?,?)""",
+                          NULL,NULL,NULL,'pending',NULL,NULL,?,?)""",
                 (
                     version_id, media_id, markdown_ref.relative_path, markdown_ref.content_sha256,
                     markdown_ref.size_bytes, initial_review_status.value, now, now,
@@ -602,7 +602,7 @@ class SQLiteTranscriptionStore:
                         reviewed_at,review_note,publication_status,published_at,supersedes_version_id,
                         created_at,updated_at,derived_from_version_id,edited_by,edit_idempotency_key
                     ) VALUES (?,?,NULL,'manual',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'managed_artifact',
-                              ?,?,?,'awaiting_review',NULL,NULL,NULL,'not_published',NULL,NULL,?,?,?,?,?)""",
+                              ?,?,?,'awaiting_review',NULL,NULL,NULL,'pending',NULL,NULL,?,?,?,?,?)""",
                     (
                         version_id,
                         base.media_id,
@@ -700,7 +700,7 @@ class SQLiteTranscriptionStore:
                         reviewed_at,review_note,publication_status,published_at,supersedes_version_id,
                         created_at,updated_at,derived_from_version_id,edited_by,edit_idempotency_key
                     ) VALUES (?,?,NULL,'manual',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'managed_artifact',
-                              ?,?,?,'awaiting_review',NULL,NULL,NULL,'not_published',NULL,NULL,?,?,?,?,?)""",
+                              ?,?,?,'awaiting_review',NULL,NULL,NULL,'pending',NULL,NULL,?,?,?,?,?)""",
                     (
                         version_id,
                         media_id,
@@ -828,17 +828,29 @@ class SQLiteTranscriptionStore:
         review_note: str | None,
         now: int,
     ) -> TranscriptVersionRecord:
+        """Apply an admin publication decision to a transcript version.
+
+        ``approved=True`` marks the version as allowed to publish (kept
+        ``pending`` until the ``publish`` command starts indexing).
+        ``approved=False`` rejects publication: the version moves to
+        ``rejected`` with an optional reason recorded in ``review_note``.
+        A rejected version may be published again after a later decision
+        (the reject decision is purely an audit record plus state flip).
+        """
         validate_uuid(version_id, "version_id")
         if type(approved) is not bool or type(reviewed_by) is not int or reviewed_by <= 0:
             raise ContractValidationError("invalid_review_command", "review")
         if review_note is not None:
             validate_single_line(review_note, "review_note")
-        target = ReviewStatus.review_approved if approved else ReviewStatus.review_rejected
+        target = PublicationStatus.pending if approved else PublicationStatus.rejected
         with self._transaction():
             changed = self._conn.execute(
-                """UPDATE transcript_versions SET review_status=?,reviewed_by=?,reviewed_at=?,review_note=?,updated_at=?
-                   WHERE id=? AND review_status='awaiting_review'""",
-                (target.value, reviewed_by, now, review_note, now, version_id),
+                """UPDATE transcript_versions SET review_status='review_approved',reviewed_by=?,reviewed_at=?,
+                       review_note=?,publication_status=?,updated_at=?
+                   WHERE id=? AND publication_status IN ('pending','rejected')""",
+                (
+                    reviewed_by, now, review_note, target.value, now, version_id,
+                ),
             ).rowcount
             if changed != 1:
                 raise StoreConflictError("review_transition_conflict")
@@ -852,14 +864,19 @@ class SQLiteTranscriptionStore:
         return self.load_version(version_id)
 
     def return_version_to_review(self, version_id: str, *, now: int) -> TranscriptVersionRecord:
+        """Move a decided-but-not-published version back to pending.
+
+        Works for both an allowed version (awaiting the publish command) and a
+        rejected version, so a wrong rejection can be reconsidered.
+        """
         validate_uuid(version_id, "version_id")
         with self._transaction():
             changed = self._conn.execute(
                 """UPDATE transcript_versions
                    SET review_status='awaiting_review',reviewed_by=NULL,reviewed_at=NULL,
-                       review_note=NULL,updated_at=?
-                   WHERE id=? AND review_status='review_approved'
-                     AND publication_status IN ('not_published','publication_failed')""",
+                       review_note=NULL,publication_status='pending',updated_at=?
+                   WHERE id=? AND publication_status IN ('pending','rejected')
+                     AND publication_status<>'publishing'""",
                 (now, version_id),
             ).rowcount
             if changed != 1:
@@ -892,12 +909,11 @@ class SQLiteTranscriptionStore:
                 (version.media_id,),
             ).fetchone() is not None:
                 raise StoreConflictError("media_replacement_active")
-            if version.publication_status not in (PublicationStatus.not_published, PublicationStatus.publication_failed):
+            if version.publication_status not in (PublicationStatus.pending, PublicationStatus.rejected, PublicationStatus.publication_failed):
                 raise ContractValidationError("publication_already_active", "publication_status")
             changed = self._conn.execute(
                 """UPDATE transcript_versions SET publication_status='publishing',updated_at=?
-                   WHERE id=? AND review_status IN ('review_approved','not_required')
-                     AND publication_status IN ('not_published','publication_failed')
+                   WHERE id=? AND publication_status IN ('pending','rejected','publication_failed')
                      AND EXISTS(
                        SELECT 1 FROM media_assets m
                        WHERE m.media_id=transcript_versions.media_id AND m.status<>'archived'
@@ -1091,7 +1107,6 @@ class SQLiteTranscriptionStore:
                 allowed = (
                     current_profile is None
                     and explicit_admin_action
-                    and version.review_status is ReviewStatus.review_approved
                     and version.publication_status is PublicationStatus.publishing
                     and PublicationIndexStatus(row["status"]) is PublicationIndexStatus.done
                 )
@@ -1100,7 +1115,6 @@ class SQLiteTranscriptionStore:
                     raise ContractValidationError("profile_required", "current_profile")
                 policy = effective_release_policy(version.profile_snapshot, current_profile)
                 allowed = promote_allowed(
-                    review_status=version.review_status,
                     effective_policy=policy,
                     current_admission=current_profile.admission,
                     explicit_admin_action=explicit_admin_action,

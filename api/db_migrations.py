@@ -1364,6 +1364,11 @@ MIGRATIONS = (
             "ALTER TABLE transcription_jobs ADD COLUMN transcribing_at INTEGER",
         ),
     ),
+    Migration(
+        41,
+        "unified_publication_status",
+        ("REPLACE_TRANSCRIPT_PUBLICATION_STATUSES", "MAP_TRANSCRIPT_PUBLICATION_STATUSES"),
+    ),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
@@ -1557,6 +1562,51 @@ def replace_transcription_jobs_columns(sql: str) -> str:
 
 
 def execute_migration_statement(conn: sqlite3.Connection, statement: str) -> None:
+    if statement == "REPLACE_TRANSCRIPT_PUBLICATION_STATUSES":
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='transcript_versions'"
+        ).fetchone()
+        if row is None or not row[0]:
+            raise RuntimeError("migration_schema_mismatch")
+        old = "publication_status TEXT NOT NULL CHECK (publication_status IN ('not_published','publishing','published','publication_failed'))"
+        new = "publication_status TEXT NOT NULL CHECK (publication_status IN ('pending','rejected','publishing','published','publication_failed'))"
+        sql = str(row[0])
+        if new in sql:
+            return
+        if old not in sql:
+            raise RuntimeError("migration_schema_mismatch")
+        conn.execute("PRAGMA writable_schema=ON")
+        try:
+            conn.execute(
+                "UPDATE sqlite_master SET sql=? WHERE type='table' AND name='transcript_versions'",
+                (sql.replace(old, new),),
+            )
+        finally:
+            conn.execute("PRAGMA writable_schema=RESET")
+        schema_version = int(conn.execute("PRAGMA schema_version").fetchone()[0])
+        conn.execute(f"PRAGMA schema_version={schema_version + 1}")
+        return
+    if statement == "MAP_TRANSCRIPT_PUBLICATION_STATUSES":
+        # Unified flow: the separate review decision is folded into the
+        # publication state.  awaiting_review / review_approved / not_required
+        # all mean "transcript ready, waiting for an admin publish decision"
+        # -> pending; review_rejected -> rejected.  Already-active publication
+        # states keep their meaning.  review_* columns stay as audit history.
+        conn.execute(
+            """UPDATE transcript_versions SET publication_status='pending'
+               WHERE publication_status='not_published'
+                 AND review_status IN ('not_required','awaiting_review','review_approved')"""
+        )
+        conn.execute(
+            """UPDATE transcript_versions SET publication_status='rejected'
+               WHERE publication_status='not_published' AND review_status='review_rejected'"""
+        )
+        # Any legacy not_published row without a review value (defensive).
+        conn.execute(
+            """UPDATE transcript_versions SET publication_status='pending'
+               WHERE publication_status='not_published'"""
+        )
+        return
     if statement == "REPLACE_DOCUMENT_REVIEW_STATUSES":
         row = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='content_versions'"

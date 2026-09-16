@@ -27,7 +27,7 @@ const awaitingVersion = {
   reviewed_by: null,
   reviewed_at: null,
   review_note: null,
-  publication_status: "not_published",
+  publication_status: "pending",
   published_at: null,
   supersedes_version_id: null,
   derived_from_version_id: null,
@@ -228,27 +228,27 @@ describe("TranscriptionVersionPanel", () => {
       awaitingVersion.markdown_sha256,
       expect.stringMatching(/^[0-9a-f-]{36}$/),
     ));
-    expect(await screen.findByText("新草稿已保存，审核状态已重置为待审核。")).toBeInTheDocument();
+    expect(await screen.findByText("新草稿已保存，发布状态已重置为待发布。")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "转录 Markdown 编辑器" })).toHaveValue("说话人 1 00:00:00\n校对后的内容\n");
   });
 
-  it("submits review note and keeps publish disabled before approval", async () => {
+  it("submits publication decision note and keeps publish disabled for legacy manual", async () => {
     render(<TranscriptionVersionPanel mediaId="media-1" />);
     fireEvent.click(screen.getByRole("button", { name: "审阅转录版本" }));
-    await screen.findByRole("textbox", { name: `审核备注 ${awaitingVersion.version_id}` });
-    expect(screen.getByRole("button", { name: "发布到知识库" })).toBeDisabled();
-    expect(screen.getByText("审核通过后可发布")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(`审核备注 ${awaitingVersion.version_id}`), { target: { value: "已校对" } });
-    fireEvent.click(screen.getByRole("button", { name: "审核通过" }));
-    await waitFor(() => expect(mocks.reviewTranscriptVersion).toHaveBeenCalledWith(awaitingVersion.version_id, true, "已校对"));
+    await screen.findByRole("textbox", { name: `发布决策原因 ${awaitingVersion.version_id}` });
+    // An automatic pending version can be published or rejected.
+    expect(screen.getByRole("button", { name: "发布到知识库" })).toBeEnabled();
+    fireEvent.change(screen.getByLabelText(`发布决策原因 ${awaitingVersion.version_id}`), { target: { value: "已校对" } });
+    fireEvent.click(screen.getByRole("button", { name: "拒绝发布" }));
+    await waitFor(() => expect(mocks.reviewTranscriptVersion).toHaveBeenCalledWith(awaitingVersion.version_id, false, "已校对"));
   });
 
-  it("rejects a version with the immutable review note", async () => {
+  it("rejects a version with the immutable decision note", async () => {
     render(<TranscriptionVersionPanel mediaId="media-1" />);
     fireEvent.click(screen.getByRole("button", { name: "审阅转录版本" }));
-    await screen.findByRole("textbox", { name: `审核备注 ${awaitingVersion.version_id}` });
-    fireEvent.change(screen.getByLabelText(`审核备注 ${awaitingVersion.version_id}`), { target: { value: "时间轴需修正" } });
-    fireEvent.click(screen.getByRole("button", { name: "拒绝" }));
+    await screen.findByRole("textbox", { name: `发布决策原因 ${awaitingVersion.version_id}` });
+    fireEvent.change(screen.getByLabelText(`发布决策原因 ${awaitingVersion.version_id}`), { target: { value: "时间轴需修正" } });
+    fireEvent.click(screen.getByRole("button", { name: "拒绝发布" }));
     await waitFor(() => expect(mocks.reviewTranscriptVersion).toHaveBeenCalledWith(awaitingVersion.version_id, false, "时间轴需修正"));
   });
 
@@ -259,7 +259,7 @@ describe("TranscriptionVersionPanel", () => {
     expect(await screen.findByRole("button", { name: "发布到知识库" })).toBeDisabled();
   });
 
-  it("publishes only an approved version", async () => {
+  it("publishes only a decidable version", async () => {
     mocks.listTranscriptVersions.mockResolvedValue([approvedVersion]);
     render(<TranscriptionVersionPanel mediaId="media-1" />);
     fireEvent.click(screen.getByRole("button", { name: "审阅转录版本" }));
@@ -269,7 +269,7 @@ describe("TranscriptionVersionPanel", () => {
     await waitFor(() => expect(mocks.publishTranscriptVersion).toHaveBeenCalledWith(approvedVersion.version_id));
   });
 
-  it("allows an approved managed manual revision to publish", async () => {
+  it("allows a managed manual revision to publish", async () => {
     const approvedRevision = { ...revisedVersion, review_status: "review_approved" as const, reviewed_by: 1, reviewed_at: 3 };
     mocks.listTranscriptVersions.mockResolvedValue([approvedRevision]);
     render(<TranscriptionVersionPanel mediaId="media-1" embedded />);
@@ -300,8 +300,8 @@ describe("TranscriptionVersionPanel", () => {
   it("notifies the parent after a review changes the media lifecycle", async () => {
     const onChanged = vi.fn();
     render(<TranscriptionVersionPanel mediaId="media-1" embedded onChanged={onChanged} />);
-    await screen.findByRole("button", { name: "审核通过" });
-    fireEvent.click(screen.getByRole("button", { name: "审核通过" }));
+    await screen.findByRole("button", { name: "拒绝发布" });
+    fireEvent.click(screen.getByRole("button", { name: "拒绝发布" }));
 
     await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
   });

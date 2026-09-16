@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, Check, CheckCircle2, Pencil, Rocket, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, CheckCircle2, Pencil, Rocket, Trash2, X } from "lucide-react";
 import { adminMediaApi } from "../api/admin/media";
 import { useTranscriptPublicationJob } from "../hooks/useTranscriptionJobs";
 import type { MediaTranscript, TranscriptVersion, TranscriptVersionBulkDeleteResult } from "../types";
@@ -20,11 +20,11 @@ function statusLabel(status: string) {
     review_rejected: "审核拒绝",
     not_required: "无需审核",
     draft: "草稿",
-    not_published: "未发布",
+    pending: "待发布",
+    rejected: "已拒绝发布",
     publishing: "发布中",
     published: "已发布",
     publication_failed: "发布失败",
-    pending: "等待索引",
     parsing: "解析中",
     chunking: "分块中",
     embedding: "向量化中",
@@ -313,7 +313,7 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
         setTimeline(null);
         setTimelineError(caught?.message || "草稿已保存，但视频时间轴加载失败");
       }
-      setSaveSuccess("新草稿已保存，审核状态已重置为待审核。");
+      setSaveSuccess("新草稿已保存，发布状态已重置为待发布。");
       await onChanged?.();
     } catch (caught: any) {
       setError(caught?.message || String(caught));
@@ -486,16 +486,16 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
           const batchChecked = batchSelectedSet.has(version.version_id);
           const itemResult = batchResultByVersionId.get(version.version_id);
           const managedManualRevision = version.source === "manual" && version.markdown_storage_kind === "managed_artifact" && Boolean(version.derived_from_version_id);
-          const canPublish = (version.source === "automatic" || managedManualRevision) && version.review_status === "review_approved" && (version.publication_status === "not_published" || version.publication_status === "publication_failed");
+          const canPublish = (version.source === "automatic" || managedManualRevision)
+            && (version.publication_status === "pending" || version.publication_status === "rejected" || version.publication_status === "publication_failed");
+          const canReject = version.publication_status === "pending" || version.publication_status === "rejected" || version.publication_status === "publication_failed";
           const publishHint = version.publication_status === "published"
             ? "当前版本已发布"
             : version.publication_status === "publishing"
               ? "正在处理发布任务"
               : version.source !== "automatic" && !managedManualRevision
                 ? "旧版人工转录稿不能通过受管流程发布"
-                : version.review_status !== "review_approved"
-                  ? "审核通过后可发布"
-                  : null;
+                : null;
           const publishHintId = `publish-hint-${version.version_id}`;
           return (
             <article
@@ -545,24 +545,20 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
               </div>
               <div className="mt-1.5 flex flex-wrap items-center justify-end gap-x-2 gap-y-1.5 text-ui-xs text-muted-foreground">
                 <div className="flex min-w-[13rem] flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="shrink-0">审核：{statusLabel(version.review_status)}</span>
+                  <span className="shrink-0">发布：{statusLabel(version.publication_status)}</span>
                   {version.review_note && <span className="min-w-0 max-w-full truncate" title={version.review_note}>· {version.review_note}</span>}
                   {(version.scheme_name || version.scheme_deleted) && <div className="flex min-w-0 flex-wrap items-center gap-1.5" data-testid="version-scheme-line"><span className="break-words">转录方案：{version.scheme_name || "原转录配置已删除"}</span>{version.scheme_name && version.scheme_deleted && <Badge variant="secondary">原转录配置已删除</Badge>}</div>}
                 </div>
-                {/* Review and publish are business-critical, so they keep a short
+                {/* Publication decisions are business-critical, so they keep a short
                     visible label next to the icon (docs/design/admin-ui-visual-contract.md:
                     an icon must not be the only entry point). aria-label stays
                     byte-identical to the label the specs and screen readers already
                     use; only the visible wording is shortened. */}
                 <div className="flex flex-wrap items-center justify-end gap-1">
-                  {version.review_status === "awaiting_review" && <>
-                    <Button size="sm" className="shrink-0" aria-label="审核通过" title="审核通过并进入可发布状态" disabled={busy} onClick={() => void reviewVersion(version.version_id, true)}>
-                      <Check className="size-4" aria-hidden="true" />
-                      通过
-                    </Button>
-                    <Button size="sm" variant="outline" className="shrink-0" aria-label="拒绝" title="拒绝该版本并记录审核备注" disabled={busy} onClick={() => void reviewVersion(version.version_id, false)}>
+                  {canReject && <>
+                    <Button size="sm" variant="outline" className="shrink-0" aria-label="拒绝发布" title="拒绝发布该版本，可填写原因" disabled={busy || !canReject} onClick={() => void reviewVersion(version.version_id, false)}>
                       <X className="size-4" aria-hidden="true" />
-                      拒绝
+                      拒绝发布
                     </Button>
                   </>}
                   {/* aria-label stays 发布到知识库 in every state: the specs locate this
@@ -572,7 +568,7 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
                     size="sm"
                     className="shrink-0"
                     aria-label="发布到知识库"
-                    title={publishHint ?? "发布该版本到知识库"}
+                    title={publishHint ?? "允许发布该版本到知识库"}
                     disabled={busy || !canPublish}
                     aria-describedby={!canPublish ? publishHintId : undefined}
                     onClick={() => void publishVersion(version.version_id)}
@@ -584,9 +580,9 @@ export function TranscriptionVersionPanel({ mediaId, refreshToken, embedded = fa
                   </Button>
                 </div>
               </div>
-              {version.review_status === "awaiting_review" && <div className="mt-2 max-w-xl">
-                <label htmlFor={`review-note-${version.version_id}`} className="sr-only">审核备注 {version.version_id}</label>
-                <Input id={`review-note-${version.version_id}`} aria-label={`审核备注 ${version.version_id}`} className="h-8 text-ui-xs" placeholder="审核备注（可选）" value={reviewNote[version.version_id] || ""} onChange={(event) => setReviewNote((current) => ({ ...current, [version.version_id]: event.target.value }))} />
+              {(canReject || version.publication_status === "pending") && <div className="mt-2 max-w-xl">
+                <label htmlFor={`review-note-${version.version_id}`} className="sr-only">发布决策原因 {version.version_id}</label>
+                <Input id={`review-note-${version.version_id}`} aria-label={`发布决策原因 ${version.version_id}`} className="h-8 text-ui-xs" placeholder="发布决策原因（可选）" value={reviewNote[version.version_id] || ""} onChange={(event) => setReviewNote((current) => ({ ...current, [version.version_id]: event.target.value }))} />
               </div>}
               {publishHint && <p id={publishHintId} className="mt-1 text-ui-xs text-muted-foreground">{publishHint}</p>}
               {batchMode && blockReason && <p id={blockReasonId} className="mt-1 text-ui-xs text-muted-foreground">不能删除：{blockReason}</p>}

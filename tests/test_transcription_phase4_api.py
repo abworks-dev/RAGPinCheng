@@ -1624,7 +1624,7 @@ def test_bulk_review_and_publish_return_itemized_partial_results(monkeypatch):
         (other, "failed"),
     ]
     assert review_service["reviewed"] == [("version-1", True, ADMIN.id, "批量复核通过")]
-    assert review_result.items[1].message == "该视频没有待审核的转录版本。"
+    assert review_result.items[1].message == "该视频没有待发布或已拒绝的转录版本。"
 
     publish_result = routes_transcription.bulk_publish_transcripts(
         publish_request(media_ids=[MEDIA_ID, other]),
@@ -1633,7 +1633,7 @@ def test_bulk_review_and_publish_return_itemized_partial_results(monkeypatch):
     assert (publish_result.succeeded, publish_result.failed) == (1, 1)
     assert review_service["published"] == ["version-1"]
     assert published_jobs == ["index-job-1"]
-    assert publish_result.items[1].message == "该视频没有审核通过且未发布的转录版本。"
+    assert publish_result.items[1].message == "该视频没有待发布或发布失败的转录版本。"
     assert connection.closed is True
 
 
@@ -1994,7 +1994,7 @@ def _seed_transcript_version(
     markdown_path=None,
     storage_kind="managed_artifact",
     review_status="review_approved",
-    publication_status="not_published",
+    publication_status="pending",
     created_at=12,
     supersedes=None,
     derived_from=None,

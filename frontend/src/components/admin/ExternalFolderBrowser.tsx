@@ -62,8 +62,8 @@ function managedUpdatedAt(timestamp: number) {
 
 const lifecycleLabel: Record<string, string> = {
   awaiting_transcription: "待转录", transcribing: "转录中", transcription_failed: "转录失败",
-  transcript_ready: "转录稿待审核", transcript_awaiting_review: "转录稿待审核",
-  transcript_rejected: "审核退回", transcript_approved: "待发布", publishing: "发布中",
+  transcript_ready: "转录稿待发布", transcript_awaiting_review: "转录稿待发布",
+  transcript_rejected: "已拒绝发布", transcript_approved: "待发布", publishing: "发布中",
   published: "已发布", publication_failed: "发布失败",
 };
 

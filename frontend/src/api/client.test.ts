@@ -681,7 +681,7 @@ describe("Phase 4B transcription API contracts", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/admin/transcription/media/bulk-review", expect.objectContaining({
       method: "POST",
       headers: { "content-type": "application/json", "X-CSRF-Token": "csrf-asr-bulk" },
-      body: JSON.stringify({ items: [{ media_id: "media-1", version_id: "version-1" }], review_note: "备注" }),
+      body: JSON.stringify({ items: [{ media_id: "media-1", version_id: "version-1" }], review_note: "备注", approved: true }),
     }));
     expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/admin/transcription/media/bulk-publish", expect.objectContaining({
       method: "POST",

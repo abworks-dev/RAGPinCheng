@@ -162,7 +162,7 @@ def _seed_version(
             publication_status,supersedes_version_id,derived_from_version_id,
             created_at,updated_at)
            VALUES (?,?,?, 'automatic','profile-test','managed_artifact',
-                   ?, 'sha', 10,'awaiting_review','not_published',?,?,?,?)""",
+                   ?, 'sha', 10,'not_required','pending',?,?,?,?)""",
         (
             version_id,
             media_id,

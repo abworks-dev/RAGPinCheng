@@ -3,7 +3,7 @@ import pytest
 
 from src.transcription.policy import (
     EffectiveReleasePolicy, OrthogonalWorkflowState, effective_release_policy,
-    mark_transcription_succeeded, promote_allowed, review_gate_satisfied,
+    mark_transcription_succeeded, promote_allowed, publication_decision_satisfied,
 )
 from src.transcription.types import (
     ProfileAdmission, ProfileQualification, PublicationIndexStatus, PublicationStatus,
@@ -16,7 +16,7 @@ SHA="a"*64
 
 def test_transcription_success_changes_only_job_status():
     state=OrthogonalWorkflowState(TranscriptionJobStatus.running,ReviewStatus.awaiting_review,
-        PublicationStatus.not_published,PublicationIndexStatus.pending)
+        PublicationStatus.pending,PublicationIndexStatus.pending)
     result=mark_transcription_succeeded(state)
     assert result == replace(state,job_status=TranscriptionJobStatus.succeeded)
 
@@ -29,16 +29,19 @@ def test_effective_policy_is_stricter_and_disabled_blocks_release():
     assert effective_release_policy(snapshot,disabled)==policy
 
 
-def test_review_gate_is_explicit():
-    manual=EffectiveReleasePolicy(True,False,False)
-    free=EffectiveReleasePolicy(False,False,False)
-    assert review_gate_satisfied(ReviewStatus.review_approved,manual)
-    assert not review_gate_satisfied(ReviewStatus.awaiting_review,manual)
-    assert review_gate_satisfied(ReviewStatus.not_required,free)
+def test_publication_decision_gate_covers_unified_states():
+    # The unified flow allows publishing from pending, rejected and
+    # publication_failed (a failed attempt may retry), but never from a
+    # never-decided/unknown or already-active state.
+    assert publication_decision_satisfied(PublicationStatus.pending)
+    assert publication_decision_satisfied(PublicationStatus.rejected)
+    assert publication_decision_satisfied(PublicationStatus.publication_failed)
+    assert not publication_decision_satisfied(PublicationStatus.publishing)
+    assert not publication_decision_satisfied(PublicationStatus.published)
 
 
 def kwargs():
-    return dict(review_status=ReviewStatus.review_approved,
+    return dict(
         effective_policy=EffectiveReleasePolicy(True,False,False),
         current_admission=ProfileAdmission.enabled,explicit_admin_action=True,
         publication_status=PublicationStatus.publishing,index_status=PublicationIndexStatus.done,
@@ -49,9 +52,8 @@ def kwargs():
 def test_promote_guard_allows_only_complete_candidate_flow():
     assert promote_allowed(**kwargs())
     variants={
-        "review_status":[ReviewStatus.awaiting_review,ReviewStatus.review_rejected],
         "current_admission":[ProfileAdmission.disabled],
-        "publication_status":[PublicationStatus.not_published,PublicationStatus.published],
+        "publication_status":[PublicationStatus.pending,PublicationStatus.published],
         "index_status":[PublicationIndexStatus.pending,PublicationIndexStatus.parsing,PublicationIndexStatus.chunking,PublicationIndexStatus.embedding,PublicationIndexStatus.failed],
     }
     for field,values in variants.items():

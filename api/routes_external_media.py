@@ -257,13 +257,11 @@ def list_entries(
                 media_status=row["media_status"],
                 transcription_job_id=row["job_id"],
                 transcription_job_status=row["job_status"],
-                review_status=row["review_status"],
                 publication_status=row["publication_status"],
                 index_status=row["index_status"],
                 lifecycle_status=project_external_lifecycle(
                     media_status=row["media_status"],
                     transcription_job_status=row["job_status"],
-                    review_status=row["review_status"],
                     publication_status=row["publication_status"],
                     index_status=row["index_status"],
                     has_published_head=bool(row["has_published_head"]),

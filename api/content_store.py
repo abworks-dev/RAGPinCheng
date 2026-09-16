@@ -1879,9 +1879,7 @@ _CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
                  WHEN h.current_version_id IS NOT NULL THEN 'published'
                  WHEN tv.publication_status='publishing' THEN 'publishing'
                  WHEN tv.publication_status='publication_failed' THEN 'publication_failed'
-                 WHEN tv.review_status='review_approved' THEN 'transcript_approved'
-                 WHEN tv.review_status='awaiting_review' THEN 'transcript_awaiting_review'
-                 WHEN tv.review_status='review_rejected' THEN 'transcript_rejected'
+                 WHEN tv.publication_status='rejected' THEN 'transcript_rejected'
                  WHEN mj.status IN ('pending','running') THEN 'transcribing'
                  WHEN m.status='failed' THEN 'transcription_failed'
                  WHEN mj.status='failed' THEN 'transcription_failed'
@@ -1897,8 +1895,8 @@ _CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
                h.current_version_id,j.status AS latest_publication_status,
                j.error_code AS latest_publication_error_code,
                review_user.real_name AS latest_reviewed_by_name,tv.reviewed_at AS latest_reviewed_at,
-               CASE WHEN tv.review_status='review_approved' THEN 'approved'
-                    WHEN tv.review_status='review_rejected' THEN 'rejected' ELSE NULL END AS latest_review_decision,
+               CASE WHEN tv.publication_status='published' THEN 'approved'
+                    WHEN tv.publication_status='rejected' THEN 'rejected' ELSE NULL END AS latest_review_decision,
                tv.review_note AS latest_review_note,
                (SELECT count(*) FROM transcript_publication_index_jobs attempts
                 WHERE attempts.transcript_version_id=tv.id) AS publication_attempt_count,
@@ -2098,9 +2096,7 @@ def _archive_media_transcript_item_locked(conn: sqlite3.Connection, item_id: str
                                    WHEN h.current_version_id IS NOT NULL THEN 'published'
                                    WHEN tv.publication_status='publishing' THEN 'publishing'
                                    WHEN tv.publication_status='publication_failed' THEN 'publication_failed'
-                                   WHEN tv.review_status='review_approved' THEN 'transcript_approved'
-                                   WHEN tv.review_status='awaiting_review' THEN 'transcript_awaiting_review'
-                                   WHEN tv.review_status='review_rejected' THEN 'transcript_rejected'
+                                   WHEN tv.publication_status='rejected' THEN 'transcript_rejected'
                                    WHEN latest_job.status IN ('pending','running') THEN 'transcribing'
                                    WHEN m.status='failed' OR latest_job.status='failed' THEN 'transcription_failed'
                                    WHEN tv.id IS NOT NULL THEN 'transcript_ready'

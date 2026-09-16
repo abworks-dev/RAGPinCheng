@@ -310,10 +310,10 @@ def preflight_purge(
         ).fetchone():
             status, reason = "blocked", "视频正在发布"
         elif row["content_kind"] == "media_transcript" and conn.execute(
-            f"SELECT 1 FROM transcript_versions WHERE media_id IN ({','.join('?' for _ in row['media_ids'])}) AND review_status='awaiting_review' LIMIT 1",
+            f"SELECT 1 FROM transcript_versions WHERE media_id IN ({','.join('?' for _ in row['media_ids'])}) AND publication_status IN ('pending','rejected') LIMIT 1",
             row["media_ids"],
         ).fetchone():
-            status, reason = "blocked", "视频仍有待审核的转录修订"
+            status, reason = "blocked", "视频仍有待发布的转录修订"
         elif row["content_kind"] == "media_transcript" and row["transcript_version_ids"] and conn.execute(
             f"SELECT 1 FROM transcript_publication_index_jobs WHERE transcript_version_id IN ({','.join('?' for _ in row['transcript_version_ids'])}) AND status IN ({','.join('?' for _ in _ACTIVE_TRANSCRIPT_INDEX_STATES)}) LIMIT 1",
             (*row["transcript_version_ids"], *_ACTIVE_TRANSCRIPT_INDEX_STATES),

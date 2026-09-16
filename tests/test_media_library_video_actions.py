@@ -49,7 +49,6 @@ def test_media_action_projection_matches_mutation_preconditions():
     active, active_disabled = _media_action_state(
         status="transcribing",
         job_status="running",
-        review_status=None,
         publication_status=None,
         publication_index_status=None,
     )
@@ -61,7 +60,6 @@ def test_media_action_projection_matches_mutation_preconditions():
         status="failed",
         job_status="failed",
         job_failure_classification="transient",
-        review_status=None,
         publication_status=None,
         publication_index_status=None,
     )
@@ -69,7 +67,6 @@ def test_media_action_projection_matches_mutation_preconditions():
         status="failed",
         job_status="failed",
         job_failure_classification="permanent",
-        review_status=None,
         publication_status=None,
         publication_index_status=None,
     )
@@ -81,7 +78,6 @@ def test_media_action_projection_matches_mutation_preconditions():
     failed_upload, _ = _media_action_state(
         status="failed",
         job_status=None,
-        review_status=None,
         publication_status=None,
         publication_index_status=None,
     )
@@ -90,8 +86,7 @@ def test_media_action_projection_matches_mutation_preconditions():
     indexing, indexing_disabled = _media_action_state(
         status="transcript_ready",
         job_status="succeeded",
-        review_status="review_approved",
-        publication_status="not_published",
+        publication_status="pending",
         publication_index_status="embedding",
     )
     assert "publish_transcript" not in indexing
@@ -100,7 +95,6 @@ def test_media_action_projection_matches_mutation_preconditions():
     replacing, replacing_disabled = _media_action_state(
         status="ready",
         job_status="succeeded",
-        review_status="review_approved",
         publication_status="published",
         publication_index_status="done",
         replacement_status="pending",
@@ -111,7 +105,6 @@ def test_media_action_projection_matches_mutation_preconditions():
     failed_replacement, failed_replacement_disabled = _media_action_state(
         status="failed",
         job_status=None,
-        review_status=None,
         publication_status=None,
         publication_index_status=None,
         replacement_status="pending",
@@ -124,7 +117,6 @@ def test_media_transcription_action_projection_for_start_and_re_transcribe():
     fresh, fresh_disabled = _media_action_state(
         status="uploaded",
         job_status=None,
-        review_status=None,
         publication_status=None,
         publication_index_status=None,
         publication_request_status="pending_transcription",
@@ -137,7 +129,6 @@ def test_media_transcription_action_projection_for_start_and_re_transcribe():
     running, running_disabled = _media_action_state(
         status="transcribing",
         job_status="running",
-        review_status=None,
         publication_status=None,
         publication_index_status=None,
         publication_request_status="ready_to_publish",
@@ -151,8 +142,7 @@ def test_media_transcription_action_projection_for_start_and_re_transcribe():
     completed, completed_disabled = _media_action_state(
         status="transcript_ready",
         job_status="succeeded",
-        review_status="awaiting_review",
-        publication_status="not_published",
+        publication_status="pending",
         publication_index_status=None,
         publication_request_status="ready_to_publish",
     )
@@ -163,7 +153,6 @@ def test_media_transcription_action_projection_for_start_and_re_transcribe():
     cancelled, _ = _media_action_state(
         status="uploaded",
         job_status="cancelled",
-        review_status=None,
         publication_status=None,
         publication_index_status=None,
     )
@@ -173,7 +162,6 @@ def test_media_transcription_action_projection_for_start_and_re_transcribe():
         status="failed",
         job_status="failed",
         job_failure_classification="permanent",
-        review_status=None,
         publication_status=None,
         publication_index_status=None,
     )
@@ -188,7 +176,6 @@ def test_media_transcription_action_projection_for_start_and_re_transcribe():
     no_request, no_request_disabled = _media_action_state(
         status="uploaded",
         job_status=None,
-        review_status=None,
         publication_status=None,
         publication_index_status=None,
     )
@@ -198,8 +185,7 @@ def test_media_transcription_action_projection_for_start_and_re_transcribe():
     manual, manual_disabled = _media_action_state(
         status="transcript_ready",
         job_status=None,
-        review_status="awaiting_review",
-        publication_status="not_published",
+        publication_status="pending",
         publication_index_status=None,
         has_transcript_versions=True,
         has_transcript_head=True,
@@ -213,14 +199,15 @@ def test_media_transcription_action_projection_for_start_and_re_transcribe():
 @pytest.mark.parametrize(
     ("expected", "values"),
     [
-        ("failed", dict(status="failed", job_status=None, review_status=None, publication_status=None, publication_index_status=None)),
-        ("failed", dict(status="transcript_ready", job_status="succeeded", review_status="review_approved", publication_status="publication_failed", publication_index_status="failed")),
-        ("index", dict(status="indexing", job_status="succeeded", review_status="review_approved", publication_status="publishing", publication_index_status="embedding")),
-        ("publication", dict(status="transcript_ready", job_status="succeeded", review_status="review_approved", publication_status="publishing", publication_index_status=None)),
-        ("ready", dict(status="ready", job_status="succeeded", review_status="review_approved", publication_status="published", publication_index_status=None)),
-        ("review", dict(status="transcript_ready", job_status="succeeded", review_status="awaiting_review", publication_status="not_published", publication_index_status=None)),
-        ("transcription", dict(status="uploaded", job_status="cancelled", review_status=None, publication_status=None, publication_index_status=None)),
-        ("upload", dict(status="uploaded", job_status=None, review_status=None, publication_status=None, publication_index_status=None)),
+        ("failed", dict(status="failed", job_status=None, publication_status=None, publication_index_status=None)),
+        ("failed", dict(status="transcript_ready", job_status="succeeded", publication_status="publication_failed", publication_index_status="failed")),
+        ("index", dict(status="indexing", job_status="succeeded", publication_status="publishing", publication_index_status="embedding")),
+        ("publication", dict(status="transcript_ready", job_status="succeeded", publication_status="publishing", publication_index_status=None)),
+        ("ready", dict(status="ready", job_status="succeeded", publication_status="published", publication_index_status=None)),
+        ("review", dict(status="transcript_ready", job_status="succeeded", publication_status="pending", publication_index_status=None)),
+        ("review", dict(status="transcript_ready", job_status="succeeded", publication_status="rejected", publication_index_status=None)),
+        ("transcription", dict(status="uploaded", job_status="cancelled", publication_status=None, publication_index_status=None)),
+        ("upload", dict(status="uploaded", job_status=None, publication_status=None, publication_index_status=None)),
     ],
 )
 def test_media_phase_projection(expected, values):

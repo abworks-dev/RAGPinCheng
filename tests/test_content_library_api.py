@@ -430,7 +430,7 @@ def _insert_published_media(
                    markdown_size_bytes,review_status,publication_status,created_at,updated_at,
                    derived_from_version_id
                ) VALUES (?,?,'manual','managed_artifact',?,?,11,
-                         'awaiting_review','not_published',?,?,?)""",
+                         'awaiting_review','pending',?,?,?)""",
             (
                 pending_id,
                 media_id,
@@ -1747,12 +1747,12 @@ def test_media_purge_preflight_blocks_active_work_pending_revision_and_version_c
         """INSERT INTO transcript_versions(
                id,media_id,source,markdown_storage_kind,markdown_rel_path,markdown_sha256,
                markdown_size_bytes,review_status,publication_status,created_at,updated_at
-           ) VALUES (?,?,'manual','managed_artifact',?,?,1,'awaiting_review','not_published',1,1)""",
+           ) VALUES (?,?,'manual','managed_artifact',?,?,1,'awaiting_review','pending',1,1)""",
         (pending_version_id, media_id, f"markdown/{pending_version_id}.md", "a" * 64),
     )
     conn.commit()
     conn.close()
-    assert blocked_reason() == "视频仍有待审核的转录修订"
+    assert blocked_reason() == "视频仍有待发布的转录修订"
     assert blocked_reason([{"item_id": item_id, "expected_version_id": pending_version_id}]) == "资料版本已变化"
 
     conn = connect(db_path)
@@ -3658,17 +3658,16 @@ def test_published_media_transcripts_share_library_listing_without_document_mirr
 
 
 @pytest.mark.parametrize(
-    ("review_status", "publication_status", "index_status", "expected"),
+    ("publication_status", "index_status", "expected"),
     [
-        ("awaiting_review", "not_published", "done", "transcript_awaiting_review"),
-        ("review_approved", "not_published", "done", "transcript_approved"),
-        ("review_approved", "publishing", "pending", "publishing"),
-        ("review_approved", "publication_failed", "failed", "publication_failed"),
+        ("pending", "done", "transcript_ready"),
+        ("rejected", "done", "transcript_rejected"),
+        ("publishing", "pending", "publishing"),
+        ("publication_failed", "failed", "publication_failed"),
     ],
 )
 def test_media_library_status_prefers_review_and_publication_over_completed_transcription(
     content_api,
-    review_status: str,
     publication_status: str,
     index_status: str,
     expected: str,
@@ -3687,8 +3686,8 @@ def test_media_library_status_prefers_review_and_publication_over_completed_tran
     )
     conn.execute("DELETE FROM media_transcript_heads WHERE media_id=?", (media_id,))
     conn.execute(
-        "UPDATE transcript_versions SET review_status=?,publication_status=?,published_at=NULL WHERE id=?",
-        (review_status, publication_status, version_id),
+        "UPDATE transcript_versions SET review_status='awaiting_review',publication_status=?,published_at=NULL WHERE id=?",
+        (publication_status, version_id),
     )
     conn.execute(
         "UPDATE transcript_publication_index_jobs SET status=? WHERE transcript_version_id=?",
@@ -3791,7 +3790,7 @@ def test_published_media_downloads_video_transcript_and_zip_with_permission_chec
 
     conn = connect(db_path)
     conn.execute(
-        "UPDATE transcript_versions SET publication_status='not_published' WHERE id=?",
+        "UPDATE transcript_versions SET publication_status='pending' WHERE id=?",
         (version_id,),
     )
     conn.commit()

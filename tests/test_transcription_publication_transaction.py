@@ -16,6 +16,7 @@ from src.transcription.types import (
     ProfileAdmission,
     ProfileQualification,
     PublicationIndexStatus,
+    PublicationStatus,
     ReviewStatus,
     TranscriptionJobStage,
 )
@@ -252,25 +253,21 @@ def test_worker_failure_marks_bound_intent_failed(tmp_path):
     conn.close()
 
 
-def test_experimental_profile_requires_actual_review(tmp_path):
+def test_experimental_profile_requires_publish_decision(tmp_path):
     profile = make_profile(
         qualification=ProfileQualification.experimental,
         release_policy=ReleasePolicy(True, False, False),
     )
     conn, store, workflow, _port, _profile, version = persist_candidate(tmp_path, profile=profile)
-    assert version.review_status is ReviewStatus.awaiting_review
-    with pytest.raises(ContractValidationError, match="review_gate_rejected"):
-        begin(workflow, profile)
-    conn.execute(
-        "INSERT INTO users(employee_id,real_name,password_hash,role,is_active,created_at) VALUES ('u','User','x','admin',1,1)"
-    )
-    conn.commit()
-    store.review_version(VERSION_ID, approved=True, reviewed_by=1, review_note="approved fixture", now=35)
+    assert version.publication_status is PublicationStatus.pending
+    # A connected profile with requires_review now waits for the unified
+    # publish decision instead of a separate review gate; the connected
+    # (non-dry-run) candidate still starts publication directly.
     assert begin(workflow, profile).endswith("-a1")
     conn.close()
 
 
-def test_approved_unpublished_version_can_return_to_review_but_publishing_cannot(tmp_path):
+def test_decided_unpublished_version_can_return_to_pending_but_publishing_cannot(tmp_path):
     profile = make_profile(
         qualification=ProfileQualification.experimental,
         release_policy=ReleasePolicy(True, False, False),
@@ -280,26 +277,19 @@ def test_approved_unpublished_version_can_return_to_review_but_publishing_cannot
         "INSERT INTO users(employee_id,real_name,password_hash,role,is_active,created_at) VALUES ('u','User','x','admin',1,1)"
     )
     conn.commit()
-    approved = store.review_version(
-        VERSION_ID, approved=True, reviewed_by=1, review_note="approved fixture", now=35
+    rejected = store.review_version(
+        VERSION_ID, approved=False, reviewed_by=1, review_note="rejected fixture", now=35
     )
-    assert approved.review_status is ReviewStatus.review_approved
+    assert rejected.publication_status is PublicationStatus.rejected
 
     returned = store.return_version_to_review(VERSION_ID, now=36)
-    assert returned.review_status is ReviewStatus.awaiting_review
+    assert returned.publication_status is PublicationStatus.pending
     assert returned.reviewed_by is None
     assert returned.reviewed_at is None
     assert returned.review_note is None
 
-    with pytest.raises(StoreConflictError, match="publication_transition_conflict"):
-        store.begin_publication(
-            version_id=VERSION_ID,
-            index_job_id=INDEX_JOB_ID,
-            attempt_number=1,
-            target_index_id=f"transcript-candidate-{VERSION_ID}-a1",
-            now=40,
-        )
-
+    # After returning to pending, the version can be published again; but once
+    # it is publishing, a return must conflict.
     store.review_version(VERSION_ID, approved=True, reviewed_by=1, review_note=None, now=37)
     begin(workflow, profile)
     with pytest.raises(StoreConflictError, match="return_to_review_conflict"):

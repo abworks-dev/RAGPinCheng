@@ -156,7 +156,7 @@ def test_application_persists_candidate_version_without_publication_or_index(tmp
             "SELECT review_status,publication_status FROM transcript_versions WHERE id=?",
             (result.result_version_id,),
         ).fetchone()
-        assert tuple(version) == ("awaiting_review", "not_published")
+        assert tuple(version) == ("awaiting_review", "pending")
         assert conn.execute("SELECT COUNT(*) FROM index_jobs").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM transcript_publication_index_jobs").fetchone()[0] == 0
         assert conn.execute(

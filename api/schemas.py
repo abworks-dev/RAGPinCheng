@@ -1838,6 +1838,9 @@ class BulkReviewTranscriptionRequest(BaseModel):
 
     items: list[BulkReviewTranscriptionItem] = Field(min_length=1, max_length=100)
     review_note: str | None = Field(default=None, max_length=500)
+    # Unified flow: True = allow the version to be published; False = reject
+    # publication (an optional reason may be attached in review_note).
+    approved: bool = True
 
 
 class BulkPublishTranscriptionRequest(BaseModel):
