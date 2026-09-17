@@ -260,6 +260,26 @@ def _retrieval_diagnostics(
     return diagnostics
 
 
+def _teaching_video_doc_types(search_query: str) -> list[str] | None:
+    """Return ["transcript"] when an enumeration question targets teaching videos.
+
+    A question like "有哪些教学视频" / "总共有哪些培训视频" / "详细点列出教学视频"
+    should recall transcripts only — otherwise the wider top-k pulls in
+    specification PDFs/PPTs that dilute the video list (reported UX issue:
+    follow-up "详细点列出来" mixed in GB 51348 etc.).  When the query also
+    mentions 章节/规范文档清单 we leave the filter open (it may target
+    document sections instead).
+    """
+    text = search_query.strip()
+    if not text:
+        return None
+    video_signal = any(k in text for k in ("视频", "教学视频", "培训", "课程", "讲课", "实录"))
+    section_signal = any(k in text for k in ("章节", "规范", "标准", "清单", "列表", "条文"))
+    if video_signal and not section_signal:
+        return ["transcript"]
+    return None
+
+
 def _merge_enumeration_recall(
     title_hits: list[RetrievedParent],
     semantic: list[RetrievedParent],
@@ -421,8 +441,13 @@ class ChatSession:
         if categories == []:
             return []
         if enumeration:
+            # Teaching-video enumeration (query mentions 视频/培训/教学 and not
+            # 章节/规范文档列表) should recall transcripts only, so follow-up
+            # "详细点列出教学视频" is not diluted by pdf/pptx specs.
+            doc_types = _teaching_video_doc_types(search_query)
             semantic = retrieve(
                 search_query, top_k=ENUMERATION_TOP_K, categories=categories,
+                doc_types=doc_types,
             )
             # Title recall guarantees every series video is surfaced for
             # enumeration even when its transcript fragments score low.
