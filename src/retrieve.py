@@ -36,6 +36,7 @@ from .config import (
     RERANK_TOP_K,
     RERANK_USE_HEADER,
     SPARSE_TOP_K,
+    TRANSCRIPT_MIN_QUOTA,
     APP_DB_PATH,
     CONTENT_HEAD_ENFORCEMENT,
 )
@@ -437,15 +438,27 @@ def _dedup_to_parents(
     # its top hit. We surface THIS time for playback instead of the parent's
     # first-turn time, so a citation seeks to the sentence actually matched.
     parent_hit_time: dict[str, str | None] = {}
+    transcript_admitted = 0
     for point, score in scored:
         pid = point.payload["parent_id"]
         snippet = point.payload["text"][:120].replace("\n", " ")
         child_id = str(point.id)
+        is_transcript = point.payload.get("doc_type") == "transcript"
         if pid in parent_score:
             parent_children[pid].append(snippet)
             parent_rrf[pid] = max(parent_rrf[pid], child_rrf.get(child_id, 0.0))
             continue
-        if len(parent_order) >= top_k:
+        at_cap = len(parent_order) >= top_k
+        # Transcript min-quota: when the query wants teaching-video knowledge but
+        # a spec/standard outranked it, keep reserving slots so at least
+        # TRANSCRIPT_MIN_QUOTA transcript parents reach the final context.
+        transcript_quota_open = (
+            TRANSCRIPT_MIN_QUOTA > 0
+            and is_transcript
+            and transcript_admitted < TRANSCRIPT_MIN_QUOTA
+            and at_cap
+        )
+        if at_cap and not transcript_quota_open:
             # Cap reached: don't admit a new parent, but keep scanning so
             # already-accepted parents can still gather child snippets above.
             continue
@@ -454,6 +467,8 @@ def _dedup_to_parents(
         parent_order.append(pid)
         parent_children[pid] = [snippet]
         parent_hit_time[pid] = point.payload.get("start_time")
+        if is_transcript:
+            transcript_admitted += 1
     parents = fetch_parents(parent_order)
     out: list[RetrievedParent] = []
     for pid in parent_order:
