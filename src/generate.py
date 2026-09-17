@@ -238,6 +238,55 @@ def _build_context(
     return "\n\n".join(blocks), used
 
 
+def _build_enumeration_context(
+    parents: list[RetrievedParent],
+    budget: int,
+) -> tuple[str, list[RetrievedParent]]:
+    """Compact context for enumerate/count questions.
+
+    Every retrieved *parent* becomes a short inventory entry (title + category
+    + start time) instead of a full passage, so 10+ sources fit under `budget`
+    and the LLM can list/count them all.  The exact 1-based ``index`` matches
+    the UI's ``sources[]`` order, so ``[N]`` citations still resolve to real
+    source cards.  The first few parents also keep a full passage (when space
+    allows, capped at 2) so the most relevant item has grounded text to cite.
+    """
+    blocks: list[str] = []
+    used: list[RetrievedParent] = []
+    total = 0
+    # Full-passage allowance: keep 2 (or fewer if budget is small) so there is
+    # grounded text to cite for the top hits; the rest are title-only inventory.
+    full_count = 0
+    for p in parents:
+        n = len(used) + 1
+        company_attr = f' company="{p.company}"' if p.company else ""
+        if p.doc_type == "transcript":
+            open_tag = (
+                f'<source index="{n}" id="{p.parent_id[:8]}" doc="{p.doc_title}" '
+                f'category="{p.category}"{company_attr} time="{p.start_time or ""}" '
+                f'type="transcript">'
+            )
+        else:
+            section_leaf = p.section_path.split(" > ")[-1] if p.section_path else ""
+            open_tag = (
+                f'<source index="{n}" id="{p.parent_id[:8]}" doc="{p.doc_title}" '
+                f'category="{p.category}"{company_attr} section="{section_leaf}">'
+            )
+        if full_count < 2 and p.text:
+            block = f"{open_tag}\n{p.text}\n</source>"
+            full_count += 1
+        else:
+            # Compact inventory entry carries just the metadata; the frontend
+            # still renders a real source card for it (title/category/play).
+            block = f"{open_tag}（条目）\n</source>"
+        if total + len(block) > budget and used:
+            break
+        blocks.append(block)
+        used.append(p)
+        total += len(block)
+    return "\n\n".join(blocks), used
+
+
 def _client() -> OpenAI:
     if not ZHIPU_API_KEY:
         raise RuntimeError("ZHIPU_API_KEY is not set. Add it to .env.")
@@ -254,15 +303,26 @@ def _prepare_generation(
     history: list[dict] | None,
     budget: int | None,
     policy: AnswerPolicy | None = None,
+    *,
+    enumeration: bool = False,
 ) -> GenerationPrep:
     """Build the messages list and decide which parents fit under `budget`.
 
     Pure / synchronous: makes no API call. Both `generate()` and
     `stream_generate()` build on this so they agree on what gets sent.
+
+    For enumeration/count questions (``enumeration=True``) the source list is
+    compacted to a deduplicated document-title inventory (with category) rather
+    than full passages, so the LLM can list/count every retrieved source within
+    the context budget. The few top passages are still included for grounded
+    citation of the most relevant items.
     """
     effective_policy = policy or load_answer_policy()
     effective_budget = effective_policy.answer_context_chars if budget is None else max(budget, 0)
-    context, used = _build_context(parents, effective_budget)
+    if enumeration:
+        context, used = _build_enumeration_context(parents, effective_budget)
+    else:
+        context, used = _build_context(parents, effective_budget)
     user_msg = render_prompt("answer_user", context=context, query=query)
 
     messages: list[dict] = [
@@ -366,6 +426,8 @@ def generate(
     history: list[dict] | None = None,
     budget: int | None = None,
     policy: AnswerPolicy | None = None,
+    *,
+    enumeration: bool = False,
 ) -> Answer:
     """Run the answering LLM call (non-streaming).
 
@@ -377,7 +439,7 @@ def generate(
         message only, never into history.
       - `query` is the user's original question, not the retrieval rewrite.
     """
-    prep = _prepare_generation(query, parents, history, budget, policy)
+    prep = _prepare_generation(query, parents, history, budget, policy, enumeration=enumeration)
     client = _client()
     started = perf_counter()
     try:
@@ -413,6 +475,8 @@ def stream_generate(
     history: list[dict] | None = None,
     budget: int | None = None,
     policy: AnswerPolicy | None = None,
+    *,
+    enumeration: bool = False,
 ) -> tuple[GenerationPrep, Iterator[str]]:
     """Streaming variant of `generate()`.
 
@@ -425,7 +489,7 @@ def stream_generate(
 
     The same channel-separation rules as `generate()` apply.
     """
-    prep = _prepare_generation(query, parents, history, budget, policy)
+    prep = _prepare_generation(query, parents, history, budget, policy, enumeration=enumeration)
     client = _client()
     started = perf_counter()
     try:
