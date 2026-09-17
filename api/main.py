@@ -57,6 +57,7 @@ from .routes_media import router as media_router
 from .routes_media_transcript import router as media_transcript_router
 from .routes_external_media import router as external_media_router, run_due_external_scans
 from .routes_prompts import router as prompts_router
+from .routes_rag import router as rag_router
 from .routes_transcript_ai import router as transcript_ai_router
 from .routes_transcription import (
     build_transcription_service,
@@ -271,6 +272,7 @@ app.include_router(transcription_router, prefix="/api")
 app.include_router(external_media_router, prefix="/api")
 app.include_router(prompts_router, prefix="/api")
 app.include_router(transcript_ai_router, prefix="/api")
+app.include_router(rag_router, prefix="/api")
 
 
 # ── React SPA hosting ──────────────────────────────────────────────────────

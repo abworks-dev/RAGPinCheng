@@ -1008,6 +1008,22 @@ SYSTEM_PROMPTS_STATEMENTS = (
     )""",
 )
 
+RAG_ABSTENTION_STATEMENTS = (
+    """CREATE TABLE IF NOT EXISTS rag_abstention_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        conversation_id TEXT NOT NULL,
+        user_query TEXT NOT NULL,
+        search_query TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        top_source_title TEXT,
+        top_score REAL,
+        assistant_text TEXT,
+        created_at INTEGER NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_rag_abstention_created ON rag_abstention_log(created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_rag_abstention_reason ON rag_abstention_log(reason)",
+)
+
 MIGRATIONS = (
     Migration(1, "multi_engine_transcription_phase2", PHASE2_STATEMENTS),
     Migration(2, "answer_regeneration_versions", ANSWER_VERSION_STATEMENTS),
@@ -1382,6 +1398,7 @@ MIGRATIONS = (
         ("REPLACE_TRANSCRIPT_PUBLICATION_STATUSES", "MAP_TRANSCRIPT_PUBLICATION_STATUSES"),
     ),
     Migration(42, "system_prompts_management", SYSTEM_PROMPTS_STATEMENTS),
+    Migration(43, "rag_abstention_log", RAG_ABSTENTION_STATEMENTS),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
