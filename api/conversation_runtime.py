@@ -543,6 +543,27 @@ def persist_turn(
         conn.execute(update_sql, params)
         conn.commit()
         plan.persisted_assistant_message_id = persisted_assistant_message_id
+        # Abstention observability loop: record refusals/not-found turns so the
+        # admin can see exactly which questions the corpus cannot serve.
+        try:
+            from .rag_abstention import abstention_reason, record as record_abstention
+            reason = abstention_reason(getattr(session, "last_turn_result", None))
+            if reason is not None:
+                result = session.last_turn_result
+                top = (result.final_sources or result.fresh_sources or [])[:1]
+                record_abstention(
+                    conn,
+                    conversation_id=plan.conversation_id,
+                    user_query=plan.user_text,
+                    search_query=result.search_query if result else plan.user_text,
+                    reason=reason,
+                    top_source_title=top[0].doc_title if top else None,
+                    top_score=top[0].score if top else None,
+                    assistant_text=result.answer_text if result else None,
+                )
+                conn.commit()
+        except Exception:
+            logger.exception("rag abstention record failed for %s", plan.conversation_id)
     except Exception:
         logger.exception("persist_turn failed for conversation %s", plan.conversation_id)
     finally:
