@@ -83,8 +83,17 @@ def finalize_answer_sources(
 def finalize_answer_sources_with_diagnostics(
     text: str,
     candidate_sources: list[RetrievedParent],
+    *,
+    keep_all: bool = False,
 ) -> CitationFinalization:
-    """Normalize citations and retain non-sensitive citation quality signals."""
+    """Normalize citations and retain non-sensitive citation quality signals.
+
+    When ``keep_all`` is True (enumeration questions) the returned
+    ``sources`` keeps every deduped candidate — not just the ones the LLM
+    happened to bracket — so the UI shows the full list of related items even
+    if the model only cited a few.  Citation markers are still normalized;
+    diagnostics report the true citation count separately.
+    """
     source_indexes: list[int] = []
     source_number_by_index: dict[int, int] = {}
     invalid_numbers: set[int] = set()
@@ -109,6 +118,22 @@ def finalize_answer_sources_with_diagnostics(
 
     normalized_text = _NUMBERED_CITATION_RE.sub(replace, text)
     cited_sources = [candidate_sources[index] for index in source_indexes]
+
+    # For enumeration: surface every deduped candidate so the UI can show the
+    # full set of related videos/items.  Candidate order is the enumeration
+    # inventory order (title recall first), so the UI list reads as the list
+    # the model enumerated.
+    if keep_all:
+        seen: set[str] = set()
+        display_sources: list[RetrievedParent] = []
+        for candidate in candidate_sources:
+            pid = candidate.parent_id
+            if pid in seen:
+                continue
+            seen.add(pid)
+            display_sources.append(candidate)
+        cited_sources = display_sources
+
     no_answer = "未找到相关内容" in normalized_text
     completed_statements = re.findall(r"[^。！？；\n]+[。！？；]", normalized_text)
     uncited_statement_count = sum(
@@ -481,6 +506,7 @@ def generate(
     finalized = finalize_answer_sources_with_diagnostics(
         resp.choices[0].message.content or "",
         prep.used_sources,
+        keep_all=enumeration,
     )
     return Answer(
         text=finalized.text,

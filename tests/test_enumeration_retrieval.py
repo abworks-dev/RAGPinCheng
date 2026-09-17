@@ -238,3 +238,25 @@ def test_retrieve_enumeration_titles_filters_unpublished(monkeypatch, tmp_path):
     assert "机电管综培训（1）" in titles
     assert "机电管综培训（2）" in titles
     assert "机电管综培训（3）" not in titles  # unpublished excluded
+
+
+def test_finalize_keeps_all_candidates_for_enumeration():
+    from src.generate import finalize_answer_sources_with_diagnostics
+
+    parents = [_parent(i) for i in range(1, 6)]
+    # The model only bracketed sources [1] and [3].
+    text = "机电管综培训有《培训1》[1]和《培训3》[3]。"
+    finalized = finalize_answer_sources_with_diagnostics(text, parents, keep_all=True)
+    # keep_all surfaces every candidate, deduped by parent_id.
+    assert [p.parent_id for p in finalized.sources] == [p.parent_id for p in parents]
+    assert len(finalized.sources) == 5
+
+
+def test_finalize_without_keep_all_trims_to_cited():
+    from src.generate import finalize_answer_sources_with_diagnostics
+
+    parents = [_parent(i) for i in range(1, 6)]
+    text = "机电管综培训有《培训1》[1]和《培训3》[3]。"
+    finalized = finalize_answer_sources_with_diagnostics(text, parents)
+    # Default behavior: only cited sources are retained, renumbered.
+    assert [p.doc_title for p in finalized.sources] == ["机电管综培训（1）", "机电管综培训（3）"]
