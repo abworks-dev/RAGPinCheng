@@ -22,8 +22,9 @@ import re
 from time import perf_counter
 from typing import Iterator
 
-from .config import DECOMPOSE_MAX_CONTEXT_CHARS, MAX_CONTEXT_CHARS, QUERY_DECOMPOSE_ENABLED
+from .config import DECOMPOSE_MAX_CONTEXT_CHARS, ENUMERATION_TOP_K, FINAL_TOP_K, MAX_CONTEXT_CHARS, QUERY_DECOMPOSE_ENABLED
 from .decompose import maybe_decompose
+from .intent import is_enumeration_intent
 from .answer_policy import MAX_CONTEXT_CHARS_CONFIG, AnswerPolicy, load_answer_policy
 from .generate import (
     Answer,
@@ -367,6 +368,8 @@ class ChatSession:
         search_query: str,
         categories: list[str] | None,
         debug: dict | None = None,
+        *,
+        enumeration: bool = False,
     ) -> list[RetrievedParent]:
         """Fresh retrieval with optional comparison-intent decomposition.
 
@@ -375,6 +378,10 @@ class ChatSession:
         plain `retrieve(search_query)` — byte-for-byte the previous behavior.
         Decomposition latency stays folded into the caller's `retrieve` timing;
         gate/applied telemetry is recorded into `debug` when provided.
+
+        Enumeration/count questions (``enumeration=True``) retrieve with a
+        wider final top-k so every relevant source survives, giving the answer
+        generator a full title inventory to list/count.
         """
         # An explicitly empty resolved scope means the administrator has not
         # enabled any knowledge for chat.  Do not pass it to the lower-level
@@ -382,7 +389,8 @@ class ChatSession:
         if categories == []:
             return []
         if not QUERY_DECOMPOSE_ENABLED:
-            return retrieve(search_query, categories=categories)
+            top_k = ENUMERATION_TOP_K if enumeration else FINAL_TOP_K
+            return retrieve(search_query, top_k=top_k, categories=categories)
 
         decision = maybe_decompose(search_query)
         if debug is not None:
@@ -396,7 +404,8 @@ class ChatSession:
             return retrieve_multi(
                 decision.sub_queries, search_query, categories=categories,
             )
-        return retrieve(search_query, categories=categories)
+        top_k = ENUMERATION_TOP_K if enumeration else FINAL_TOP_K
+        return retrieve(search_query, top_k=top_k, categories=categories)
 
     def _sources_for_ui(
         self, parents: list[RetrievedParent]
@@ -449,6 +458,7 @@ class ChatSession:
         timings["rewrite"] = rewrite_t
         rewrite_applied = search_query != query
         has_history = bool(self.state.messages)
+        enumeration = is_enumeration_intent(query, standalone_query=search_query)
 
         # ①a QUERY GUARD — block ambiguous input before retrieval
         # IMPORTANT: Validate the ORIGINAL user query, NOT the rewritten one.
@@ -505,7 +515,7 @@ class ChatSession:
 
         # ② RETRIEVE + ③ MERGE
         t = perf_counter()
-        fresh_sources = self._fresh_retrieve(search_query, categories)
+        fresh_sources = self._fresh_retrieve(search_query, categories, enumeration=enumeration)
         final_sources = retrieve_for_turn(
             fresh_sources, self.state.last_sources, search_query,
             categories=categories,
@@ -576,6 +586,7 @@ class ChatSession:
             history=history_msgs,
             budget=budget,
             policy=policy,
+            enumeration=enumeration,
         )
         relevance = _retrieval_diagnostics(
             relevance, fresh_sources, final_sources,
@@ -636,6 +647,7 @@ class ChatSession:
         timings["rewrite"] = rewrite_t
         rewrite_applied = search_query != query
         has_history = bool(self.state.messages)
+        enumeration = is_enumeration_intent(query, standalone_query=search_query)
 
         # ①a QUERY GUARD — block ambiguous input before retrieval
         # IMPORTANT: Validate the ORIGINAL user query, NOT the rewritten one.
@@ -711,7 +723,7 @@ class ChatSession:
 
         # ② RETRIEVE + ③ MERGE
         t = perf_counter()
-        fresh_sources = self._fresh_retrieve(search_query, categories)
+        fresh_sources = self._fresh_retrieve(search_query, categories, enumeration=enumeration)
         final_sources = retrieve_for_turn(
             fresh_sources, self.state.last_sources, search_query,
             categories=categories,
@@ -790,6 +802,7 @@ class ChatSession:
             history=history_msgs,
             budget=budget,
             policy=policy,
+            enumeration=enumeration,
         )
         relevance = _retrieval_diagnostics(
             relevance, fresh_sources, final_sources,

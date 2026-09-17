@@ -189,6 +189,12 @@ RERANK_TOP_K = 40
 # and never hits this.
 RERANK_BATCH_CAP = 96
 FINAL_TOP_K = 5
+# Enumeration/count questions (e.g. "总共有几个培训视频", "有哪些章节") need a much
+# wider candidate window so every relevant source survives the final top-k
+# cutoff; the answer then receives a compact title inventory instead of full
+# passages (see src/generate.py).  Cap keeps the reranker/parent expansion cost
+# bounded while still surfacing a full list.
+ENUMERATION_TOP_K = 16
 MAX_CONTEXT_CHARS = 6000
 # Answer-generation defaults. Runtime overrides are stored in app.sqlite by
 # the system-admin policy page; these remain the bootstrap fallback.
