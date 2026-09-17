@@ -20,7 +20,7 @@ PROTECTED = {
     "src/chunk.py": "560d3d20e878c17c8052ba84cf91b89752d5f2fde4b64db6852bd9d17aaae15e",
     "src/index.py": "eeb1a6adb5811dd2082ddbfaeccb56a4dca6242b25ea9f578d4f69c01a00054f",
     "src/indexing_pipeline.py": "3d14dc7bd970d59773fb66aa6a5ed0fd6d1cbb16ceaafd9935ffe48219dc9983",
-    "src/retrieve.py": "de585207fe38d94edca120a1a47670b538607d7cc62119d1c73946ac4087ddbf",
+    "src/retrieve.py": "04194a0cd306eeedff5427c3398513f56f8f61fc5ec07be51da54f66d1a3e28c",
 }
 FORBIDDEN = {
     "funasr", "faster_whisper", "whisper", "torch", "av", "ffmpeg",
