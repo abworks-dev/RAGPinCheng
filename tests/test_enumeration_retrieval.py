@@ -70,13 +70,17 @@ def test_enumeration_context_indexes_match_used_order():
         assert f'doc="{p.doc_title}"' in context
 
 
-def test_enumeration_context_first_two_keep_full_text():
+def test_enumeration_context_every_source_has_real_snippet():
     parents = [_parent(i) for i in range(1, 6)]
     context, used = _build_enumeration_context(parents, budget=10_000)
     assert "这是视频 1 的正文内容" in context
     assert "这是视频 2 的正文内容" in context
-    # The remaining sources are compact inventory entries.
-    assert context.count("（条目）") == 3
+    # Every source carries real content — no empty placeholder.
+    assert "（条目）" not in context
+    assert "（内容为空）" not in context
+    # All six 视频 snippets appear (compact for the tail entries).
+    for i in range(1, 6):
+        assert f"视频 {i} 的正文内容" in context
 
 
 def test_enumeration_context_respects_budget_truncation():
@@ -92,6 +96,18 @@ def test_enumeration_context_non_transcript_uses_section():
     context, _ = _build_enumeration_context(parents, budget=10_000)
     assert 'type="transcript"' not in context
     assert 'section="第 1 节"' in context
+
+
+def test_compact_snippet_strips_speaker_line_and_truncates():
+    from src.generate import _compact_snippet
+
+    text = "说话人 1 00:00:00\n这是视频的实际内容。"
+    assert _compact_snippet(text) == "这是视频的实际内容。"
+    long = "说话人 1 00:00:00\n" + "长内容" * 60
+    snippet = _compact_snippet(long, limit=40)
+    assert len(snippet) <= 40
+    assert snippet.endswith("…")
+    assert _compact_snippet("") == "（内容为空）"
 
 
 # ── session _fresh_retrieve top_k routing ────────────────────────────────────
