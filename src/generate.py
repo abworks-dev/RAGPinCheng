@@ -245,17 +245,17 @@ def _build_enumeration_context(
     """Compact context for enumerate/count questions.
 
     Every retrieved *parent* becomes a short inventory entry (title + category
-    + start time) instead of a full passage, so 10+ sources fit under `budget`
-    and the LLM can list/count them all.  The exact 1-based ``index`` matches
-    the UI's ``sources[]`` order, so ``[N]`` citations still resolve to real
-    source cards.  The first few parents also keep a full passage (when space
-    allows, capped at 2) so the most relevant item has grounded text to cite.
+    + a real opening snippet of its text), so the LLM can reliably list/count
+    every source within the context budget.  The exact 1-based ``index``
+    matches the UI's ``sources[]`` order, so ``[N]`` citations still resolve to
+    real source cards.  The first few parents keep their full passage (capped
+    at 2) so there is grounded text to cite for the top hits; the rest carry a
+    bounded snippet so a strict "answer only from <sources>" model never sees
+    an empty source and wrongly answers "未找到相关内容".
     """
     blocks: list[str] = []
     used: list[RetrievedParent] = []
     total = 0
-    # Full-passage allowance: keep 2 (or fewer if budget is small) so there is
-    # grounded text to cite for the top hits; the rest are title-only inventory.
     full_count = 0
     for p in parents:
         n = len(used) + 1
@@ -272,19 +272,45 @@ def _build_enumeration_context(
                 f'<source index="{n}" id="{p.parent_id[:8]}" doc="{p.doc_title}" '
                 f'category="{p.category}"{company_attr} section="{section_leaf}">'
             )
-        if full_count < 2 and p.text:
+        if full_count < 2 and p.text and len(p.text) > 0:
             block = f"{open_tag}\n{p.text}\n</source>"
             full_count += 1
         else:
-            # Compact inventory entry carries just the metadata; the frontend
-            # still renders a real source card for it (title/category/play).
-            block = f"{open_tag}（条目）\n</source>"
+            # Every non-passage source still carries its real opening snippet so
+            # the model has grounded content (the frontend renders the full card
+            # via publication/index metadata regardless).  Transcript text starts
+            # with a 说话人 HH:MM:SS line we strip for a compact snippet.
+            snippet = _compact_snippet(p.text)
+            block = f"{open_tag}\n{snippet}\n</source>"
         if total + len(block) > budget and used:
             break
         blocks.append(block)
         used.append(p)
         total += len(block)
     return "\n\n".join(blocks), used
+
+
+def _compact_snippet(text: str, limit: int = 180) -> str:
+    """Trim a transcript/passage to a short real snippet for enumeration context.
+
+    Strips leading speaker/time marker lines so the snippet reads naturally,
+    then truncates to `limit` chars with an ellipsis.  Never returns empty when
+    the input has content.
+    """
+    if not text:
+        return "（内容为空）"
+    lines = text.splitlines()
+    while lines and (
+        lines[0].lstrip().startswith("说话") or ":" in lines[0][:12]
+    ):
+        lines.pop(0)
+    cleaned = "\n".join(lines).strip()
+    if not cleaned:
+        cleaned = text.strip()
+    if len(cleaned) > limit:
+        # Leave room for the ellipsis so the result stays within `limit`.
+        cleaned = cleaned[: limit - 1].rstrip() + "…"
+    return cleaned or "（内容为空）"
 
 
 def _client() -> OpenAI:
