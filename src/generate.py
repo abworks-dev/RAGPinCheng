@@ -372,9 +372,17 @@ def _prepare_generation(
     effective_budget = effective_policy.answer_context_chars if budget is None else max(budget, 0)
     if enumeration:
         context, used = _build_enumeration_context(parents, effective_budget)
+        # Deterministic count: the answer must report exactly how many distinct
+        # items are in the inventory, never recomputed by the LLM (which was
+        # observed to drift: 4 / 9 / 10 for the same list).
+        total = len({p.doc_title for p in used})
+        total_line = f"\n条目总数（以此为准，请如实列出并引用）：{total}"
     else:
         context, used = _build_context(parents, effective_budget)
-    user_msg = render_prompt("answer_user", context=context, query=query)
+        total_line = ""
+    user_msg = render_prompt(
+        "answer_user", context=context, query=query, total_line=total_line,
+    )
 
     messages: list[dict] = [
         {"role": "system", "content": load_prompt("answer_system")}
