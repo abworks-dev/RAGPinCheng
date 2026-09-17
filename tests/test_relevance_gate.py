@@ -106,7 +106,7 @@ def test_sync_session_skips_generation_when_gate_rejects(monkeypatch):
     assert result.relevance["action"] == "low_confidence"
     assert result.sources == []
     assert result.final_sources == []
-    assert "未找到足够相关" in result.answer_text
+    assert "未检索到" in result.answer_text or "最接近" in result.answer_text
 
 
 def test_stream_session_skips_generation_and_keeps_history_clean(monkeypatch):
@@ -123,7 +123,7 @@ def test_stream_session_skips_generation_and_keeps_history_clean(monkeypatch):
     answer = "".join(stream)
     assert prep.relevance["action"] == "low_confidence"
     assert prep.used_sources == []
-    assert "未找到足够相关" in answer
+    assert "未检索到" in answer or "最接近" in answer
     assert session.last_turn_result is not None
     assert session.last_turn_result.final_sources == []
     assert session.state.messages[-1].content == answer

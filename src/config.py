@@ -196,6 +196,20 @@ FINAL_TOP_K = 5
 # bounded while still surfacing a full list.
 ENUMERATION_TOP_K = 16
 MAX_CONTEXT_CHARS = 6000
+# Reserved final slots for transcript (teaching-video) sources in regular
+# (non-enumeration) retrieval.  When the query carries teaching/training intent
+# terms, at least this many transcript parents are guaranteed into the final
+# top-k even if their raw score ranks below other document types (e.g. a
+# standard/spec pushing the desired training video out).  0 disables the
+# guarantee.  Used to keep "虹吸雨水管处理原则" from being answered only from
+# GB specifications instead of the 管综培训 transcript.
+TRANSCRIPT_MIN_QUOTA = int(os.getenv("TRANSCRIPT_MIN_QUOTA", "1"))
+# Query intent terms that signal the user is after teaching-video knowledge;
+# when present, the transcript min-quota guarantee applies.
+_TRANSCRIPT_QUERY_MARKERS = (
+    "培训", "讲解", "操作流程", "怎么做", "如何做", "建模", "实操",
+    "视频", "案例", "操作",
+)
 # Answer-generation defaults. Runtime overrides are stored in app.sqlite by
 # the system-admin policy page; these remain the bootstrap fallback.
 ANSWER_MAX_OUTPUT_TOKENS = int(os.getenv("ANSWER_MAX_OUTPUT_TOKENS", "1200"))
