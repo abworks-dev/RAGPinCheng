@@ -24,7 +24,7 @@ from typing import Iterator
 
 from .config import DECOMPOSE_MAX_CONTEXT_CHARS, ENUMERATION_TOP_K, FINAL_TOP_K, MAX_CONTEXT_CHARS, QUERY_DECOMPOSE_ENABLED
 from .decompose import maybe_decompose
-from .intent import is_enumeration_intent
+from .intent import extract_series_token, is_enumeration_intent
 from .answer_policy import MAX_CONTEXT_CHARS_CONFIG, AnswerPolicy, load_answer_policy
 from .generate import (
     Answer,
@@ -37,7 +37,7 @@ from .generate import (
 from .query_guard import QueryValidation, validate_search_query
 from .relevance_gate import LOW_CONFIDENCE_MESSAGE, evaluate_relevance
 from .rerank import rerank_scores
-from .retrieve import RetrievedParent, retrieve, retrieve_multi
+from .retrieve import RetrievedParent, retrieve, retrieve_enumeration_titles, retrieve_multi
 
 # Fixed reserve (chars) inside MAX_CONTEXT_CHARS for system prompt + question
 # scaffolding + answer_user template overhead. Leaves the remainder for history
@@ -249,6 +249,27 @@ def _retrieval_diagnostics(
     return diagnostics
 
 
+def _merge_enumeration_recall(
+    title_hits: list[RetrievedParent],
+    semantic: list[RetrievedParent],
+) -> list[RetrievedParent]:
+    """Merge title recall ahead of semantic results, deduping by parent_id.
+
+    Enumeration answers want every series video first (the list/count core),
+    then the semantically-best passages for grounded citation.  Title hits keep
+    their (score=1.0) position; semantic results appear after and are deduped
+    against both.
+    """
+    seen: set[str] = set()
+    merged: list[RetrievedParent] = []
+    for p in list(title_hits) + semantic:
+        if p.parent_id in seen:
+            continue
+        seen.add(p.parent_id)
+        merged.append(p)
+    return merged
+
+
 def retrieve_for_turn(
     fresh: list[RetrievedParent],
     last_sources: list[RetrievedParent] | None,
@@ -388,9 +409,23 @@ class ChatSession:
         # retriever, where [] retains its legacy "no filter" meaning.
         if categories == []:
             return []
+        if enumeration:
+            semantic = retrieve(
+                search_query, top_k=ENUMERATION_TOP_K, categories=categories,
+            )
+            # Title recall guarantees every series video is surfaced for
+            # enumeration even when its transcript fragments score low.
+            token = extract_series_token(search_query)
+            title_hits = retrieve_enumeration_titles(search_query, token)
+            merged = _merge_enumeration_recall(title_hits, semantic)
+            if debug is not None:
+                debug["enumeration_top_k"] = ENUMERATION_TOP_K
+                debug["enumeration_title_recall"] = len(title_hits)
+                debug["enumeration_merged"] = len(merged)
+            return merged
+
         if not QUERY_DECOMPOSE_ENABLED:
-            top_k = ENUMERATION_TOP_K if enumeration else FINAL_TOP_K
-            return retrieve(search_query, top_k=top_k, categories=categories)
+            return retrieve(search_query, top_k=FINAL_TOP_K, categories=categories)
 
         decision = maybe_decompose(search_query)
         if debug is not None:
@@ -404,8 +439,7 @@ class ChatSession:
             return retrieve_multi(
                 decision.sub_queries, search_query, categories=categories,
             )
-        top_k = ENUMERATION_TOP_K if enumeration else FINAL_TOP_K
-        return retrieve(search_query, top_k=top_k, categories=categories)
+        return retrieve(search_query, top_k=FINAL_TOP_K, categories=categories)
 
     def _sources_for_ui(
         self, parents: list[RetrievedParent]
