@@ -1,18 +1,65 @@
-"""Query-intent detection for retrieval shaping.
+"""Query-intent detection for retrieval shaping and answering stance.
 
-RAG answers most questions with focused parent fragments, but "enumerate /
-count" questions (e.g. "机电管综培训总共有几个培训视频", "有哪些章节", "分别列出")
-need a wider candidate window so every relevant source survives the final
-top-k cutoff.  This module identifies that intent with lightweight rules, so
-the retrieval top-k can be raised and a compact title inventory can be
-injected into the answer context.
+Classifies user input into one of four intents so the pipeline can pick the
+right retrieval breadth and the right system-prompt stance:
+
+- ``greeting``   : social salutations / self-intro asks. Never run RAG — the
+                   session returns a canned self-introduction instead.
+- ``enumerate``  : list/count questions (e.g. "总共有几个培训视频", "有哪些章节").
+                   Uses a wider top-k + title recall + compact inventory so
+                   every relevant item is surfaced and listed.
+- ``comparison`` : which-to-choose / comparative questions (decompose path).
+- ``fact``       : ordinary factual / how-to questions (default, regular RAG).
+
+This keeps the enumerate/count helpers from the earlier work and adds the
+routing used to pick the answering stance.
 """
 from __future__ import annotations
 
 import re
+from enum import Enum
 
-# Markers that strongly suggest the user wants a list / count / enumeration
-# of items rather than an answer from one specific passage.
+
+class Intent(str, Enum):
+    GREETING = "greeting"
+    ENUMERATE = "enumerate"
+    COMPARISON = "comparison"
+    FACT = "fact"
+
+
+# ── greeting ────────────────────────────────────────────────────────────────
+
+# Pure greetings / social openers — never knowledge lookups.  Also covers the
+# "你能做什么 / 你会什么" self-intro asks so they get a helpful assistant caps
+# instead of a cold "未找到相关内容".
+_GREETING_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # Pure salutations / social openers — short and self-contained.
+    re.compile(r"^(?:你)?(?:好|嗨|哈喽|hi|hello|hey|早上好|下午好|晚上好|晚安|在吗|在么|在不在)[!！~～。.]*$", re.IGNORECASE),
+    # "你能做什么 / 你会做什么 / 你可以做什么 / 你是谁 / 你是做什么的" style asks.
+    re.compile(r"^(?:请问?)?你?(?:能|会|可以)?(?:做什么|干什么|能做什么|可以做什么|会做什么|帮我什么|帮我做点什么|帮我回答什么)[！!~～。.?？]*$"),
+    re.compile(r"^(?:你|好|嗨|哈喽|hi|hello|hey|在吗|在么|请问|嗨喽){0,2}\s*你?(?:能|会|可以)?(?:做什么|干什么|能做什么|会做什么|可以做什么)\s*[！!~～。.?？]*$", re.IGNORECASE),
+    re.compile(r"^你(?:是谁|是做什么的|是干嘛的|是谁呀)[！!~～。.?？]*$"),
+    re.compile(r"^[!！~？?。.\s]*$"),  # pure punctuation
+    re.compile(r"^(?:谢谢|感谢|谢谢啦|多谢|辛苦|好的|ok|okay|收到)[!！~～。.…]*$", re.IGNORECASE),
+)
+
+# Domain terms that make a query a real knowledge lookup, not social chatter.
+# If present, the input is almost certainly factual — never classed as greeting.
+_GREETING_EXCLUDE_SUBSTR = (
+    "雨水管", "管线", "管材", "风管", "桥架", "Revit", "CAD", "BIM",
+    "钢筋", "构件", "楼板", "梁", "柱", "墙", "规范", "标准", "图集", "建模",
+    "培训", "视频", "章节", "流程", "操作", "审核", "检查",
+)
+
+
+def is_greeting(query: str) -> bool:
+    text = query.strip()
+    if not text:
+        return True  # empty input is treated as social noise
+    if any(sub in text for sub in _GREETING_EXCLUDE_SUBSTR):
+        return False
+    return any(p.search(text) for p in _GREETING_PATTERNS)
+
 _ENUMERATION_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"总共\s*(?:有|是)?\s*\d*\s*个"),
     re.compile(r"(?:有|是)\s*(?:几个|多少个|哪些|哪几个)"),
@@ -24,6 +71,41 @@ _ENUMERATION_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"第[一二三四五六七八九十]+\s*[部章讲课节]"),
     re.compile(r"[几多少]\s*[部章讲课节个视频]"),
 )
+
+# Choose-between / comparative markers → decompose path (retrieve_multi).
+_COMPARISON_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"(?:哪个|哪种|哪些好|选哪个|该选|应该选|更好|更合适|更推荐|对比|比较|区别|差异|优劣|好一点|适合)"),
+    re.compile(r"(?:和|与|vs|vs\.|VS)[^。？?]{0,6}(?:哪个|相比|对比|比较|区别)"),
+    re.compile(r"(?:二选一|多选一|怎么选)"),
+)
+
+
+def is_comparison(query: str) -> bool:
+    text = query.strip()
+    if not text:
+        return False
+    return any(p.search(text) for p in _COMPARISON_PATTERNS)
+
+
+def classify_intent(query: str, *, standalone_query: str | None = None) -> Intent:
+    """Route the query to an intent for retrieval breadth + answer stance.
+
+    Priority: greeting (short-circuit) → enumerate (list/count) →
+    comparison (decompose) → fact (default).  The rewrite-standalone form is
+    also considered so a follow-up that was expanded to an enumeration still
+    routes correctly.
+    """
+    candidates = [query]
+    if standalone_query and standalone_query.strip():
+        candidates.append(standalone_query)
+
+    if any(is_greeting(c) for c in candidates):
+        return Intent.GREETING
+    if is_enumeration_intent(query, standalone_query=standalone_query):
+        return Intent.ENUMERATE
+    if any(is_comparison(c) for c in candidates):
+        return Intent.COMPARISON
+    return Intent.FACT
 
 
 def is_enumeration_intent(query: str, *, standalone_query: str | None = None) -> bool:

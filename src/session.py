@@ -24,7 +24,7 @@ from typing import Iterator
 
 from .config import DECOMPOSE_MAX_CONTEXT_CHARS, ENUMERATION_TOP_K, FINAL_TOP_K, MAX_CONTEXT_CHARS, QUERY_DECOMPOSE_ENABLED
 from .decompose import maybe_decompose
-from .intent import extract_series_token, is_enumeration_intent
+from .intent import Intent, classify_intent, extract_series_token, is_enumeration_intent
 from .answer_policy import MAX_CONTEXT_CHARS_CONFIG, AnswerPolicy, load_answer_policy
 from .generate import (
     Answer,
@@ -35,7 +35,7 @@ from .generate import (
     stream_generate,
 )
 from .query_guard import QueryValidation, validate_search_query
-from .relevance_gate import LOW_CONFIDENCE_MESSAGE, evaluate_relevance
+from .relevance_gate import abstention_message, evaluate_relevance
 from .rerank import rerank_scores
 from .retrieve import RetrievedParent, retrieve, retrieve_enumeration_titles, retrieve_multi
 
@@ -58,6 +58,17 @@ _VAGUE_FOLLOW_UP_RE = re.compile(
 _CLARIFICATION_MESSAGE = (
     "我还无法确定您想追问上一条回答中的哪一项。"
     "请补充具体对象或条件，例如条款、构件、材料型号或操作步骤。"
+)
+
+_GREETING_MESSAGE = (
+    "您好！我是公司内部知识库助手，可以帮您查询行业规范、客户标准、"
+    "公司内部标准、项目经验与培训视频等内容。\n\n"
+    "您可以这样问我：\n"
+    "· “机电管综培训总共有几个培训视频？”\n"
+    "· “Revit 如何创建参数化族？”\n"
+    "· “管综培训里管线避让原则是什么？”\n"
+    "· “GB 50016 对疏散距离的要求是什么？”\n"
+    "请描述您想查找的具体内容，我为您检索。"
 )
 
 
@@ -484,7 +495,28 @@ class ChatSession:
         policy = load_answer_policy()
         policy_snapshot = policy.public_dict()
 
-        # ① REWRITE
+        # ① GREETING — social small-talk short-circuit (no retrieval/LLM).
+        if classify_intent(query) is Intent.GREETING:
+            timings.update({"rewrite": 0.0, "guard": 0.0, "retrieve": 0.0, "generate": 0.0, "total": 0.0})
+            self.state.append_turn(query, _GREETING_MESSAGE, sources_for_ui=[], policy_snapshot=policy_snapshot)
+            result = TurnResult(
+                answer_text=_GREETING_MESSAGE,
+                sources=[],
+                search_query=query,
+                fresh_sources=[],
+                final_sources=[],
+                answer=None,
+                history_chars=0,
+                budget=0,
+                rewrite_applied=False,
+                timings=timings,
+                guard_reason="greeting",
+                policy_snapshot=policy_snapshot,
+            )
+            self.last_turn_result = result
+            return result
+
+        # ② REWRITE
         resolution, rewrite_t = self._resolve_search_query(
             query, usage_out=rewrite_usage,
         )
@@ -560,9 +592,9 @@ class ChatSession:
             fresh_sources, final_sources,
         )
 
-        # No-source escape hatch.
+        # No-source escape hatch (transparent abstention instead of a bare fallback).
         if not final_sources:
-            fallback = "资料中未找到相关内容。"
+            fallback = abstention_message(query, fresh_sources)
             self.state.append_turn(query, fallback, sources_for_ui=[], policy_snapshot=policy_snapshot)
             self.state.last_sources = []
             self.state.last_search_query = search_query
@@ -572,7 +604,7 @@ class ChatSession:
                 answer_text=fallback,
                 sources=[],
                 search_query=search_query,
-                fresh_sources=[],
+                fresh_sources=fresh_sources,
                 final_sources=[],
                 answer=None,
                 history_chars=0,
@@ -587,13 +619,14 @@ class ChatSession:
             return result
 
         if relevance["action"] == "low_confidence":
-            self.state.append_turn(query, LOW_CONFIDENCE_MESSAGE, sources_for_ui=[], policy_snapshot=policy_snapshot)
+            message = abstention_message(query, fresh_sources)
+            self.state.append_turn(query, message, sources_for_ui=[], policy_snapshot=policy_snapshot)
             self.state.last_sources = []
             self.state.last_search_query = search_query
             timings["generate"] = 0.0
             timings["total"] = sum(timings.values())
             result = TurnResult(
-                answer_text=LOW_CONFIDENCE_MESSAGE,
+                answer_text=message,
                 sources=[],
                 search_query=search_query,
                 fresh_sources=fresh_sources,
@@ -673,7 +706,46 @@ class ChatSession:
         policy = load_answer_policy()
         policy_snapshot = policy.public_dict()
 
-        # ① REWRITE
+        # ① GREETING — social small-talk short-circuit (no retrieval/LLM).
+        if classify_intent(query) is Intent.GREETING:
+            timings.update({"rewrite": 0.0, "guard": 0.0, "retrieve": 0.0, "generate": 0.0, "total": 0.0})
+            prep = StreamingTurnPrep(
+                search_query=query,
+                rewrite_applied=False,
+                fresh_sources=[],
+                final_sources=[],
+                used_sources=[],
+                history_chars=0,
+                budget=0,
+                timings=dict(timings),
+                no_source_fallback=True,
+                guard_reason="greeting",
+                policy_snapshot=policy_snapshot,
+            )
+            resolution = QueryResolution(original_query=query, standalone_query=query)
+            prep.query_resolution = resolution
+
+            def _greeting_iter() -> Iterator[str]:
+                yield _GREETING_MESSAGE
+
+            stream = self._wrap_stream(
+                _greeting_iter(),
+                query=query,
+                search_query=query,
+                rewrite_applied=False,
+                fresh_sources=[],
+                final_sources=[],
+                gen_prep=None,
+                history_chars=0,
+                budget=0,
+                timings_so_far=dict(timings),
+                rewrite_usage=dict(rewrite_usage),
+                guard_reason="greeting",
+                policy=policy,
+            )
+            return prep, stream
+
+        # ② REWRITE
         resolution, rewrite_t = self._resolve_search_query(
             query, usage_out=rewrite_usage,
         )
@@ -770,7 +842,7 @@ class ChatSession:
 
         # No-source path: stream the fallback message and finalize.
         if not final_sources:
-            fallback = "资料中未找到相关内容。"
+            fallback = abstention_message(query, fresh_sources)
             prep = StreamingTurnPrep(
                 search_query=search_query,
                 rewrite_applied=rewrite_applied,
@@ -822,7 +894,7 @@ class ChatSession:
                 query_resolution=resolution,
             )
             def _low_confidence_iter() -> Iterator[str]:
-                yield LOW_CONFIDENCE_MESSAGE
+                yield abstention_message(query, fresh_sources)
             stream = self._wrap_stream(_low_confidence_iter(), query=query, search_query=search_query, rewrite_applied=rewrite_applied, fresh_sources=fresh_sources, final_sources=[], gen_prep=None, history_chars=0, budget=0, timings_so_far=dict(timings), rewrite_usage=dict(rewrite_usage), relevance=relevance, policy=policy)
             return prep, stream
 
