@@ -131,3 +131,94 @@ def test_fresh_retrieve_uses_default_top_k_for_plain_question(monkeypatch):
     s = session_mod.ChatSession()
     s._fresh_retrieve("管道避让原则是什么", categories=None, enumeration=False)
     assert calls[0]["top_k"] == FINAL_TOP_K
+
+
+# ── series-token extraction ─────────────────────────────────────────────────
+
+
+def test_extract_series_token_produces_usable_key():
+    from src.intent import extract_series_token
+
+    assert extract_series_token("机电管综培训总共有几个培训视频") == "机电管综培训"
+    assert extract_series_token("净高检查共有几个部分") == "净高检查"
+    token = extract_series_token("暖通机房建模培训分别有哪些视频")
+    assert "暖通机房建模培训" in token
+    assert "哪些" not in token and "培训视频" not in token
+
+
+# ── title recall + merge ────────────────────────────────────────────────────
+
+
+def _tv_parent(index: int, media_id: str = None) -> RetrievedParent:
+    return RetrievedParent(
+        parent_id=f"p-{index}",
+        doc_title=f"机电管综培训（{index}）",
+        category="教学视频",
+        section_path="transcript",
+        source_path=f"/media/v{index}.mp4",
+        text=f"说话人 1 00:00:0{index}\n视频 {index} 正文\n",
+        score=1.0,
+        matched_children=[],
+        doc_type="transcript",
+        start_time=f"00:00:0{index}",
+        media_id=media_id or f"media-{index}",
+        transcript_version_id=f"00000000-0000-4{index:1d}00-8000-00000000000{index}",
+    )
+
+
+def test_merge_enumeration_recall_dedups_and_puts_title_hits_first():
+    from src.session import _merge_enumeration_recall
+
+    title_hits = [_tv_parent(1), _tv_parent(2)]
+    # semantic includes p-2 (dup) plus p-3
+    semantic = [
+        RetrievedParent(**{**_tv_parent(2).__dict__, "score": 0.9}),
+        _tv_parent(3),
+    ]
+    merged = _merge_enumeration_recall(title_hits, semantic)
+    pids = [p.parent_id for p in merged]
+    assert pids == ["p-1", "p-2", "p-3"]
+    assert len({p.parent_id for p in merged}) == 3
+
+
+def test_retrieve_enumeration_titles_filters_unpublished(monkeypatch, tmp_path):
+    import sqlite3
+
+    from src import retrieve as retrieve_mod
+    from src.transcription_retrieval_visibility import PublishedTranscriptSnapshot
+
+    db = tmp_path / "parents.sqlite"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """CREATE TABLE parents (parent_id TEXT PRIMARY KEY, doc_title TEXT, category TEXT,
+           section_path TEXT, source_path TEXT, text TEXT, doc_type TEXT, start_time TEXT,
+           company TEXT, media_id TEXT, transcript_version_id TEXT, publication_target_id TEXT,
+           content_item_id TEXT, content_version_id TEXT, category_key TEXT)"""
+    )
+    # Two published (admitted) series videos + one unpublished.
+    admitted = set()
+    rows = []
+    for i in (1, 2, 3):
+        version_id = f"00000000-0000-4{i}00-8000-00000000000{i}"
+        admitted.add(version_id)
+        rows.append((
+            f"p-{i}", f"机电管综培训（{i}）", "教学视频", "transcript", f"/m{i}", f"v{i} text", "transcript",
+            "00:00:00", None, f"media-{i}", version_id, None, None, None, None
+        ))
+    # Make video 3 unpublished by not admitting its version id.
+    admitted.remove(rows[2][10])
+    for r in rows:
+        conn.execute(
+            "INSERT INTO parents (parent_id,doc_title,category,section_path,source_path,text,doc_type,start_time,company,media_id,transcript_version_id,publication_target_id,content_item_id,content_version_id,category_key) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            r,
+        )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(retrieve_mod, "PARENTS_DB", db)
+    visibility = type("V", (), {"snapshot": lambda self: PublishedTranscriptSnapshot(frozenset(admitted))})()
+    result = retrieve_mod.retrieve_enumeration_titles("机电管综培训总共有几个", "机电管综培训", visibility=visibility)
+    titles = [p.doc_title for p in result]
+    assert "机电管综培训（1）" in titles
+    assert "机电管综培训（2）" in titles
+    assert "机电管综培训（3）" not in titles  # unpublished excluded

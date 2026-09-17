@@ -30,6 +30,7 @@ from .config import (
     DECOMPOSE_MIN_QUOTA_PER_SUBQUERY,
     DENSE_TOP_K,
     FINAL_TOP_K,
+    PARENTS_DB,
     RERANK_BATCH_CAP,
     RERANK_ENABLED,
     RERANK_TOP_K,
@@ -521,6 +522,89 @@ def retrieve(
     return _dedup_to_parents(
         scored, child_rrf, top_k, snapshot, content_snapshot, category_labels
     )
+
+
+def retrieve_enumeration_titles(
+    query: str,
+    series_token: str,
+    *,
+    visibility: PublishedTranscriptVisibilityPort | None = None,
+) -> list[RetrievedParent]:
+    """Title-based recall for enumeration/count questions.
+
+    Semantic retrieval ranks fragments by similarity, which can silently miss
+    a series video whose transcript chunks score lower (e.g. "（三）车位平面调整"
+    under a "总共有几个培训视频" question).  This helper recalls one parent per
+    published transcript whose doc_title contains the extracted series token,
+    so every video in the series is surfaced for the LLM to list/count.
+
+    Only admitted parents for currently-published transcript versions are
+    returned (same visibility rules as the main retrieval path).
+    """
+    token = series_token.strip()
+    if not token or not PARENTS_DB.is_file():
+        return []
+    snapshot = (visibility or _DEFAULT_VISIBILITY).snapshot()
+    admitted = snapshot.version_ids
+    conn = sqlite3.connect(f"file:{PARENTS_DB.as_posix()}?mode=ro", uri=True)
+    try:
+        rows = conn.execute(
+            """SELECT parent_id, doc_title, category, section_path, source_path, text,
+                      doc_type, start_time, media_id, transcript_version_id, category_key
+               FROM parents
+               WHERE doc_title LIKE ? AND doc_type='transcript'
+               ORDER BY doc_title, rowid ASC""",
+            (f"%{token}%",),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    by_media: dict[str, dict] = {}
+    for r in rows:
+        tv = r[9]
+        if tv not in admitted:
+            continue
+        # Keep the lowest (earliest) parent per media so each video contributes
+        # exactly one compact inventory parent.
+        media_id = r[8]
+        if media_id in by_media:
+            continue
+        by_media[media_id] = {
+            "parent_id": r[0],
+            "doc_title": r[1],
+            "category": r[2],
+            "section_path": r[3],
+            "source_path": r[4],
+            "text": r[5],
+            "doc_type": r[6] or "transcript",
+            "start_time": r[7],
+            "media_id": media_id,
+            "transcript_version_id": tv,
+            "category_key": r[10],
+        }
+    category_labels = _managed_category_labels()
+    out: list[RetrievedParent] = []
+    for p in by_media.values():
+        out.append(
+            RetrievedParent(
+                parent_id=p["parent_id"],
+                doc_title=p["doc_title"],
+                category=category_labels.get(p["category_key"], p["category"]),
+                section_path=p["section_path"],
+                source_path=p["source_path"],
+                text=p["text"],
+                score=1.0,
+                matched_children=[],
+                doc_type=p["doc_type"],
+                start_time=p["start_time"],
+                media_id=p["media_id"],
+                transcript_version_id=p["transcript_version_id"],
+                category_key=p["category_key"],
+                rrf_score=0.0,
+            )
+        )
+    out.sort(key=lambda p: p.doc_title)
+    return out
 
 
 def _cap_children_for_rerank(

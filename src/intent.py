@@ -43,3 +43,37 @@ def is_enumeration_intent(query: str, *, standalone_query: str | None = None) ->
             if pattern.search(text):
                 return True
     return False
+
+
+# Tokens to strip when extracting a title-recall key from an enumeration query.
+_ENUMERATION_NOISE = (
+    r"总共有|一共有|共计|合计|总共|共有",
+    r"几个|多少个|哪些|哪几个|哪些类|几类|几个培训视频|多少",
+    r"有哪些|有什么|有没有|分别有哪些",
+    r"培训视频|教学视频|视频|章节|部分|清单|列表|分别|第[一二三四五六七八九十]+\s*[部章讲课节]",
+    r"的是|有多少",
+)
+
+
+def extract_series_token(query: str) -> str:
+    """Best-effort extraction of a title-recall key from an enumeration query.
+
+    Removes enumeration scaffolding ("总共有几个培训视频" etc.) so the remainder
+    is a short series keyword ("机电管综培训") usable for title LIKE matching.
+    Falls back to the whole query on no match.  Only used to widen recall for
+    enumeration questions; never affects other queries.
+    """
+    text = query.strip()
+    if not text:
+        return ""
+    stripped = text
+    # Drop punctuation and trailing enumeration markers first.
+    stripped = re.sub(r"[，。？?！!、：:]+", " ", stripped)
+    for noise in _ENUMERATION_NOISE:
+        stripped = re.sub(noise, " ", stripped)
+    stripped = re.sub(r"\s+", "", stripped)
+    # The series keyword is usually the leading noun chunk; return longest
+    # non-empty segment (whole leftover if nothing usable).
+    if len(stripped) >= 2:
+        return stripped
+    return text.strip()
