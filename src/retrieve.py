@@ -163,6 +163,23 @@ def _bootstrap_indexes() -> bool:
     return True
 
 
+def _doc_type_filter(doc_types: list[str] | None) -> models.Filter | None:
+    """Restrict recall to specific payload doc_type values (e.g. transcripts).
+
+    Used for teaching-video enumeration so training transcripts are not diluted
+    by specs/pptx/pdfs ("详细点列出教学视频" must not pull in GB 51348 etc.).
+    """
+    if not doc_types:
+        return None
+    return models.Filter(
+        must=[
+            models.FieldCondition(
+                key="doc_type", match=models.MatchAny(any=list(doc_types))
+            )
+        ]
+    )
+
+
 def _category_filter(categories: list[str] | None) -> models.Filter | None:
     if categories is None:
         return None
@@ -322,6 +339,8 @@ def _recall_scored(
     categories: list[str] | None,
     snapshot: PublishedTranscriptSnapshot | None = None,
     content_snapshot: PublishedContentSnapshot | None = None,
+    *,
+    doc_types: list[str] | None = None,
 ):
     """Run one query's dense+sparse (+code-boost) recall and rerank.
 
@@ -337,9 +356,10 @@ def _recall_scored(
     snapshot = snapshot or _DEFAULT_VISIBILITY.snapshot()
     content_snapshot = content_snapshot or _DEFAULT_CONTENT_VISIBILITY.snapshot()
     cat_filter = _category_filter(categories)
+    doc_type_filter = _doc_type_filter(doc_types)
     visibility_filter = _visibility_filter(snapshot)
     base_filter = _merge_filters(
-        cat_filter, visibility_filter, _content_visibility_filter(content_snapshot)
+        cat_filter, visibility_filter, _content_visibility_filter(content_snapshot), doc_type_filter
     )
     code_filter = _code_filter(code_variants)
 
@@ -525,12 +545,13 @@ def retrieve(
     categories: list[str] | None = None,
     *,
     visibility: PublishedTranscriptVisibilityPort | None = None,
+    doc_types: list[str] | None = None,
 ) -> list[RetrievedParent]:
     snapshot = (visibility or _DEFAULT_VISIBILITY).snapshot()
     content_snapshot = _DEFAULT_CONTENT_VISIBILITY.snapshot()
     category_labels = _managed_category_labels()
     scored, child_rrf = _recall_scored(
-        query, categories, snapshot, content_snapshot
+        query, categories, snapshot, content_snapshot, doc_types=doc_types
     )
     if not scored:
         return []

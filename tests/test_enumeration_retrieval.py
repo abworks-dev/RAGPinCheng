@@ -119,8 +119,8 @@ def test_fresh_retrieve_uses_enumeration_top_k(monkeypatch):
 
     calls: list[dict] = []
 
-    def fake_retrieve(query, top_k=FINAL_TOP_K, categories=None):
-        calls.append({"query": query, "top_k": top_k, "categories": categories})
+    def fake_retrieve(query, top_k=FINAL_TOP_K, categories=None, **kwargs):
+        calls.append({"query": query, "top_k": top_k, "categories": categories, "doc_types": kwargs.get("doc_types")})
         return []
 
     monkeypatch.setattr(session_mod, "retrieve", fake_retrieve)
@@ -128,7 +128,7 @@ def test_fresh_retrieve_uses_enumeration_top_k(monkeypatch):
 
     s = session_mod.ChatSession()
     s._fresh_retrieve("机电管综培训总共有几个培训视频", categories=None, enumeration=True)
-    assert calls == [{"query": "机电管综培训总共有几个培训视频", "top_k": ENUMERATION_TOP_K, "categories": None}]
+    assert calls == [{"query": "机电管综培训总共有几个培训视频", "top_k": ENUMERATION_TOP_K, "categories": None, "doc_types": ["transcript"]}]
 
 
 def test_fresh_retrieve_uses_default_top_k_for_plain_question(monkeypatch):
