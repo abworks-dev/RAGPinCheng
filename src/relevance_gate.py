@@ -18,6 +18,29 @@ from .retrieve import RetrievedParent
 
 LOW_CONFIDENCE_MESSAGE = "未找到足够相关的资料。请补充具体的构件、规范、软件操作或项目资料名称。"
 
+
+def abstention_message(query: str, sources: list[RetrievedParent], *, max_closest: int = 1) -> str:
+    """Build a transparent abstention (refusal) message.
+
+    Follows the Abstention Recipe: state what was searched, what was missing,
+    and offer a next action; surface the closest partial match clearly labeled
+    instead of pretending "no content exists".  Used when retrieval returned
+    material but the relevance gate marks it low-confidence, so the UI never
+    sees a bare "未找到相关内容。" with no way forward.
+    """
+    searched = query.strip() or "您的问题"
+    closest = ""
+    if sources:
+        ranked = sorted(sources, key=lambda p: float(p.score), reverse=True)
+        titles = [f"《{p.doc_title}》" for p in ranked[:max_closest] if (p.doc_title or "").strip()]
+        if titles:
+            closest = f" 最接近的资料是：{'、'.join(titles)}（但不足以支撑完整回答）。"
+    return (
+        f"抱歉，我在知识库中未检索到足以回答「{searched}」的可靠内容。{closest}"
+        "您可以：换个更具体的说法（例如补充构件名称、规范条文或项目资料名）；"
+        "或联系管理员补充相关资料。"
+    )
+
 @dataclass(frozen=True)
 class RelevanceDecision:
     action: str
