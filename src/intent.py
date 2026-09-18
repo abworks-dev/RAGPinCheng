@@ -135,6 +135,30 @@ def is_enumeration_intent(query: str, *, standalone_query: str | None = None) ->
     return False
 
 
+# Ordinal/section-specific patterns (第N个视频/章节, N-M ranges, 第一到第N, 各章节).
+_ORDINAL_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"第\s*\d+\s*(?:个|段)[^，。？?]{0,8}(?:视频|章节|部分|内容|文件)"),
+    re.compile(r"第[一二三四五六七八九十]+\s*(?:个|段)[^，。？?]{0,8}(?:视频|章节|部分|内容|文件)"),
+    re.compile(r"\b\d+\s*[-—–~至]\s*\d+\b[^，。？?]{0,10}(?:讲了|讲什么|内容|章节|视频|列出来|分别)"),
+    re.compile(r"(?:把|将)?[^，。？?]{0,8}\d+\s*[-—–~至]\s*\d+[^，。？?]{0,10}(?:讲了|内容|列出来|分别|是什么)"),
+    re.compile(r"第[一二三四五六七八九十]+到第[一二三四五六七八九十]+[^，。？?]{0,8}(?:视频|章节|内容)"),
+    re.compile(r"各(?:个|段)?(?:视频|章节|部分|章节内容)[^，。？?]{0,6}(?:讲|内容|是什么|分别)"),
+)
+
+
+def is_ordinal_section_query(query: str) -> bool:
+    """True when the question asks about an ordinal/section position or range.
+
+    These need the series name to answer (e.g. "第10个视频" requires knowing which
+    series), so a follow-up should anchor to the last user's series rather than
+    whatever title the assistant just cited.
+    """
+    text = query.strip()
+    if not text:
+        return False
+    return any(p.search(text) for p in _ORDINAL_PATTERNS)
+
+
 # Tokens to strip when extracting a title-recall key from an enumeration query.
 _ENUMERATION_NOISE = (
     r"总共有|一共有|共计|合计|总共|共有",

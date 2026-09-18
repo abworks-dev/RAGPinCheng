@@ -24,7 +24,7 @@ from typing import Iterator
 
 from .config import DECOMPOSE_MAX_CONTEXT_CHARS, ENUMERATION_TOP_K, FINAL_TOP_K, MAX_CONTEXT_CHARS, QUERY_DECOMPOSE_ENABLED
 from .decompose import maybe_decompose
-from .intent import Intent, classify_intent, extract_series_token, is_enumeration_intent
+from .intent import Intent, classify_intent, extract_series_token, is_enumeration_intent, is_ordinal_section_query
 from .answer_policy import MAX_CONTEXT_CHARS_CONFIG, AnswerPolicy, load_answer_policy
 from .generate import (
     Answer,
@@ -395,6 +395,21 @@ class ChatSession:
 
         rewritten = rewrite_query(prior, query, usage_out=usage_out)
         changed = rewritten.strip() != query.strip()
+        # Ordinal/section follow-ups ("第10个视频", "1-10 讲了什么") need the
+        # series name.  The rewrite model may anchor to a title the assistant
+        # just cited (e.g. "《20250702早上培训…》[1]" from the previous answer)
+        # instead of the user's actual series ("机电管综培训").  When the
+        # rewrite produced an assistant-cited-title anchor, re-anchor to the
+        # last user question's series token.
+        if (
+            is_ordinal_section_query(query)
+            and last_user
+            and "[" in rewritten
+        ):
+            series = extract_series_token(last_user)
+            if len(series) >= 2 and series not in query:
+                rewritten = f"{series} {query}"
+                changed = True
         resolution = QueryResolution(
             original_query=query,
             standalone_query=rewritten,
