@@ -80,3 +80,21 @@ def test_ordinal_followup_skips_rewrite_and_anchors_to_last_user_series(monkeypa
     assert "机电管综培训" in resolution.standalone_query
     assert "把1-10讲了什么列出来" in resolution.standalone_query
     assert resolution.fallback_reason == "ordinal_reanchor"
+
+
+def test_ordinal_anchor_prefers_previous_search_query(monkeypatch):
+    """When the prior user question is open-ended, anchor on the previous turn's
+    search query if it carries the concrete series the assistant retrieved."""
+    from src import session as session_mod
+
+    s = session_mod.ChatSession()
+    s.state.append_turn("有什么相关的培训吗", "根据公司知识库…机电管综培训…[1]", sources_for_ui=[], policy_snapshot={})
+    s.state.last_search_query = "机电管综培训 相关的培训"
+
+    def unexpected_rewrite(*_a, **_k):
+        raise AssertionError("rewrite must not be called for ordinal follow-up")
+
+    monkeypatch.setattr(session_mod, "rewrite_query", unexpected_rewrite)
+    resolution, _t = s._resolve_search_query("把1-10讲了什么列出来")
+    assert "机电管综培训" in resolution.standalone_query
+    assert "把1-10讲了什么列出来" in resolution.standalone_query

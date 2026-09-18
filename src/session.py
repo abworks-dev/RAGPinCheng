@@ -412,7 +412,14 @@ class ChatSession:
         # "《20250702早上培训…》" from the previous answer).  Skip the rewrite
         # LLM call entirely and anchor on the last user question's series token.
         if is_ordinal_section_query(query) and last_user:
-            series = _trim_series_token(extract_series_token(last_user))
+            # Prefer the previous turn's actual search query (rewrite result) —
+            # for an open-ended prior question ("有什么相关的培训吗") it usually
+            # carries the concrete series the assistant retrieved (e.g.
+            # "机电管综培训"), which the bare user text lacks.
+            anchor = self.state.last_search_query or last_user
+            series = _trim_series_token(extract_series_token(anchor))
+            if len(series) < 2:
+                series = _trim_series_token(extract_series_token(last_user))
             if len(series) >= 2 and series not in query:
                 rewritten = f"{series} {query}"
             else:
