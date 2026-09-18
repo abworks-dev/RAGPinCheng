@@ -60,18 +60,23 @@ def test_fresh_retrieve_routes_section_enum_to_enumeration_topk(monkeypatch):
     assert calls[0]["doc_types"] == ["transcript"]
 
 
-def test_ordinal_followup_reanchors_to_last_user_series(monkeypatch):
-    """When rewrite anchors an ordinal follow-up to a cited assistant title
-    (e.g. 《20250702早上培训…》[1]), re-anchor to the user's series token."""
+def test_ordinal_followup_skips_rewrite_and_anchors_to_last_user_series(monkeypatch):
+    """An ordinal/section follow-up must NOT run the rewrite LLM (it anchored
+    to an assistant-cited title); it anchors to the last user question's series."""
     from src import session as session_mod
 
     s = session_mod.ChatSession()
     s.state.append_turn("机电管综培训有哪十个章节", "根据资料…[1]", sources_for_ui=[], policy_snapshot={})
 
+    called = {"n": 0}
+
     def fake_rewrite(*_a, **_k):
+        called["n"] += 1
         return "《20250702早上培训（要求、流程解读、命名标准）》[1]的内容是什么"
 
     monkeypatch.setattr(session_mod, "rewrite_query", fake_rewrite)
     resolution, _t = s._resolve_search_query("把1-10讲了什么列出来")
+    assert called["n"] == 0  # rewrite skipped
     assert "机电管综培训" in resolution.standalone_query
     assert "把1-10讲了什么列出来" in resolution.standalone_query
+    assert resolution.fallback_reason == "ordinal_reanchor"
