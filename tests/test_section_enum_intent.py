@@ -58,3 +58,20 @@ def test_fresh_retrieve_routes_section_enum_to_enumeration_topk(monkeypatch):
     s._fresh_retrieve("第十个视频是什么", categories=None, enumeration=True)
     assert calls and calls[0]["top_k"] == 16
     assert calls[0]["doc_types"] == ["transcript"]
+
+
+def test_ordinal_followup_reanchors_to_last_user_series(monkeypatch):
+    """When rewrite anchors an ordinal follow-up to a cited assistant title
+    (e.g. 《20250702早上培训…》[1]), re-anchor to the user's series token."""
+    from src import session as session_mod
+
+    s = session_mod.ChatSession()
+    s.state.append_turn("机电管综培训有哪十个章节", "根据资料…[1]", sources_for_ui=[], policy_snapshot={})
+
+    def fake_rewrite(*_a, **_k):
+        return "《20250702早上培训（要求、流程解读、命名标准）》[1]的内容是什么"
+
+    monkeypatch.setattr(session_mod, "rewrite_query", fake_rewrite)
+    resolution, _t = s._resolve_search_query("把1-10讲了什么列出来")
+    assert "机电管综培训" in resolution.standalone_query
+    assert "把1-10讲了什么列出来" in resolution.standalone_query
