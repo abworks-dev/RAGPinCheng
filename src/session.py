@@ -260,6 +260,19 @@ def _retrieval_diagnostics(
     return diagnostics
 
 
+def _trim_series_token(token: str) -> str:
+    """Crop a series token at enumeration scaffolding for title LIKE matching.
+
+    extract_series_token("机电管综培训有哪十个章节") -> "机电管综培训有哪十个";
+    trimming at 有/共/是/分/哪/几/这/那 yields the clean series keyword
+    "机电管综培训" so title recall can match the actual video titles.
+    """
+    if not token:
+        return ""
+    cleaned = re.split(r"[有共是分哪几这那总]", token)[0]
+    return cleaned.strip() or ""
+
+
 def _teaching_video_doc_types(search_query: str) -> list[str] | None:
     """Return ["transcript"] when an enumeration question targets teaching videos.
 
@@ -393,23 +406,28 @@ class ChatSession:
                 fallback_reason="repeat_query",
             ), perf_counter() - t0
 
-        rewritten = rewrite_query(prior, query, usage_out=usage_out)
-        changed = rewritten.strip() != query.strip()
-        # Ordinal/section follow-ups ("第10个视频", "1-10 讲了什么") need the
-        # series name.  The rewrite model may anchor to a title the assistant
-        # just cited (e.g. "《20250702早上培训…》[1]" from the previous answer)
-        # instead of the user's actual series ("机电管综培训").  When the
-        # rewrite produced an assistant-cited-title anchor, re-anchor to the
-        # last user question's series token.
-        if (
-            is_ordinal_section_query(query)
-            and last_user
-            and "[" in rewritten
-        ):
-            series = extract_series_token(last_user)
+        # Ordinal/section follow-ups ("第10个视频", "1-10 讲了什么") refer to the
+        # series the user was just asking about, not to whatever title the
+        # assistant happened to cite (the rewrite model anchored to
+        # "《20250702早上培训…》" from the previous answer).  Skip the rewrite
+        # LLM call entirely and anchor on the last user question's series token.
+        if is_ordinal_section_query(query) and last_user:
+            series = _trim_series_token(extract_series_token(last_user))
             if len(series) >= 2 and series not in query:
                 rewritten = f"{series} {query}"
-                changed = True
+            else:
+                rewritten = query
+            resolution = QueryResolution(
+                original_query=query,
+                standalone_query=rewritten,
+                kind="follow_up" if rewritten != query else "standalone",
+                confidence=0.8 if rewritten != query else 0.5,
+                fallback_reason="ordinal_reanchor",
+            )
+            return resolution, perf_counter() - t0
+
+        rewritten = rewrite_query(prior, query, usage_out=usage_out)
+        changed = rewritten.strip() != query.strip()
         resolution = QueryResolution(
             original_query=query,
             standalone_query=rewritten,
