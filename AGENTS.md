@@ -160,7 +160,7 @@ Docker状态：docker compose -f docker/docker-compose.yml ps
 - SSE和 `SourceDTO` 变化必须同步后端Schema、前端类型和消费代码；
 - 新Python运行依赖需同步 `requirements.txt` 与 `requirements-prod.txt`，除非明确只属于本地或生产；
 - 修改Chunk、ID、Embedding或索引Schema时必须说明是否需要全量重建及回滚；
-- 当前公开版视频只确认时间戳引用；“媒体播放链路”只能描述为补充报告中的候选实现，不得写成现有能力。
+- 视频转录与媒体播放的当前能力、边界和验证入口见 [视频转录链路](<docs/features/transcript-pipeline.md>)，并核对当前源码；保持鉴权与媒体可见性边界，不得仅凭源码存在宣称当前环境已部署或用户验收通过。
 
 ## 数据与安全底线
 
