@@ -15,6 +15,9 @@ const viewerNotices = {
 
 export default defineConfig({
   plugins: [react(), viewerNotices],
+  // The IFC engine is imported only by a worker, outside Vite's initial crawl.
+  // Prebundle it before navigation so first use cannot reload an open preview.
+  optimizeDeps: { include: ["web-ifc"] },
   server: {
     port: 5173,
     // Atomic editor staging directories are not application source.
