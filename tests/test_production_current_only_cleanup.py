@@ -367,3 +367,37 @@ def test_entrypoint_guards_precede_deletion_and_do_not_offer_test_bypass():
     assert "[switch]$Skip" not in source
     assert "[switch]$Test" not in source
     assert "-WhatIf:$false" not in source
+
+
+def test_workflow_actions_match_repository_allowlist():
+    workflow = (ROOT / '.github/workflows/cleanup-production-current-only.yml').read_text()
+    allowed = {'actions/checkout@v4', 'actions/download-artifact@v4', 'actions/upload-artifact@v4'}
+    actions = [line.split('uses:', 1)[1].strip() for line in workflow.splitlines() if 'uses:' in line]
+    assert actions and set(actions) <= allowed
+
+
+@pytest.mark.parametrize('mutation', ['', "$script:preview.conclusion='failure'", "$script:preview.event='push'", "$script:preview.head_sha='other'", "$script:preview.head_branch='other'", "$script:preview.path='other.yml'", "$script:networkFails=$true"])
+def test_workflow_preview_provenance_native_powershell(run_ps, mutation):
+    workflow = (ROOT / '.github/workflows/cleanup-production-current-only.yml').read_text()
+    step = workflow.split('      - name: Verify successful preview provenance', 1)[1].split('      - name:', 1)[0]
+    block = '\n'.join(line[10:] for line in step.split('        run: |\n', 1)[1].splitlines())
+    setup = r"""
+$env:PREVIEW_RUN_ID='123'; $env:EXPECTED_COMMIT='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+$env:GITHUB_API_URL='https://api.github.com'; $env:GITHUB_REPOSITORY='fixture/repo'
+$env:WORKFLOW_TOKEN='fake-fixture-token'
+$script:networkFails=$false
+$script:preview=@{conclusion='success';event='workflow_dispatch';head_sha=$env:EXPECTED_COMMIT;head_branch='master';path='.github/workflows/cleanup-production-current-only.yml'}
+function Invoke-RestMethod {
+ param($Uri,$Headers,$Method,$TimeoutSec)
+ if ($script:networkFails) { throw 'simulated network failure' }
+ if ($Uri -ne 'https://api.github.com/repos/fixture/repo/actions/runs/123') { throw 'wrong provenance endpoint' }
+ return [pscustomobject]$script:preview
+}
+"""
+    script = setup + mutation + '\n$verify = [scriptblock]::Create(' + _quote(block) + ')\n'
+    if mutation:
+        expected = '*refusing cleanup*' if 'networkFails' in mutation else 'Preview must*'
+        script += 'Expect-Throw { & $verify } ' + _quote(expected)
+    else:
+        script += '& $verify'
+    run_ps(script)
