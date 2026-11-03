@@ -1,0 +1,70 @@
+name: Diagnose Retained Production Layout
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full merged master SHA for metadata-only observation"
+        required: true
+        type: string
+      confirm_diagnostic:
+        description: "Observe fixed 31 retained roots, without reading file contents or deleting"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    if: ${{ inputs.confirm_diagnostic == true }}
+    environment: production-asr
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    timeout-minutes: 20
+    env:
+      EXPECTED_COMMIT: ${{ inputs.commit_sha }}
+      ASR_PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
+      RUNTIME_ROOT: ${{ vars.PRODUCTION_RUNTIME_ROOT }}
+    steps:
+      - name: Validate immutable diagnostic scope
+        shell: powershell
+        run: |
+          if ($env:EXPECTED_COMMIT -cnotmatch '^[0-9a-f]{40}$') { throw 'Full lowercase commit SHA required' }
+          if ($env:EXPECTED_COMMIT -cne $env:GITHUB_SHA) { throw 'Commit must equal dispatch revision' }
+          if ($env:GITHUB_REF -cne 'refs/heads/master') { throw 'Only merged master diagnostics are allowed' }
+          foreach ($root in @($env:ASR_PROGRAM_ROOT, $env:RUNTIME_ROOT)) {
+            if ([string]::IsNullOrWhiteSpace($root)) { throw 'Managed roots must be configured' }
+          }
+
+      - name: Check out immutable diagnostic implementation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: Observe directory boundary locations without reading contents
+        shell: powershell
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP "retained-layout-${{ github.run_id }}-${{ github.run_attempt }}.json"
+          & "${{ github.workspace }}\scripts\diagnose-retained-production-layout.ps1" `
+            -AsrProgramRoot $env:ASR_PROGRAM_ROOT `
+            -RuntimeRoot $env:RUNTIME_ROOT `
+            -ExpectedAsrCandidateId '35048453327' `
+            -ExpectedGpuReleaseId 'e351a5d5d78f-f9a0f015f3e8' `
+            -ReportPath $report
+          'Layout labels are observations only. Every payload remains retained; no contents or live identity were verified.' |
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
+      - name: Publish bounded location-only evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: retained-layout-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/retained-layout-${{ github.run_id }}-${{ github.run_attempt }}.json
+          if-no-files-found: warn
+          retention-days: 90
