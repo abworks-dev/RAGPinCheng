@@ -127,6 +127,14 @@ promotion前备份当前任务XML、GPU环境文件和release指针。新release
 - 候选解析workflow不加载或下载模型、不直接写正式锁，只产出待人工复核的证据artifact；
 - 当前文档不表示生产GPU服务已经恢复。
 
+## 显式放弃旧版本回滚的手动清理
+
+`cleanup-production-current-only.yml` 是独立的手动维护入口，不替代现有保留回滚能力的清理策略，也不定期执行。必须先批准具体生产范围并明确接受无备份、旧版本不可回滚，再使用已合并的完整 master SHA 和当前 ASR candidate/GPU release 身份执行 preview。
+
+preview 只生成目录元数据清单和审计记录，不删除文件。apply 必须绑定同一实现的成功 preview run、包含 attempt 的精确 artifact 名称及清单原始字节 SHA-256，并显式确认 `confirm_no_backup`。脚本重新发现候选并验证当前版本指针、清单、进程/计划任务引用和目录快照；身份变化、路径注入、目录漂移、重解析点或服务不健康均拒绝继续。
+
+清理只选择可识别的非当前版本构建载荷；模型、配置、资格目录、历史状态、报告、审计和未知用途目录保留。历史审计中的旧版本身份不会被删除或改写来绕过保护。删除前和每个对象之后保存审计，结束后复查 ASR/GPU 健康；失败可能已产生部分不可逆删除，应以审计中的 `deleted` 和 `pending` 为准，不能假设可恢复。代码入口的存在不代表已经在生产执行或释放了磁盘空间。
+
 ## 验证入口
 
 - `pytest services/gpu_service/tests/test_contract.py`
