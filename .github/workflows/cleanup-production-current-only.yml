@@ -89,17 +89,21 @@ jobs:
 
       - name: Verify successful preview provenance
         if: inputs.operation == 'apply'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const runId = Number(process.env.PREVIEW_RUN_ID);
-            if (!Number.isSafeInteger(runId)) throw new Error('Invalid preview run ID');
-            const { data: run } = await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: runId });
-            if (run.conclusion !== 'success' || run.event !== 'workflow_dispatch' ||
-                run.head_sha !== process.env.EXPECTED_COMMIT || run.head_branch !== 'master' ||
-                run.path !== '.github/workflows/cleanup-production-current-only.yml') {
-              throw new Error('Preview must be successful manual execution of the same reviewed master implementation');
-            }
+        shell: powershell
+        env:
+          WORKFLOW_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:PREVIEW_RUN_ID -notmatch '^[0-9]{1,20}$') { throw 'Invalid preview run ID' }
+          $headers = @{ Authorization = 'Bearer ' + $env:WORKFLOW_TOKEN; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+          $url = "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:PREVIEW_RUN_ID"
+          try { $run = Invoke-RestMethod -Uri $url -Headers $headers -Method Get -TimeoutSec 30 }
+          catch { throw 'Unable to verify preview provenance; refusing cleanup' }
+          if ($run.conclusion -ne 'success' -or $run.event -ne 'workflow_dispatch' -or
+              $run.head_sha -ne $env:EXPECTED_COMMIT -or $run.head_branch -ne 'master' -or
+              $run.path -ne '.github/workflows/cleanup-production-current-only.yml') {
+            throw 'Preview must be successful manual execution of the same reviewed master implementation'
+          }
 
       - name: Download exact preview manifest
         if: inputs.operation == 'apply'
