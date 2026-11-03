@@ -1,0 +1,140 @@
+name: Cleanup Production Exact31
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Exact reviewed merged master implementation SHA
+        required: true
+        type: string
+      operation:
+        description: Preview first, then apply exact approved manifest
+        required: true
+        type: choice
+        default: preview
+        options: [preview, apply]
+      preview_run_id:
+        description: Successful preview run ID (apply only)
+        required: false
+        type: string
+      preview_artifact_name:
+        description: Exact attempt-aware preview artifact (apply only)
+        required: false
+        type: string
+      manifest_sha256:
+        description: Raw preview manifest SHA256 (apply only)
+        required: false
+        type: string
+      confirm_no_backup:
+        description: Confirm entire listed31 payload deletion including internal generic protected names, no backup or rollback
+        required: true
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: production-gpu-exclusive
+  cancel-in-progress: false
+jobs:
+  cleanup:
+    runs-on: [self-hosted, Windows, X64, asr-production]
+    environment: production-asr
+    timeout-minutes: 120
+    env:
+      EXPECTED_COMMIT: ${{ inputs.commit_sha }}
+      OPERATION: ${{ inputs.operation }}
+      PREVIEW_RUN_ID: ${{ inputs.preview_run_id }}
+      PREVIEW_ARTIFACT: ${{ inputs.preview_artifact_name }}
+      MANIFEST_SHA256: ${{ inputs.manifest_sha256 }}
+      CONFIRM_NO_BACKUP: ${{ inputs.confirm_no_backup }}
+      ASR_DATA_ROOT: ${{ vars.PRODUCTION_ASR_DATA_ROOT }}
+      ASR_PROGRAM_ROOT: ${{ vars.PRODUCTION_ASR_PROGRAM_ROOT }}
+      RUNTIME_ROOT: ${{ vars.PRODUCTION_RUNTIME_ROOT }}
+      WHISPERX_ROOT: ${{ vars.PRODUCTION_WHISPERX_ROOT }}
+      FASTER_WHISPER_ROOT: ${{ vars.PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT }}
+      QWEN3_ASR_ROOT: ${{ vars.PRODUCTION_QWEN3_ASR_QUALIFICATION_ROOT }}
+      GPU_MODEL_CACHE_ROOT: ${{ vars.GPU_MODEL_CACHE_SOURCE }}
+      ASR_SERVICE_BASE_URL: ${{ vars.PRODUCTION_ASR_SERVICE_URL }}
+      GPU_SERVICE_BASE_URL: ${{ vars.GPU_SERVICE_URL }}
+    steps:
+      - name: Validate immutable revision and irreversible waiver
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if ($env:GITHUB_REF -cne 'refs/heads/master' -or $env:EXPECTED_COMMIT -cnotmatch '^[0-9a-f]{40}$' -or $env:EXPECTED_COMMIT -cne $env:GITHUB_SHA) { throw 'Reviewed merged master SHA required' }
+          if ($env:OPERATION -notin @('preview','apply')) { throw 'Invalid operation' }
+          foreach ($binding in @(@{actual=$env:ASR_DATA_ROOT;expected='D:/ServiceData/RAGPinCheng-ASR'},@{actual=$env:ASR_PROGRAM_ROOT;expected='D:/Services/RAGPinCheng-ASR'},@{actual=$env:RUNTIME_ROOT;expected='D:/RAGPinCheng/runtime'})) {
+            if ($binding.actual -notmatch '^[A-Za-z]:[\\/]' -or -not [IO.Path]::GetFullPath($binding.actual).TrimEnd('\','/').Equals([IO.Path]::GetFullPath($binding.expected).TrimEnd('\','/'),[StringComparison]::OrdinalIgnoreCase)) { throw 'Production roots must equal the explicitly approved fixed tuple' }
+          }
+          if ($env:OPERATION -eq 'apply') {
+            if ($env:CONFIRM_NO_BACKUP -cne 'true' -or $env:PREVIEW_RUN_ID -cnotmatch '^[0-9]{1,20}$' -or $env:MANIFEST_SHA256 -cnotmatch '^[0-9a-f]{64}$') { throw 'Apply requires explicit waiver and preview hash' }
+            if ($env:PREVIEW_ARTIFACT -cnotmatch ('^production-exact31-'+[regex]::Escape($env:PREVIEW_RUN_ID)+'-[1-9][0-9]*-preview$')) { throw 'Exact attempt-aware preview artifact required' }
+          }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify exact successful preview attempt provenance
+        if: inputs.operation == 'apply'
+        shell: powershell
+        env:
+          WORKFLOW_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if ($env:PREVIEW_ARTIFACT -cnotmatch ('^production-exact31-'+[regex]::Escape($env:PREVIEW_RUN_ID)+'-(?<attempt>[1-9][0-9]*)-preview$')) { throw 'Invalid preview artifact' }
+          $attempt=$Matches['attempt']
+          $headers=@{Authorization='Bearer '+$env:WORKFLOW_TOKEN;Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+          $url="$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:PREVIEW_RUN_ID/attempts/$attempt"
+          try { $run=Invoke-RestMethod -Uri $url -Headers $headers -Method Get -TimeoutSec 30 -MaximumRedirection 0 } catch { throw 'Cannot verify exact preview attempt' }
+          if ($run.conclusion -cne 'success' -or $run.event -cne 'workflow_dispatch' -or $run.head_sha -cne $env:EXPECTED_COMMIT -or $run.head_branch -cne 'master' -or $run.path -cne '.github/workflows/cleanup-production-exact31.yml' -or [string]$run.run_attempt -cne $attempt -or [string]$run.id -cne $env:PREVIEW_RUN_ID) { throw 'Preview attempt provenance mismatch' }
+      - name: Download exact approved preview
+        if: inputs.operation == 'apply'
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.preview_artifact_name }}
+          path: ${{ runner.temp }}/exact31-approved-${{ github.run_id }}-${{ github.run_attempt }}
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.preview_run_id }}
+      - name: Preview or apply exact31
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $reportRoot=Join-Path $env:RUNNER_TEMP 'exact31-${{ github.run_id }}-${{ github.run_attempt }}'
+          New-Item -ItemType Directory -Path $reportRoot -ErrorAction Stop | Out-Null
+          $arguments=@{
+            Mode=if ($env:OPERATION -eq 'apply') {'Apply'} else {'Preview'}
+            AsrDataRoot=$env:ASR_DATA_ROOT; AsrProgramRoot=$env:ASR_PROGRAM_ROOT; RuntimeRoot=$env:RUNTIME_ROOT
+            WhisperXRoot=$env:WHISPERX_ROOT; FasterWhisperQualificationRoot=$env:FASTER_WHISPER_ROOT
+            Qwen3AsrQualificationRoot=$env:QWEN3_ASR_ROOT; GpuConfiguredModelCachePath=$env:GPU_MODEL_CACHE_ROOT
+            ExpectedAsrCandidateId='35048453327'; ExpectedGpuReleaseId='e351a5d5d78f-f9a0f015f3e8'
+            ManifestPath=(Join-Path $reportRoot 'manifest.json'); AuditPath=(Join-Path $reportRoot 'audit.json'); MaxDeleteGB=600
+            AsrHealthUrl=($env:ASR_SERVICE_BASE_URL.TrimEnd('/')+'/health'); GpuHealthUrl=($env:GPU_SERVICE_BASE_URL.TrimEnd('/')+'/health')
+          }
+          if ($env:OPERATION -eq 'apply') {
+            $approved=Join-Path $env:RUNNER_TEMP 'exact31-approved-${{ github.run_id }}-${{ github.run_attempt }}/manifest.json'
+            Copy-Item -LiteralPath $approved -Destination $arguments.ManifestPath -ErrorAction Stop
+            $arguments.ExpectedManifestSha256=$env:MANIFEST_SHA256; $arguments.ConfirmNoBackup=$true
+          }
+          & .\scripts\cleanup-production-exact31.ps1 @arguments
+          if ($env:OPERATION -eq 'preview') {
+            $sha=(Get-FileHash -LiteralPath $arguments.ManifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            Write-Host "EXACT31_MANIFEST_SHA256:$sha"
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "EXACT31_MANIFEST_SHA256:$sha"
+            Get-Content -LiteralPath $arguments.ManifestPath -Raw -Encoding UTF8
+          }
+      - name: Report physical disk usage
+        if: always()
+        shell: powershell
+        run: |
+          Get-PSDrive -PSProvider FileSystem | Where-Object {$_.Name -eq 'D'} | ForEach-Object {
+            $line='D: used={0:N2} GiB free={1:N2} GiB' -f ($_.Used/1GB),($_.Free/1GB)
+            Write-Host $line; Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $line
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-exact31-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.operation }}
+          path: ${{ runner.temp }}/exact31-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 90
