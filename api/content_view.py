@@ -17,6 +17,14 @@ class PreparedContentView:
 
 
 def _remove_tree(path: Path) -> None:
+    # POSIX unlink requires write permission on the containing directory, not
+    # the file. Exported generations are deliberately 0550, so make only this
+    # validated tree's directories writable before traversal. Never follow links.
+    if path.is_symlink():
+        raise ValueError("invalid_content_view_generation")
+    for directory, _subdirectories, _files in os.walk(path, followlinks=False):
+        os.chmod(directory, 0o700)
+
     def make_writable_and_retry(function, target, _error) -> None:
         os.chmod(target, 0o700)
         function(target)

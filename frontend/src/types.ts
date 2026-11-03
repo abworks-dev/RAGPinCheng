@@ -591,6 +591,26 @@ export type ManagedContentItem = {
   publication_status?: string | null;
 };
 
+export type ManagedAttachmentInfo = {
+  version_id: string;
+  original_filename: string;
+  doc_type: string;
+  file_size: number;
+  rag_enabled: boolean;
+  preview_kind: "image" | "pdf" | "dxf" | "ifc" | "none";
+  preview_status: string;
+  preview_url?: string | null;
+  is_associated?: boolean;
+  is_current?: boolean;
+  version_number?: number;
+  category_path?: string;
+  category_name?: string;
+  current_version_id?: string | null;
+  source_origin?: string;
+  lifecycle_status?: string;
+  created_at?: number;
+};
+
 export type ManagedPreview = {
   version_id: string;
   preview_parent_id: string;

@@ -519,6 +519,11 @@ def _delete_app_records(conn: sqlite3.Connection, item_id: str) -> tuple[list[st
     ).fetchall()
     versions = [str(row["id"]) for row in version_rows]
     object_hashes = {str(row["object_sha256"]) for row in version_rows if row["object_sha256"]}
+    object_hashes.update(str(row[0]) for row in conn.execute(
+        '''SELECT p.object_sha256 FROM content_version_previews p
+           JOIN content_versions v ON v.id=p.version_id WHERE v.item_id=?
+           UNION SELECT p.object_sha256 FROM content_version_preview_history p
+           JOIN content_versions v ON v.id=p.version_id WHERE v.item_id=?''', (item_id, item_id)))
     placeholders = ",".join("?" for _ in versions)
     storage_rel_paths: list[str] = []
     conn.execute("BEGIN IMMEDIATE")
@@ -535,7 +540,9 @@ def _delete_app_records(conn: sqlite3.Connection, item_id: str) -> tuple[list[st
         conn.execute("DELETE FROM content_items WHERE id=?", (item_id,))
         for object_sha256 in object_hashes:
             if conn.execute(
-                "SELECT 1 FROM content_versions WHERE object_sha256=? LIMIT 1", (object_sha256,)
+                '''SELECT 1 FROM content_versions WHERE object_sha256=?
+                   UNION ALL SELECT 1 FROM content_version_previews WHERE object_sha256=?
+                   UNION ALL SELECT 1 FROM content_version_preview_history WHERE object_sha256=? LIMIT 1''', (object_sha256, object_sha256, object_sha256)
             ).fetchone():
                 continue
             obj = conn.execute(

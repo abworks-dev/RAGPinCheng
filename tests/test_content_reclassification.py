@@ -11,7 +11,30 @@ import api.content_reclassification as reclassification
 import api.db as app_db
 from api.content_storage import ContentStorage, StoredContentObject
 from api.content_store import create_web_batch, register_uploaded_document
-from api.content_view import rebuild_read_only_view
+from api.content_view import discard_prepared_read_only_view, rebuild_read_only_view
+
+
+def test_discard_read_only_generation_preserves_canonical_objects(tmp_path: Path):
+    storage = ContentStorage(tmp_path / "content")
+    storage.ensure_layout()
+    canonical = tmp_path / "canonical.bin"
+    canonical.write_bytes(b"canonical-content")
+    canonical_mode = canonical.stat().st_mode
+    generation = storage.views_root.parent / ".next-readonly-test"
+    nested = generation / "category" / "nested"
+    nested.mkdir(parents=True)
+    exported = nested / "file.bin"
+    exported.write_bytes(canonical.read_bytes())
+    exported.chmod(0o440)
+    nested.chmod(0o550)
+    nested.parent.chmod(0o550)
+    generation.chmod(0o550)
+
+    discard_prepared_read_only_view(storage, generation)
+
+    assert not generation.exists()
+    assert canonical.read_bytes() == b"canonical-content"
+    assert canonical.stat().st_mode == canonical_mode
 
 
 class FakeQdrant:

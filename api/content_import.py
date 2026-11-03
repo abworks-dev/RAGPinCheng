@@ -15,7 +15,10 @@ from .content_store import (
 )
 
 
+from .content_attachment_types import ATTACHMENT_EXTENSIONS
+
 SUPPORTED_TYPES = {
+    **ATTACHMENT_EXTENSIONS,
     ".pdf": "pdf",
     ".md": "markdown",
     ".docx": "docx",

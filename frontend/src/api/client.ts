@@ -36,6 +36,7 @@ import type {
   FolderRequest,
   ManagedContentItem,
   ManagedPreview,
+  ManagedAttachmentInfo,
   XMindPreview,
   ContentTrashAuditEvent,
   ContentReclassificationJob,
@@ -922,6 +923,33 @@ export const api = {
       `/api/admin/content/versions/${encodeURIComponent(versionId)}/preview`,
       { method: "POST", body: JSON.stringify({}) },
     ),
+  managedAttachmentInfo: (versionId: string, signal?: AbortSignal) =>
+    jsonFetch<ManagedAttachmentInfo>(`/api/admin/content/versions/${encodeURIComponent(versionId)}/info`, { signal }),
+  managedAttachmentBytes: async (versionId: string, preview: boolean, signal: AbortSignal) => {
+    const path = `/api/admin/content/versions/${encodeURIComponent(versionId)}/${preview ? "preview" : "file?download=false"}`;
+    const response = await rawFetch(path, { signal });
+    if (!response.ok) { await response.body?.cancel(); throw new ApiError(response.status, "", "无法读取资料预览，请检查权限或下载原文件"); }
+    const max = 32 * 1024 * 1024;
+    if (Number(response.headers.get("content-length")) > max) { await response.body?.cancel(); throw new Error("预览文件超过 32 MB，请下载后查看"); }
+    if (!response.body) throw new Error("文件内容为空");
+    const reader = response.body.getReader();
+    const chunks: BlobPart[] = [];
+    let size = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > max) throw new Error("预览文件超过 32 MB，请下载后查看");
+        chunks.push(value.slice().buffer as ArrayBuffer);
+      }
+    } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+    return new Blob(chunks, { type: response.headers.get("content-type") || "application/octet-stream" });
+  },
+  uploadManagedAttachmentPreview: (versionId: string, file: File) => {
+    const form = new FormData(); form.append("file", file);
+    return multipartFetch<ManagedAttachmentInfo>(`/api/admin/content/versions/${encodeURIComponent(versionId)}/associated-preview`, form);
+  },
   managedContentXMindPreview: (versionId: string) =>
     jsonFetch<XMindPreview>(
       `/api/admin/content/versions/${encodeURIComponent(versionId)}/xmind-preview`,

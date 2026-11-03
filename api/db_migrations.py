@@ -1408,6 +1408,25 @@ MIGRATIONS = (
         ),
     ),
 )
+# Additive attachment support: retain every existing row and broaden only doc_type.
+MIGRATIONS += (Migration(45, 'versioned_non_rag_attachments', (
+    'RELAX_CONTENT_VERSION_DOC_TYPE_ATTACHMENTS',
+    """CREATE TABLE IF NOT EXISTS content_version_previews (
+        version_id TEXT PRIMARY KEY REFERENCES content_versions(id) ON DELETE CASCADE,
+        object_sha256 TEXT NOT NULL REFERENCES content_objects(sha256) ON DELETE RESTRICT,
+        original_filename TEXT NOT NULL,
+        preview_kind TEXT NOT NULL CHECK(preview_kind IN ('image','pdf')),
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS content_version_preview_history (
+        id INTEGER PRIMARY KEY,
+        version_id TEXT NOT NULL REFERENCES content_versions(id) ON DELETE CASCADE,
+        object_sha256 TEXT NOT NULL REFERENCES content_objects(sha256) ON DELETE RESTRICT,
+        created_at INTEGER NOT NULL
+    )""",
+    'CREATE INDEX IF NOT EXISTS idx_content_preview_history_version ON content_version_preview_history(version_id)',
+)),)
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
     {
@@ -1706,6 +1725,19 @@ def execute_migration_statement(conn: sqlite3.Connection, statement: str) -> Non
             )
         finally:
             conn.execute("PRAGMA writable_schema=RESET")
+        return
+    if statement == 'RELAX_CONTENT_VERSION_DOC_TYPE_ATTACHMENTS':
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='content_versions'").fetchone()
+        old = "'pdf','markdown','doc','docx','xls','xlsx','ppt','pptx','xmind','transcript'"
+        new = old + ",'jpg','jpeg','png','dwg','dxf','rvt','che','nwd','nwc','ifc','skp','max'"
+        if row is None or not row[0] or (old not in row[0] and new not in row[0]):
+            raise RuntimeError('migration_schema_mismatch')
+        if new not in row[0]:
+            conn.execute('PRAGMA writable_schema=ON')
+            try:
+                conn.execute("UPDATE sqlite_master SET sql=? WHERE type='table' AND name='content_versions'", (row[0].replace(old, new),))
+            finally:
+                conn.execute('PRAGMA writable_schema=RESET')
         return
     if statement == "RELAX_CONTENT_VERSION_DOC_TYPE_LEGACY_OFFICE":
         row = conn.execute(
