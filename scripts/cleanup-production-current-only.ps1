@@ -100,7 +100,11 @@ function Tree([string]$Path,[switch]$Payload) {
                 # data/evidence directories and actual artifacts, not substrings.
                 if (($entry.PSIsContainer -and $entry.Name -match '^(models?|model-cache|logs?|audit|reports?|evidence|transcriptions?|tasks?|business|config|data)$') -or
                     (-not $entry.PSIsContainer -and ($entry.Name -match '(?i)(\.sqlite(?:3)?(?:-wal|-shm)?$|\.db$|(^|\.)env($|\.)|\.log$|^\.active$|^\.lock$|^run\.lock$|(?:report|evidence|audit).*\.(json|jsonl|csv|txt|html)$)'))) {
-                    throw 'Protected data, model, configuration, active marker or evidence inside payload'
+                    $blocked = New-Object System.InvalidOperationException 'Protected data, model, configuration, active marker or evidence inside payload'
+                    $blocked.Data['matched_guard'] = if ($entry.PSIsContainer) { 'protected-directory' } else { 'protected-file' }
+                    # Fixed guard vocabulary only; arbitrary descendant names are private.
+                    $blocked.Data['blocking_basename'] = if ($entry.PSIsContainer) { $entry.Name.ToLowerInvariant() } else { '' }
+                    throw $blocked
                 }
             }
             $length = [int64]0
@@ -247,13 +251,51 @@ function Live {
         asr_state_sha256=(Hash-File $activePath); asr_manifest_sha256=(Hash-File (Join-Path $asrRoot 'release-manifest.json'));
         gpu_pointer_sha256=(Hash-File $pointerPath); gpu_manifest_sha256=(Hash-File $gpuManifestPath) }
 }
+# Observational metadata only: never part of the approval manifest or eligibility.
+function Add-Skipped([string]$Path,[string]$Kind,[string]$Identity,[string]$ReasonCode,
+    [string]$MatchedGuard = '',[string]$BlockingBasename = '') {
+    if (-not (Get-Variable -Name skipped -Scope Script -ErrorAction SilentlyContinue)) {
+        $script:skipped = New-Object 'System.Collections.Generic.List[object]'
+        $script:skippedDroppedCount = 0
+    }
+    if ($script:skipped.Count -ge 200) { $script:skippedDroppedCount++; return }
+    # Callers provide recognized run/payload paths only, never descendant names.
+    $safePath = ((FullPath $Path) -replace '[\x00-\x1f\x7f]','?')
+    if ($safePath.Length -gt 1024) { $safePath = $safePath.Substring(0,1024) }
+    $venvLayout = $false
+    if ((Split-Path $Path -Leaf) -eq 'venv') {
+        # No contents read, interpreter execution, or follow of a reparse point.
+        try {
+            Assert-Ancestors $Path
+            $venvLayout = $true
+            foreach ($part in @('pyvenv.cfg','Scripts/python.exe','Lib/site-packages')) {
+                $probe = Join-Path $Path $part
+                Assert-Ancestors $probe
+                $container = $part -eq 'Lib/site-packages'
+                if (-not (Test-Path -LiteralPath $probe -PathType $(if ($container) { 'Container' } else { 'Leaf' }))) {
+                    $venvLayout = $false; break
+                }
+            }
+        } catch { $venvLayout = $false } # Observation cannot alter deletion decisions.
+    }
+    $script:skipped.Add([ordered]@{ path=$safePath; kind=$Kind; identity=$Identity;
+        reason_code=$ReasonCode; matched_guard=$MatchedGuard;
+        blocking_basename=$BlockingBasename; recognized_venv_layout=$venvLayout })
+}
+function Add-ReferencedSkip([string]$Path,[string]$Kind,[string]$Identity) {
+    $reason = if (Has-ActiveMarker $Path) { 'active-marker' } else { 'referenced' }
+    Add-Skipped $Path $Kind $Identity $reason
+}
 function Add-Payload([string]$Path,[string]$Kind,[string]$Identity,[string[]]$Refs) {
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return }
     Assert-Ancestors $Path
-    if (Referenced $Path $Refs) { return }
+    if (Referenced $Path $Refs) { Add-ReferencedSkip $Path $Kind $Identity; return }
     try { $info = Tree $Path -Payload }
     catch {
-        if ($_.Exception.Message -like 'Protected data*') { return }
+        if ($_.Exception.Message -like 'Protected data*') {
+            Add-Skipped $Path $Kind $Identity 'protected-content' ([string]$_.Exception.Data['matched_guard']) ([string]$_.Exception.Data['blocking_basename'])
+            return
+        }
         throw
     }
     $script:items.Add([ordered]@{ path=(FullPath $Path); kind=$Kind; identity=$Identity;
@@ -263,13 +305,15 @@ function Add-Payload([string]$Path,[string]$Kind,[string]$Identity,[string[]]$Re
 }
 function Discover([string[]]$Refs) {
     $script:items = New-Object 'System.Collections.Generic.List[object]'
+    $script:skipped = New-Object 'System.Collections.Generic.List[object]'
+    $script:skippedDroppedCount = 0
     $dep = Join-Path $AsrDataRoot 'dependency-runs'
     if (Test-Path -LiteralPath $dep -PathType Container) {
         Assert-Ancestors $dep
         foreach ($run in @(Get-ChildItem -LiteralPath $dep -Directory -Force | Sort-Object Name)) {
             if ($run.Name -notmatch '^candidate-([0-9]{1,20})$' -or $Matches[1] -eq $ExpectedAsrCandidateId) { continue }
             Assert-Ancestors $run.FullName
-            if (Referenced $run.FullName $Refs) { continue }
+            if (Referenced $run.FullName $Refs) { Add-ReferencedSkip $run.FullName 'asr-dependency-run' $run.Name; continue }
             # The run root may include logs, locks, reports or qualification evidence.
             # Preserve it, and select only known reproducible payload children.
             foreach ($child in @('venv','wheelhouse','pip-cache')) {
@@ -282,10 +326,10 @@ function Discover([string[]]$Refs) {
     foreach ($run in @(Get-ChildItem -LiteralPath $releases -Directory -Force | Sort-Object Name)) {
         if ($run.Name -notmatch '^[0-9]{1,20}$' -or $run.Name -eq $ExpectedAsrCandidateId) { continue }
         Assert-Ancestors $run.FullName
-        if (Referenced $run.FullName $Refs) { continue }
+        if (Referenced $run.FullName $Refs) { Add-ReferencedSkip $run.FullName 'asr-release' $run.Name; continue }
         Tree $run.FullName | Out-Null
         try { Read-AsrReleaseManifest -ProgramRoot $AsrProgramRoot -DataRoot $AsrDataRoot -CandidateId $run.Name -AllowLegacyWhisperXV1Profiles | Out-Null }
-        catch { continue } # Unknown/incomplete releases are not eligible.
+        catch { Add-Skipped $run.FullName 'asr-release' $run.Name 'release-manifest-invalid'; continue } # Unknown/incomplete releases are not eligible.
         foreach ($child in @('app','venv')) { Add-Payload (Join-Path $run.FullName $child) 'asr-release-payload' $run.Name $Refs }
     }
     $gpuReleases = Join-Path $RuntimeRoot 'releases'
@@ -293,12 +337,12 @@ function Discover([string[]]$Refs) {
     foreach ($run in @(Get-ChildItem -LiteralPath $gpuReleases -Directory -Force | Sort-Object Name)) {
         if ($run.Name -notmatch '^[0-9a-f]{12}-[0-9a-f]{12}$' -or $run.Name -eq $ExpectedGpuReleaseId) { continue }
         Assert-Ancestors $run.FullName
-        if (Referenced $run.FullName $Refs) { continue }
+        if (Referenced $run.FullName $Refs) { Add-ReferencedSkip $run.FullName 'gpu-release' $run.Name; continue }
         $metadata = Join-Path $run.FullName 'runtime-manifest.json'
-        if (-not (Test-Path -LiteralPath $metadata -PathType Leaf)) { continue }
+        if (-not (Test-Path -LiteralPath $metadata -PathType Leaf)) { Add-Skipped $run.FullName 'gpu-release' $run.Name 'missing-public-manifest'; continue }
         try { $manifest = Read-Json $metadata } catch { throw 'Invalid GPU release metadata' }
         if ([string](Prop $manifest 'release_id') -ne $run.Name -or (Prop $manifest 'qualification_status') -ne 'qualified' -or
-            (Prop $manifest 'lock_validation_status') -ne 'validated') { continue }
+            (Prop $manifest 'lock_validation_status') -ne 'validated') { Add-Skipped $run.FullName 'gpu-release' $run.Name 'nonqualified-public-manifest'; continue }
         foreach ($child in @('venv','wheelhouse')) { Add-Payload (Join-Path $run.FullName $child) 'gpu-release-payload' $run.Name $Refs }
     }
     $resolver = Join-Path $RuntimeRoot 'resolver'
@@ -307,7 +351,7 @@ function Discover([string[]]$Refs) {
         foreach ($run in @(Get-ChildItem -LiteralPath $resolver -Directory -Force | Sort-Object Name)) {
             if ($run.Name -notmatch '^[0-9]{1,20}(?:-[0-9]+)?$') { continue }
             Assert-Ancestors $run.FullName
-            if (Referenced $run.FullName $Refs) { continue }
+            if (Referenced $run.FullName $Refs) { Add-ReferencedSkip $run.FullName 'gpu-resolver-run' $run.Name; continue }
             Add-Payload (Join-Path $run.FullName 'venv') 'gpu-resolver-payload' $run.Name $Refs
         }
     }
@@ -365,7 +409,9 @@ if ($Mode -eq 'Preview') {
     $hash = Hash-File $ManifestPath
     Write-Json $AuditPath ([ordered]@{ schema_version='production-current-only-audit/1'; mode='Preview';
         manifest_sha256=$hash; health_before=$before; candidate_count=$candidates.Count; total_bytes=$total;
-        retained='models, configuration, qualification, evidence, historical state, unknown payloads' }) -CreateOnly
+        retained='models, configuration, qualification, evidence, historical state, unknown payloads';
+        skipped=@($script:skipped.ToArray() | Sort-Object { $_.path },{ $_.reason_code });
+        skipped_dropped_count=$script:skippedDroppedCount }) -CreateOnly
     Write-Host "PRODUCTION_CURRENT_ONLY mode=Preview candidates=$($candidates.Count) bytes=$total manifest_sha256=$hash"
     return
 }
