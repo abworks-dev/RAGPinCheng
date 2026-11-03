@@ -74,5 +74,7 @@ export const adminContentApi = {
   publicationJobs: (...args: Parameters<typeof api.publicationJobs>) => api.publicationJobs(...args),
   retryPublicationJob: (...args: Parameters<typeof api.retryPublicationJob>) => api.retryPublicationJob(...args),
   cancelPublicationJob: (...args: Parameters<typeof api.cancelPublicationJob>) => api.cancelPublicationJob(...args),
+  dismissUploadTask: (...args: Parameters<typeof api.dismissUploadTask>) => api.dismissUploadTask(...args),
+  archiveUploadTask: (...args: Parameters<typeof api.archiveUploadTask>) => api.archiveUploadTask(...args),
   deleteOrphanUploadTask: (...args: Parameters<typeof api.deleteOrphanUploadTask>) => api.deleteOrphanUploadTask(...args),
 };

@@ -1399,6 +1399,14 @@ MIGRATIONS = (
     ),
     Migration(42, "system_prompts_management", SYSTEM_PROMPTS_STATEMENTS),
     Migration(43, "rag_abstention_log", RAG_ABSTENTION_STATEMENTS),
+    Migration(
+        44,
+        "upload_task_dismissal",
+        (
+            "ALTER TABLE upload_batches ADD COLUMN dismissed_at INTEGER",
+            "ALTER TABLE upload_batches ADD COLUMN dismissed_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        ),
+    ),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(

@@ -112,8 +112,10 @@ from .content_store import (
     create_content_revision,
     create_web_batch,
     find_sibling_category_by_name,
+    finalize_upload_batch,
     get_category_force_delete_preview,
     get_upload_task,
+    dismiss_upload_task,
     list_content_items,
     list_content_items_page,
     find_content_filename_conflict,
@@ -1450,6 +1452,48 @@ async def upload_managed_documents(
         total_files=len(files),
         total_bytes=sum(upload_sizes),
     )
+    try:
+        response = await _receive_managed_upload_batch(
+            conn=conn, files=files, category_id=category_id, normalized_paths=normalized_paths,
+            actions=actions, publish_intents=publish_intents, upload_sizes=upload_sizes,
+            batch_id=batch_id, user=user, allow_folder_merge=allow_folder_merge,
+            video_scheme_id=video_scheme_id, video_idempotency_keys=video_idempotency_keys,
+            max_file_bytes=settings.upload_max_file_mb * 1024 * 1024,
+        )
+        finalize_upload_batch(conn, batch_id)
+        return response
+    except BaseException as exc:
+        # Includes cancellation: reconcile only this request's batch, never stale
+        # batches that may still be owned by another in-flight request.
+        conn.rollback()
+        try:
+            finalize_upload_batch(conn, batch_id, failed=True)
+        except sqlite3.Error:
+            conn.rollback()
+            logger.exception("Unable to finalize interrupted upload batch %s", batch_id)
+        if isinstance(exc, (OSError, sqlite3.Error, RuntimeError)):
+            raise HTTPException(
+                status_code=503, detail="服务器暂时无法完成上传登记，请检查已接收文件后重试"
+            ) from exc
+        raise
+
+
+async def _receive_managed_upload_batch(
+    *,
+    conn: sqlite3.Connection,
+    files: list[UploadFile],
+    category_id: str,
+    normalized_paths: list[str | None],
+    actions: list[ManagedUploadConflictAction],
+    publish_intents: list[bool],
+    upload_sizes: list[int],
+    batch_id: str,
+    user: CurrentUser,
+    allow_folder_merge: bool,
+    video_scheme_id: str | None,
+    video_idempotency_keys: list[str] | None,
+    max_file_bytes: int,
+) -> ManagedUploadResponse:
     entries: list[ManagedUploadEntryDTO] = []
     can_create_folders = has_content_permission(conn, user, "category.manage")
     created_category_ids: set[str] = set()
@@ -1470,10 +1514,7 @@ async def upload_managed_documents(
                     reason=reason, entry_kind="video", failure_code="conflict_skipped",
                 )
                 continue
-            video_limit = min(
-                settings.upload_max_file_mb * 1024 * 1024,
-                MAX_VIDEO_UPLOAD_MB * 1024 * 1024,
-            )
+            video_limit = min(max_file_bytes, MAX_VIDEO_UPLOAD_MB * 1024 * 1024)
             if size_bytes > video_limit:
                 reason = "视频超过上传大小上限"
                 entries.append(ManagedUploadEntryDTO(filename=filename, kind="video", status="skipped", reason=reason, reason_code="video_too_large"))
@@ -1503,6 +1544,10 @@ async def upload_managed_documents(
                     reason=reason, entry_kind="video", failure_code="invalid_filename_extension",
                 )
                 continue
+            upload_category_id = category_id
+            media_rowid_before = conn.execute(
+                "SELECT COALESCE(MAX(rowid), 0) FROM media_assets"
+            ).fetchone()[0]
             try:
                 upload_category_id = _resolve_upload_category(
                     conn,
@@ -1517,9 +1562,6 @@ async def upload_managed_documents(
                 # source of truth for storage, idempotency, queueing and status.
                 from .routes_admin import upload_media
 
-                media_rowid_before = conn.execute(
-                    "SELECT COALESCE(MAX(rowid), 0) FROM media_assets"
-                ).fetchone()[0]
                 media = await upload_media(
                     video=upload,
                     title=Path(final_filename).stem,
@@ -1540,17 +1582,6 @@ async def upload_managed_documents(
                 )
                 source_parts = relative_path.split("/") if relative_path else [final_filename]
                 source_parts[-1] = final_filename
-                entries.append(ManagedUploadEntryDTO(
-                    filename=final_filename, kind="video", media_id=media.media_id,
-                    transcription_job_id=media.transcription_job_id, status="accepted",
-                    resolution="renamed" if action.strategy == "rename" else "created",
-                ))
-                record_upload_batch_entry(
-                    conn, batch_id=batch_id, sequence=index + 1, filename=final_filename,
-                    relative_path="/".join(source_parts), size_bytes=size_bytes, status="accepted",
-                    entry_kind="video", media_id=media.media_id,
-                    transcription_job_id=media.transcription_job_id,
-                )
             except HTTPException as exc:
                 conn.rollback()
                 detail = exc.detail
@@ -1594,13 +1625,28 @@ async def upload_managed_documents(
                     reason = "服务器暂时无法创建转录任务，请稍后重试"
                 else:
                     reason_code = "video_upload_failed"
-                    reason = str(exc) or "视频上传失败"
+                    reason = "视频上传失败，请检查文件后重试"
                 entries.append(ManagedUploadEntryDTO(filename=final_filename, kind="video", status="skipped", reason=reason, reason_code=reason_code))
                 record_upload_batch_entry(
                     conn, batch_id=batch_id, sequence=index + 1, filename=final_filename,
                     relative_path=relative_path, size_bytes=size_bytes, status="skipped",
                     reason=reason, entry_kind="video", failure_code=reason_code,
                 )
+            else:
+                # Bookkeeping is outside admission error handling. If it fails,
+                # fail the request rather than inventing a second skipped entry
+                # for media that may already be durably stored.
+                record_upload_batch_entry(
+                    conn, batch_id=batch_id, sequence=index + 1, filename=final_filename,
+                    relative_path="/".join(source_parts), size_bytes=size_bytes, status="accepted",
+                    entry_kind="video", media_id=media.media_id,
+                    transcription_job_id=media.transcription_job_id,
+                )
+                entries.append(ManagedUploadEntryDTO(
+                    filename=final_filename, kind="video", media_id=media.media_id,
+                    transcription_job_id=media.transcription_job_id, status="accepted",
+                    resolution="renamed" if action.strategy == "rename" else "created",
+                ))
             continue
         doc_type = _DOC_TYPES.get(suffix)
         if doc_type is None:
@@ -1690,7 +1736,7 @@ async def upload_managed_documents(
             elif conflict is not None:
                 raise ContentFilenameConflict(conflict)
             stored = await _storage.ingest_upload(
-                upload, batch_id=batch_id, max_bytes=settings.upload_max_file_mb * 1024 * 1024
+                upload, batch_id=batch_id, max_bytes=max_file_bytes
             )
             if doc_type in {"docx", "xlsx", "pptx"}:
                 package_issue = find_unsafe_office_content(
@@ -1744,25 +1790,19 @@ async def upload_managed_documents(
                 item_id = uploaded.item_id
                 version_id = uploaded.version_id
                 resolution = "renamed" if action.strategy == "rename" else "created"
-            entries.append(ManagedUploadEntryDTO(
-                filename=final_filename, item_id=item_id, version_id=version_id,
-                sha256=stored.sha256, status="accepted", resolution=resolution,
-            ))
-            record_upload_batch_entry(
-                conn, batch_id=batch_id, sequence=index + 1, filename=final_filename,
-                relative_path=source_rel_path, size_bytes=size_bytes, status="accepted",
-                item_id=item_id, version_id=version_id,
-            )
-            if publish_intents[index]:
-                _publication_id, index_job_id = create_publication_job(
-                    conn, version_id, actor_user_id=user.id
-                )
-                enqueue_content_publication(index_job_id)
-        except (ValueError, sqlite3.IntegrityError) as exc:
+        except (ValueError, OSError, sqlite3.Error, RuntimeError) as exc:
             conn.rollback()
-            _discard_unreferenced_upload(conn, stored)
-            reason_code = str(exc)
-            reason = {
+            try:
+                _discard_unreferenced_upload(conn, stored)
+            except (OSError, sqlite3.Error):
+                # Cleanup is best-effort; never replace a safe per-file failure
+                # with a raw filesystem/database exception.
+                logger.exception("Unable to clean up failed upload in batch %s", batch_id)
+            safe_reasons = {
+                "empty_content": "文件内容为空",
+                "invalid_filename": "文件名无效",
+                "invalid_content_title": "资料标题无效",
+                "active_category_not_found": "目标目录不可用",
                 "folder_approval_required": "目录尚未批准，请联系资料负责人创建后重试",
                 "folder_name_conflict": "上传文件夹与当前目录的子文件夹重名，请先确认合并或重命名",
                 "invalid_relative_path": "文件夹路径无效",
@@ -1782,21 +1822,48 @@ async def upload_managed_documents(
                 "xmind_content_invalid": "XMind 主题内容无效",
                 "xmind_topic_structure_invalid": "XMind 主题结构无效或层级过深",
                 "xmind_topic_limits_exceeded": "XMind 主题数量超过安全限制",
-            }.get(reason_code, reason_code)
+            }
+            if isinstance(exc, sqlite3.Error):
+                reason_code = "content_database_unavailable"
+                reason = "服务器暂时无法登记资料，请检查已接收文件后重试"
+            elif isinstance(exc, OSError):
+                reason_code = "content_storage_unavailable"
+                reason = "服务器暂时无法保存资料，请稍后重试"
+            elif isinstance(exc, ValueError) and str(exc) in safe_reasons:
+                reason_code = str(exc)
+                reason = safe_reasons[reason_code]
+            else:
+                reason_code = "content_upload_failed"
+                reason = "资料上传失败，请检查文件后重试"
+            record_upload_batch_entry(
+                conn, batch_id=batch_id, sequence=index + 1, filename=final_filename,
+                relative_path=relative_path, size_bytes=size_bytes, status="skipped", reason=reason,
+                failure_code=reason_code,
+            )
             entries.append(ManagedUploadEntryDTO(
                 filename=final_filename, status="skipped", reason=reason,
                 reason_code=reason_code,
             ))
+        else:
             record_upload_batch_entry(
                 conn, batch_id=batch_id, sequence=index + 1, filename=final_filename,
-                relative_path=relative_path, size_bytes=size_bytes, status="skipped", reason=reason,
+                relative_path=source_rel_path, size_bytes=size_bytes, status="accepted",
+                item_id=item_id, version_id=version_id,
             )
-    if not any(entry.status == "accepted" for entry in entries):
-        conn.execute(
-            "UPDATE upload_batches SET status='failed',error_summary=?,updated_at=strftime('%s','now') WHERE id=?",
-            ("没有可接收的文件", batch_id),
-        )
-        conn.commit()
+            entries.append(ManagedUploadEntryDTO(
+                filename=final_filename, item_id=item_id, version_id=version_id,
+                sha256=stored.sha256, status="accepted", resolution=resolution,
+            ))
+            if publish_intents[index]:
+                # Admission is already durable. A later publication failure must
+                # not relabel that document as skipped or lose its references.
+                try:
+                    _publication_id, index_job_id = create_publication_job(
+                        conn, version_id, actor_user_id=user.id
+                    )
+                    enqueue_content_publication(index_job_id)
+                except (ValueError, OSError, sqlite3.Error, RuntimeError) as exc:
+                    raise RuntimeError("content_publication_unavailable") from exc
     return ManagedUploadResponse(batch_id=batch_id, entries=entries)
 
 
@@ -1872,6 +1939,67 @@ def get_managed_upload_task(
     if row is None:
         raise HTTPException(status_code=404, detail="上传任务不存在")
     return _managed_upload_task_dto(row, entries)
+
+
+@router.post("/upload-tasks/{batch_id}/dismiss")
+def dismiss_managed_upload_task(
+    batch_id: str,
+    user: CurrentUser = Depends(require_content_permission("item.upload", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> dict[str, object]:
+    _require_feature()
+    try:
+        dismiss_upload_task(conn, batch_id, user_id=user.id, is_admin=user.role == "admin")
+    except ValueError as exc:
+        if str(exc) == "upload_task_processing":
+            raise HTTPException(status_code=409, detail="任务仍在处理中，请完成后再移除记录") from exc
+        raise HTTPException(status_code=404, detail="上传任务不存在") from exc
+    return {"batch_id": batch_id, "dismissed": True}
+
+
+@router.post("/upload-tasks/{batch_id}/archive", response_model=BulkManagedContentResponse)
+def archive_managed_upload_task_content(
+    batch_id: str,
+    user: CurrentUser = Depends(require_content_permission("item.upload", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> BulkManagedContentResponse:
+    """Archive original batch references, never substitute a later document/video head."""
+    _require_feature()
+    row, entries = get_upload_task(conn, batch_id, user_id=user.id, is_admin=user.role == "admin")
+    if row is None:
+        raise HTTPException(status_code=404, detail="上传任务不存在")
+    if row["task_status"] == "processing":
+        raise HTTPException(status_code=409, detail="任务仍在处理中，请完成后再操作资料")
+    if not any(has_content_permission(conn, user, key) for key in ("item.archive_draft", "item.archive_published")):
+        raise HTTPException(status_code=403, detail="当前账号没有移入回收站的权限")
+    refs: list[dict[str, str]] = []
+    missing: list[BulkManagedContentResultDTO] = []
+    for entry in entries:
+        if entry["status"] != "accepted":
+            continue
+        if entry["item_id"] and entry["version_id"]:
+            refs.append({"item_id": entry["item_id"], "expected_version_id": entry["version_id"]})
+        elif entry["media_id"]:
+            item = conn.execute(
+                "SELECT id FROM content_items WHERE media_id=? AND content_kind='media_transcript'",
+                (entry["media_id"],),
+            ).fetchone()
+            if item is not None:
+                refs.append({"item_id": item["id"], "expected_version_id": f"media-pending-{entry['media_id']}"})
+            else:
+                missing.append(BulkManagedContentResultDTO(
+                    version_id=f"media-pending-{entry['media_id']}", status="failed",
+                    message="视频资料已不存在，请刷新任务详情",
+                ))
+        else:
+            missing.append(BulkManagedContentResultDTO(
+                version_id=entry["version_id"] or f"upload-entry-{entry['sequence']}",
+                status="failed", message="上传记录缺少资料关联，请刷新任务详情",
+            ))
+    result = (bulk_archive_content_items(BulkArchiveManagedContentRequest(items=refs), user=user, conn=conn)
+              if refs else BulkManagedContentResponse(results=[], succeeded=0, failed=0))
+    return BulkManagedContentResponse(results=[*result.results, *missing], succeeded=result.succeeded,
+                                      failed=result.failed + len(missing))
 
 
 @router.delete("/upload-tasks/{batch_id}/orphan", status_code=204)
@@ -2960,7 +3088,7 @@ def download_media_library_item(
     row = conn.execute(
         """SELECT i.title,i.media_id,m.original_filename,m.storage_rel_path,m.mime_type,m.file_size,m.sha256,
                   v.markdown_storage_kind,v.markdown_rel_path,v.markdown_sha256,
-                  v.markdown_size_bytes,v.publication_status
+                  v.markdown_size_bytes,v.publication_status,h.current_version_id AS published_head_id
            FROM content_items i
            JOIN media_assets m ON m.media_id=i.media_id AND m.status<>'archived'
            LEFT JOIN media_transcript_heads h ON h.media_id=m.media_id
@@ -2975,8 +3103,28 @@ def download_media_library_item(
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="视频资料不存在")
-    if part != "video" and row["publication_status"] != "published":
+    if part != "video" and (not row["published_head_id"] or row["publication_status"] != "published"):
         raise HTTPException(status_code=404, detail="视频转录稿尚未正式发布")
+    transcript_filename = _safe_bulk_archive_name(f"{row['title']}-转录稿.md", set())
+    if part == "transcript":
+        # A published artifact remains downloadable when its original video/share is offline.
+        transcript = _verified_media_transcript_bytes(row)
+        temporary = tempfile.NamedTemporaryFile(prefix="media-transcript-", suffix=".md", delete=False)
+        transcript_path = Path(temporary.name)
+        try:
+            temporary.write(transcript)
+        except BaseException:
+            temporary.close()
+            transcript_path.unlink(missing_ok=True)
+            raise
+        finally:
+            temporary.close()
+        return FileResponse(
+            transcript_path,
+            media_type="text/markdown; charset=utf-8",
+            filename=transcript_filename,
+            background=BackgroundTask(transcript_path.unlink, missing_ok=True),
+        )
     try:
         resolved_media = resolve_media_path(conn, str(row["media_id"]), media_root=MEDIA_DIR)
         video_path = resolved_media.path
@@ -2996,7 +3144,6 @@ def download_media_library_item(
         if digest.hexdigest() != row["sha256"]:
             raise HTTPException(status_code=409, detail="视频文件完整性校验失败")
     video_filename = _safe_bulk_archive_name(str(row["original_filename"]), set())
-    transcript_filename = _safe_bulk_archive_name(f"{row['title']}-转录稿.md", set())
     if part == "video":
         return FileResponse(
             video_path,
@@ -3005,21 +3152,6 @@ def download_media_library_item(
             content_disposition_type="attachment",
         )
     transcript = _verified_media_transcript_bytes(row)
-    if part == "transcript":
-        temporary = tempfile.NamedTemporaryFile(
-            prefix="media-transcript-", suffix=".md", delete=False
-        )
-        transcript_path = Path(temporary.name)
-        try:
-            temporary.write(transcript)
-        finally:
-            temporary.close()
-        return FileResponse(
-            transcript_path,
-            media_type="text/markdown; charset=utf-8",
-            filename=transcript_filename,
-            background=BackgroundTask(transcript_path.unlink, missing_ok=True),
-        )
     if video_size + len(transcript) > _MAX_BULK_DOWNLOAD_BYTES:
         raise HTTPException(status_code=413, detail="视频与转录稿总量不能超过 1 GiB")
     temporary = tempfile.NamedTemporaryFile(

@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   upload: vi.fn(),
   uploadTasks: vi.fn(),
   uploadTask: vi.fn(),
+  dismissUploadTask: vi.fn(),
+  archiveUploadTask: vi.fn(),
   deleteOrphanUploadTask: vi.fn(),
   indexJobs: vi.fn(),
   publicationJobs: vi.fn(),
@@ -117,6 +119,8 @@ vi.mock("../../api/client", () => ({
     uploadManagedContent: mocks.upload,
     managedUploadTasks: mocks.uploadTasks,
     managedUploadTask: mocks.uploadTask,
+    dismissUploadTask: mocks.dismissUploadTask,
+    archiveUploadTask: mocks.archiveUploadTask,
     deleteOrphanUploadTask: mocks.deleteOrphanUploadTask,
     managedContentIndexJobs: mocks.publicationJobs,
     publicationJobs: mocks.publicationJobs,
@@ -1417,6 +1421,7 @@ it("uses comfortable selection and type tracks in the managed content table", as
     await openRootFolder();
     fireEvent.click(await screen.findByRole("button", { name: "上传文件" }));
     const input = await screen.findByLabelText("选择资料文件");
+    expect(input.getAttribute("accept")?.split(",")).toEqual(expect.arrayContaining([".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"]));
     expect(screen.getByLabelText("选择资料文件夹")).toBeInTheDocument();
     const file = new File(["# Guide"], "guide.md", { type: "text/markdown" });
     fireEvent.change(input, { target: { files: [file] } });
@@ -1999,6 +2004,24 @@ it("uses comfortable selection and type tracks in the managed content table", as
     expect(mocks.success).toHaveBeenCalledWith("已开始下载“WhisperX 培训视频”");
   });
 
+  it.each(["pending_publication", "processing", "failed"] as const)("downloads video only when media has no published head (%s)", async (lifecycle) => {
+    mocks.permissions = ORGANIZER_PERMISSIONS;
+    mocks.items.mockResolvedValue({ items: [{ ...mediaItem, lifecycle_status: lifecycle, has_published_head: false }], total: 1, status_counts: { [lifecycle]: 1 } });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:video") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    render(<AdminManagedContentPage />);
+    await openRootFolder();
+    fireEvent.click(screen.getAllByRole("button", { name: "下载“WhisperX 培训视频”" })[0]);
+    const dialog = screen.getByRole("dialog", { name: "下载视频资料" });
+    expect(within(dialog).getByRole("radio", { name: /^仅视频/ })).toHaveAttribute("aria-checked", "true");
+    expect(within(dialog).getByRole("radio", { name: /^仅转录稿/ })).toBeDisabled();
+    expect(within(dialog).getByRole("radio", { name: /^视频与转录稿/ })).toBeDisabled();
+    expect(within(dialog).getAllByText("尚无正式发布的转录稿，暂不可下载")).toHaveLength(2);
+    fireEvent.click(within(dialog).getByRole("button", { name: "开始下载" }));
+    await waitFor(() => expect(mocks.downloadMedia).toHaveBeenCalledWith(mediaItem.item_id, "video", "training.mp4"));
+  });
+
   it("creates a reviewed media metadata candidate while preserving the published item", async () => {
     mocks.role = "admin";
     mocks.permissions = PUBLISHER_PERMISSIONS;
@@ -2263,7 +2286,7 @@ it("uses comfortable selection and type tracks in the managed content table", as
     expect(screen.getByText("未完成 1 个")).toBeInTheDocument();
     const failedRow = screen.getByTestId("upload-task-row");
     const failedActions = within(failedRow).getAllByRole("button");
-    expect(failedActions.map((button) => button.getAttribute("aria-label"))).toEqual(["重试上传", "查看上传任务详情", "删除任务及资料"]);
+    expect(failedActions.map((button) => button.getAttribute("aria-label") || button.textContent)).toEqual(["重试上传", "查看上传任务详情", "删除任务记录", "将本批资料移至回收站"]);
     expect(failedActions[0]).toBeDisabled();
     expect(failedActions[0]).toHaveAttribute("aria-label", "重试上传");
 
@@ -2350,7 +2373,72 @@ it("uses comfortable selection and type tracks in the managed content table", as
     expect(within(selectedRows[20]).getByRole("checkbox")).toBeChecked();
   });
 
-  it("batch deletes selected upload tasks by moving generated items to the recycle bin", async () => {
+  function mockTask(batchId: string) {
+    return { batch_id: batchId, upload_mode: "files" as const, status: "completed" as const, target_category_id: "cat-03", target_path: `03 公司内部标准 / ${batchId}`, total_files: 2, accepted_files: 2, skipped_files: 0, total_bytes: 20, total_uploaded_bytes: 20, created_by_name: "整理员", created_at: 1, updated_at: 1, error_summary: null, entries: [
+      { sequence: 1, filename: "doc.pdf", relative_path: "doc.pdf", size_bytes: 10, status: "accepted" as const, reason: null, item_id: "old-item", version_id: "old-version", created_at: 1 },
+      { sequence: 2, filename: "video.mp4", relative_path: "video.mp4", size_bytes: 10, status: "accepted" as const, reason: null, media_id: "media-1", created_at: 1 },
+    ] };
+  }
+
+  it("allows upload-only users to dismiss mixed document/video task records without archive permissions", async () => {
+    mocks.permissions = ["item.upload"];
+    const task = mockTask("mixed");
+    mocks.uploadTasks.mockResolvedValue({ tasks: [task], total: 1, status_counts: { completed: 1 } });
+    window.history.replaceState({}, "", "/admin/content?view=uploads");
+    render(<AdminManagedContentPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "删除任务记录" }));
+    const dialog = screen.getByRole("dialog", { name: "删除任务记录" });
+    expect(dialog).toHaveTextContent("不会删除已上传资料");
+    expect(screen.queryByRole("button", { name: "将本批资料移至回收站" })).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认删除任务记录" }));
+    await waitFor(() => expect(mocks.dismissUploadTask).toHaveBeenCalledWith("mixed"));
+    expect(mocks.bulkArchive).not.toHaveBeenCalled();
+    expect(mocks.archiveUploadTask).not.toHaveBeenCalled();
+    expect(mocks.uploadTask).not.toHaveBeenCalled();
+    expect(mocks.deleteContent).not.toHaveBeenCalled();
+  });
+
+  it("retains per-task partial dismissal failures and retries only failed tasks", async () => {
+    mocks.permissions = ["item.upload"];
+    const tasks = [mockTask("ok"), mockTask("blocked")];
+    mocks.uploadTasks.mockResolvedValue({ tasks, total: 2, status_counts: { completed: 2 } });
+    mocks.dismissUploadTask.mockResolvedValueOnce({ dismissed: true }).mockRejectedValueOnce(new Error("任务仍在处理中"));
+    window.history.replaceState({}, "", "/admin/content?view=uploads");
+    render(<AdminManagedContentPage />);
+    await screen.findByText("03 公司内部标准 / ok");
+    for (const row of screen.getAllByTestId("upload-task-row")) fireEvent.click(within(row).getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "批量操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "删除所选任务（2）" }));
+    const dialog = screen.getByRole("dialog", { name: "删除所选上传任务" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认删除任务记录（2）" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("任务仍在处理中");
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("03 公司内部标准 / blocked");
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认删除任务记录（1）" }));
+    await waitFor(() => expect(mocks.dismissUploadTask).toHaveBeenCalledTimes(3));
+    expect(mocks.dismissUploadTask.mock.calls.map(([id]) => id)).toEqual(["ok", "blocked", "blocked"]);
+  });
+
+  it("archives only the explicit task snapshot endpoint and preserves partial reasons and task record", async () => {
+    mocks.permissions = ORGANIZER_PERMISSIONS;
+    mocks.uploadTasks.mockResolvedValue({ tasks: [mockTask("archive")], total: 1, status_counts: { completed: 1 } });
+    mocks.archiveUploadTask.mockResolvedValue({ succeeded: 1, failed: 1, results: [
+      { item_id: "old-item", version_id: "old-version", status: "failed", message: "资料版本已变化，请刷新后重试" },
+      { item_id: "media-item", version_id: "media-pending-media-1", status: "succeeded" },
+    ] });
+    window.history.replaceState({}, "", "/admin/content?view=uploads");
+    render(<AdminManagedContentPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "将本批资料移至回收站" }));
+    const dialog = screen.getByRole("dialog", { name: "将本批资料移至回收站" });
+    expect(dialog).toHaveTextContent("任务记录不会删除");
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认将本批资料移至回收站" }));
+    expect(await within(dialog).findByRole("status")).toHaveTextContent("doc.pdf：资料版本已变化，请刷新后重试");
+    expect(mocks.archiveUploadTask).toHaveBeenCalledWith("archive");
+    expect(mocks.bulkArchive).not.toHaveBeenCalled();
+    expect(mocks.dismissUploadTask).not.toHaveBeenCalled();
+    expect(mocks.uploadTask).not.toHaveBeenCalled();
+  });
+
+  it("batch dismisses selected upload tasks without touching generated items", async () => {
     mocks.permissions = ORGANIZER_PERMISSIONS;
     const tasks = [1, 2].map((index) => ({
       batch_id: `batch-delete-${index}`,
@@ -2384,17 +2472,21 @@ it("uses comfortable selection and type tracks in the managed content table", as
     fireEvent.click(screen.getByRole("menuitem", { name: "删除所选任务（2）" }));
 
     const dialog = screen.getByRole("dialog", { name: "删除所选上传任务" });
-    expect(within(dialog).getByText(/选中的 2 个任务记录/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/选中的 2 个任务仅删除记录/)).toBeInTheDocument();
     expect(within(dialog).getByText("文件上传 · 03 公司内部标准 / 任务 1")).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: "确认移入回收站（2）" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认删除任务记录（2）" }));
 
-    await waitFor(() => expect(mocks.bulkArchive).toHaveBeenCalledTimes(2));
-    expect(mocks.bulkArchive).toHaveBeenCalledWith([{ item_id: "item-1", expected_version_id: "version-1" }]);
-    expect(mocks.bulkArchive).toHaveBeenCalledWith([{ item_id: "item-2", expected_version_id: "version-2" }]);
-    expect(mocks.success).toHaveBeenCalledWith("已将 2 份资料移入回收站，共处理 2 个任务");
+    await waitFor(() => expect(mocks.dismissUploadTask).toHaveBeenCalledTimes(2));
+    expect(mocks.dismissUploadTask).toHaveBeenCalledWith("batch-delete-1");
+    expect(mocks.dismissUploadTask).toHaveBeenCalledWith("batch-delete-2");
+    expect(mocks.bulkArchive).not.toHaveBeenCalled();
+    expect(mocks.archiveUploadTask).not.toHaveBeenCalled();
+    expect(mocks.deleteOrphanUploadTask).not.toHaveBeenCalled();
+    expect(mocks.uploadTask).not.toHaveBeenCalled();
+    expect(mocks.success).toHaveBeenCalledWith("已删除 2 条上传任务记录，不会删除已上传资料");
   });
 
-  it("batch delete excludes processing tasks and cleans up orphan records", async () => {
+  it("batch dismissal excludes processing tasks and does not call legacy orphan cleanup", async () => {
     mocks.permissions = ORGANIZER_PERMISSIONS;
     const tasks = [
       {
@@ -2449,10 +2541,14 @@ it("uses comfortable selection and type tracks in the managed content table", as
     expect(deleteItem).toBeEnabled();
     fireEvent.click(deleteItem);
     const dialog = screen.getByRole("dialog", { name: "删除所选上传任务" });
-    expect(within(dialog).getByText(/选中的 1 个任务记录/)).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: "确认移入回收站（1）" }));
+    expect(within(dialog).getByText(/选中的 1 个任务仅删除记录/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认删除任务记录（1）" }));
 
-    await waitFor(() => expect(mocks.deleteOrphanUploadTask).toHaveBeenCalledWith("batch-delete-orphan"));
-    expect(mocks.success).toHaveBeenCalledWith("已将 0 份资料移入回收站，清理 1 条无关联记录，共处理 1 个任务");
+    await waitFor(() => expect(mocks.dismissUploadTask).toHaveBeenCalledWith("batch-delete-orphan"));
+    expect(mocks.dismissUploadTask).not.toHaveBeenCalledWith("batch-delete-processing");
+    expect(mocks.deleteOrphanUploadTask).not.toHaveBeenCalled();
+    expect(mocks.bulkArchive).not.toHaveBeenCalled();
+    expect(mocks.uploadTask).not.toHaveBeenCalled();
+    expect(mocks.success).toHaveBeenCalledWith("已删除 1 条上传任务记录，不会删除已上传资料");
   });
 });
