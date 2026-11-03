@@ -150,7 +150,7 @@ function References {
 }
 function Has-ActiveMarker([string]$Path) {
     $scopes = @($Path)
-    if ((Split-Path $Path -Leaf) -in @('app','venv','wheelhouse','pip-cache')) {
+    if ((Split-Path $Path -Leaf) -in @('app','venv','wheelhouse','pip-cache','shared-wheel-seed','qualified-faster-whisper-wheel-seed','qualified-whisperx-wheel-seed')) {
         $scopes += Split-Path $Path -Parent
     }
     foreach ($scope in $scopes) {
@@ -168,7 +168,7 @@ function Referenced([string]$Path,[string[]]$References) {
     foreach ($reference in $References) {
         $normalized = $reference.Replace('/','\')
         if ($normalized.IndexOf($Path.Replace('/','\'),[StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
-        if ((Split-Path $Path -Leaf) -in @('app','venv','wheelhouse','pip-cache')) {
+        if ((Split-Path $Path -Leaf) -in @('app','venv','wheelhouse','pip-cache','shared-wheel-seed','qualified-faster-whisper-wheel-seed','qualified-whisperx-wheel-seed')) {
             $parent = (Split-Path $Path -Parent).Replace('/','\')
             if ($normalized.IndexOf($parent,[StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
         }
@@ -298,6 +298,22 @@ function Add-Payload([string]$Path,[string]$Kind,[string]$Identity,[string[]]$Re
         }
         throw
     }
+    if ($Kind -eq 'asr-wheel-seed-payload') {
+        # Run the complete payload tree guard first; never skip links or IO errors
+        # by filtering the enumeration to wheel names or regular files.
+        $flatWheels = $info.files -gt 0 -and $info.directories -eq 0
+        foreach ($entry in @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop)) {
+            if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse point in payload tree' }
+            if ($entry -isnot [IO.FileInfo] -or
+                -not [string]::Equals($entry.Extension,'.whl',[StringComparison]::OrdinalIgnoreCase)) {
+                $flatWheels = $false
+            }
+        }
+        if (-not $flatWheels) {
+            Add-Skipped $Path $Kind $Identity 'unsupported-wheel-seed-content'
+            return
+        }
+    }
     $script:items.Add([ordered]@{ path=(FullPath $Path); kind=$Kind; identity=$Identity;
         reason='recognized non-current payload; no live reference; rollback explicitly waived';
         bytes=$info.bytes; files=$info.files; directories=$info.directories;
@@ -318,6 +334,9 @@ function Discover([string[]]$Refs) {
             # Preserve it, and select only known reproducible payload children.
             foreach ($child in @('venv','wheelhouse','pip-cache')) {
                 Add-Payload (Join-Path $run.FullName $child) 'asr-dependency-payload' $run.Name $Refs
+            }
+            foreach ($child in @('shared-wheel-seed','qualified-faster-whisper-wheel-seed','qualified-whisperx-wheel-seed')) {
+                Add-Payload (Join-Path $run.FullName $child) 'asr-wheel-seed-payload' $run.Name $Refs
             }
         }
     }
