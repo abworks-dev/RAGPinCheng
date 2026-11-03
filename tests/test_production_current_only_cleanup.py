@@ -484,3 +484,89 @@ function Invoke-RestMethod { $script:requests++; throw 'Unexpected network' }
 Expect-Throw { Health } '*Health URLs must be*'
 if ($script:requests) { throw 'Unverified host was requested' }
 ''')
+
+
+def test_preview_retention_diagnostics_do_not_change_approval_or_expose_references(run_ps):
+    setup = _SANDBOX_ENTRY.replace("& $entry\n$ExpectedManifestSha256", r"""
+Put 'asr-data/dependency-runs/candidate-3/venv/Lib/site-packages/transformers/models/private.bin' 'FIXTURE_PRIVATE_CONTENT' | Out-Null
+function Get-CimInstance { param($ClassName,$ErrorAction)
+    [pscustomobject]@{ProcessId=123456;ExecutablePath='mock';CommandLine='private=FIXTURE_SECRET_REFERENCE'}
+}
+& $entry
+$ExpectedManifestSha256""")
+    run_ps(setup + r"""
+$preview = Read-Json (Join-Path $PWD 'audit.json')
+$approval = Read-Json $ManifestPath
+$rows = @($preview.skipped | Where-Object { $_.reason_code -eq 'protected-content' })
+if ($rows.Count -ne 1) { throw 'Missing protected retention diagnostic' }
+if (@($approval.candidates).Count -ne 1) { throw 'Diagnostics changed approval candidates' }
+if ($approval.PSObject.Properties.Name -contains 'skipped') { throw 'Diagnostics entered approval contract' }
+if ((Json $preview) -match 'FIXTURE_SECRET_REFERENCE|FIXTURE_PRIVATE_CONTENT') { throw 'Private values leaked' }
+if ($rows[0].matched_guard -ne 'protected-directory' -or $rows[0].blocking_basename -ne 'models') { throw 'Incorrect first blocker classification' }
+if ($rows[0].PSObject.Properties.Name -contains 'first_blocking_relative_path') { throw 'Arbitrary descendant path exposed' }
+& $entry
+if (Test-Path $payloadRoot) { throw 'Existing approved deletion behavior changed' }
+if (-not (Test-Path (Join-Path $AsrDataRoot 'dependency-runs/candidate-3/venv'))) { throw 'Protected payload deleted' }
+""")
+
+
+def test_retained_known_identity_exit_reasons_are_sanitized_and_stable(run_ps):
+    run_ps(r"""
+Put 'asr-data/dependency-runs/candidate-2/venv/python.exe' | Out-Null
+Put 'asr-data/dependency-runs/candidate-3/venv/python.exe' | Out-Null
+Put 'asr-data/dependency-runs/candidate-3/run.lock' | Out-Null
+Put 'asr-program/releases/404/app/main.py' | Out-Null
+Put 'gpu/releases/111111111111-222222222222/venv/python.exe' | Out-Null
+Put 'gpu/releases/333333333333-444444444444/venv/python.exe' | Out-Null
+Put 'gpu/releases/333333333333-444444444444/runtime-manifest.json' '{"release_id":"333333333333-444444444444","qualification_status":"failed","lock_validation_status":"validated"}' | Out-Null
+$refs = @((Join-Path $AsrDataRoot 'dependency-runs/candidate-2') + ' --private=FIXTURE_SECRET_REFERENCE')
+$one = @(Discover $refs)
+$first = Json $script:skipped.ToArray()
+$two = @(Discover $refs)
+if ((Json $one) -cne (Json $two) -or $first -cne (Json $script:skipped.ToArray())) { throw 'Unstable candidates or diagnostics' }
+foreach ($code in @('referenced','active-marker','release-manifest-invalid','missing-public-manifest','nonqualified-public-manifest')) {
+    if (@($script:skipped | Where-Object { $_.reason_code -eq $code }).Count -ne 1) { throw ('Missing diagnostic: '+$code) }
+}
+if ($first -match 'FIXTURE_SECRET_REFERENCE|unknown release') { throw 'Raw reference or exception leaked' }
+""")
+
+
+@pytest.mark.parametrize('artifact', ['models/model.bin', '.env'])
+def test_retained_protected_file_and_directory_still_fail_closed(run_ps, artifact):
+    run_ps("Put " + _quote('asr-data/dependency-runs/candidate-2/venv/' + artifact) + r""" | Out-Null
+if ((Discover @()).Count) { throw 'Protected payload selected' }
+$rows = @($script:skipped | Where-Object { $_.reason_code -eq 'protected-content' })
+if ($rows.Count -ne 1 -or $rows[0].matched_guard -notin @('protected-directory','protected-file')) { throw 'Protected blocker not diagnosed' }
+""")
+
+
+def test_retention_diagnostics_do_not_turn_reparse_failure_into_success(run_ps):
+    run_ps(r"""
+Put 'outside/private.txt' 'FIXTURE_PRIVATE_CONTENT' | Out-Null
+Put 'asr-data/dependency-runs/candidate-2/venv/python.exe' | Out-Null
+$link = Join-Path $AsrDataRoot 'dependency-runs/candidate-2/venv/link'
+New-Item -ItemType Junction -Path $link -Target (Join-Path $PWD 'outside') | Out-Null
+Expect-Throw { Discover @() } '*Reparse point*'
+if (-not (Test-Path (Join-Path $PWD 'outside/private.txt'))) { throw 'Outside tree changed' }
+""")
+
+
+def test_retention_layout_observation_is_not_deletion_authorization(run_ps):
+    run_ps(r"""
+foreach ($p in @('pyvenv.cfg','Scripts/python.exe','Lib/site-packages/transformers/models/weights.bin')) {
+    Put ('asr-data/dependency-runs/candidate-2/venv/' + $p) 'FIXTURE_PRIVATE_CONTENT' | Out-Null
+}
+if ((Discover @()).Count) { throw 'Recognized layout bypassed protected artifact guard' }
+if ($script:skipped.Count -ne 1 -or -not $script:skipped[0].recognized_venv_layout) { throw 'Recognized layout missing' }
+if ((Json $script:skipped.ToArray()) -match 'FIXTURE_PRIVATE_CONTENT|weights.bin') { throw 'Private descendant information leaked' }
+""")
+
+
+def test_retention_diagnostics_are_bounded_and_lazy_initialized(run_ps):
+    run_ps(r"""
+$path = Join-Path $AsrDataRoot 'dependency-runs/candidate-2'
+foreach ($i in 1..205) { Add-Skipped $path 'asr-dependency-run' 'candidate-2' 'referenced' }
+if ($script:skipped.Count -ne 200 -or $script:skippedDroppedCount -ne 5) { throw 'Unbounded retained metadata' }
+Discover @() | Out-Null
+if ($script:skipped.Count -ne 0 -or $script:skippedDroppedCount -ne 0) { throw 'Discovery did not reset diagnostics' }
+""")
