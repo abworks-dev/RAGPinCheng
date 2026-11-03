@@ -157,13 +157,13 @@ test.describe("资料管理", () => {
     const rows = page.getByTestId("upload-task-row");
     const failedRow = rows.filter({ hasText: "01 行业规范与标准 / 02 文件夹上传测试" });
     const failedActions = failedRow.getByRole("button");
-    await expect(failedActions).toHaveCount(3);
-expect(await failedActions.evaluateAll((buttons) => buttons.map((button) => button.getAttribute("aria-label")))).toEqual(["重试上传", "查看上传任务详情", "删除任务及资料"]);
+    await expect(failedActions).toHaveCount(4);
+    expect(await failedActions.evaluateAll((buttons) => buttons.map((button) => button.getAttribute("aria-label") || button.textContent))).toEqual(["重试上传", "查看上传任务详情", "删除任务记录", "将本批资料移至回收站"]);
     const retry = failedRow.getByRole("button", { name: "重试上传", exact: true });
     await expect(retry).toBeDisabled();
 
     const partialRow = rows.filter({ hasText: "合成长目录名称用于响应式检查" });
-    await partialRow.getByRole("button", { name: "详情" }).click();
+    await partialRow.getByRole("button", { name: "查看上传任务详情" }).click();
     const detail = page.getByRole("dialog", { name: "上传任务详情" });
     await expect(detail).toBeVisible();
     await expect(detail.getByRole("progressbar", { name: "任务处理进度 100%" })).toBeVisible();

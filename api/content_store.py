@@ -1560,26 +1560,61 @@ def record_upload_batch_entry(
         raise ValueError("invalid_upload_batch_entry")
     if entry_kind not in {"document", "video"}:
         raise ValueError("invalid_upload_batch_entry_kind")
-    now = _now()
-    conn.execute(
-        """INSERT INTO upload_batch_entries
-           (batch_id,sequence,filename,relative_path,size_bytes,status,reason,item_id,version_id,
-            entry_kind,media_id,transcription_job_id,failure_code,created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (batch_id, sequence, filename, relative_path, size_bytes, status, reason, item_id, version_id,
-         entry_kind, media_id, transcription_job_id, failure_code, now),
-    )
-    accepted_increment = 1 if status == "accepted" else 0
-    skipped_increment = 1 if status == "skipped" else 0
-    uploaded_increment = size_bytes if status == "accepted" else 0
-    conn.execute(
-        """UPDATE upload_batches
-           SET accepted_files=accepted_files+?, skipped_files=skipped_files+?,
-               total_uploaded_bytes=total_uploaded_bytes+?, updated_at=?
-           WHERE id=?""",
-        (accepted_increment, skipped_increment, uploaded_increment, now, batch_id),
-    )
-    conn.commit()
+    try:
+        conn.execute(
+            """INSERT INTO upload_batch_entries
+               (batch_id,sequence,filename,relative_path,size_bytes,status,reason,item_id,version_id,
+                entry_kind,media_id,transcription_job_id,failure_code,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (batch_id, sequence, filename, relative_path, size_bytes, status, reason, item_id, version_id,
+             entry_kind, media_id, transcription_job_id, failure_code, _now()),
+        )
+        finalize_upload_batch(conn, batch_id)
+    except BaseException:
+        conn.rollback()
+        raise
+
+
+def finalize_upload_batch(
+    conn: sqlite3.Connection,
+    batch_id: str,
+    *,
+    failed: bool = False,
+) -> None:
+    """Reconcile this batch only; incomplete batches stay active unless aborted."""
+    try:
+        conn.execute(
+            """UPDATE upload_batches
+               SET accepted_files=(SELECT count(*) FROM upload_batch_entries
+                                   WHERE batch_id=? AND status='accepted'),
+                   skipped_files=(SELECT count(*) FROM upload_batch_entries
+                                  WHERE batch_id=? AND status='skipped'),
+                   total_uploaded_bytes=(SELECT COALESCE(sum(size_bytes),0)
+                                         FROM upload_batch_entries
+                                         WHERE batch_id=? AND status='accepted'),
+                   updated_at=?
+               WHERE id=?""",
+            (batch_id, batch_id, batch_id, _now(), batch_id),
+        )
+        conn.execute(
+            """UPDATE upload_batches
+               SET status=CASE
+                     WHEN ? OR status='failed' THEN 'failed'
+                     WHEN accepted_files+skipped_files < total_files THEN 'staging'
+                     WHEN accepted_files > 0 THEN 'ready_for_review'
+                     ELSE 'failed' END,
+                   error_summary=CASE
+                     WHEN ? THEN '上传未完成，请检查已接收的文件后重试'
+                     WHEN accepted_files+skipped_files >= total_files AND accepted_files=0
+                       THEN '没有可接收的文件'
+                     ELSE error_summary END
+               WHERE id=?""",
+            (failed, failed, batch_id),
+        )
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
 
 
 def list_upload_tasks(
@@ -1601,7 +1636,7 @@ def list_upload_tasks(
         params.append(user_id)
     task_status = """
         CASE
-          WHEN status IN ('staging','validating') AND accepted_files+skipped_files < total_files THEN 'processing'
+          WHEN status<>'failed' AND accepted_files+skipped_files < total_files THEN 'processing'
           WHEN status='failed' OR (total_files > 0 AND accepted_files=0) THEN 'failed'
           WHEN skipped_files > 0 THEN 'partial_success'
           ELSE 'completed'
@@ -1657,7 +1692,7 @@ def list_upload_tasks(
                  FROM upload_batches b
                  LEFT JOIN paths ON paths.id=b.target_category_id
                  LEFT JOIN users u ON u.id=b.created_by
-                 WHERE b.origin='web' AND b.total_files > 0
+                 WHERE b.origin='web' AND b.total_files > 0 AND b.dismissed_at IS NULL
              )
              SELECT * FROM task_rows {scope}"""
     filters: list[str] = []
@@ -1709,6 +1744,36 @@ def get_upload_task(
         (batch_id,),
     ).fetchall()
     return row, entries
+
+
+def dismiss_upload_task(
+    conn: sqlite3.Connection,
+    batch_id: str,
+    *,
+    user_id: int,
+    is_admin: bool = False,
+) -> None:
+    """Hide a finished task without deleting its entries, audit trail or content."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = conn.execute(
+            "SELECT * FROM upload_batches WHERE id=? AND origin='web' AND total_files>0",
+            (batch_id,),
+        ).fetchone()
+        if row is None or (not is_admin and row["created_by"] != user_id):
+            raise ValueError("upload_task_not_found")
+        if row["dismissed_at"] is None:
+            if row["status"] != "failed" and row["accepted_files"] + row["skipped_files"] < row["total_files"]:
+                raise ValueError("upload_task_processing")
+            conn.execute(
+                "UPDATE upload_batches SET dismissed_at=?,dismissed_by=? WHERE id=?",
+                (_now(), user_id, batch_id),
+            )
+            audit_event(conn, "upload_task.dismissed", actor_user_id=user_id, batch_id=batch_id)
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
 
 
 def register_uploaded_document(
@@ -1773,7 +1838,8 @@ def register_uploaded_document(
         ),
     )
     conn.execute(
-        "UPDATE upload_batches SET status='ready_for_review',updated_at=? WHERE id=?",
+        """UPDATE upload_batches SET status='ready_for_review',updated_at=?
+                   WHERE id=? AND NOT (origin='web' AND total_files>0)""",
         (now, batch_id),
     )
     audit_event(
@@ -2749,7 +2815,8 @@ def create_content_revision(
         )
         if stored is not None and source_batch_id:
             conn.execute(
-                "UPDATE upload_batches SET status='ready_for_review',updated_at=? WHERE id=?",
+                """UPDATE upload_batches SET status='ready_for_review',updated_at=?
+                   WHERE id=? AND NOT (origin='web' AND total_files>0)""",
                 (now, source_batch_id),
             )
         event_type = "content.updated" if stored is not None else "content.renamed"

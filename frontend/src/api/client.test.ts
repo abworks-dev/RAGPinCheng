@@ -21,6 +21,86 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+class ManagedUploadXHR {
+  static instance: ManagedUploadXHR;
+  upload = { onprogress: null as ((event: ProgressEvent) => void) | null, onload: null as (() => void) | null };
+  status = 200;
+  statusText = "OK";
+  responseText = JSON.stringify({ batch_id: "batch-1", accepted_files: 1 });
+  withCredentials = false;
+  timeout = 0;
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onabort: (() => void) | null = null;
+  open = vi.fn();
+  setRequestHeader = vi.fn();
+  send = vi.fn();
+  constructor() { ManagedUploadXHR.instance = this; }
+}
+
+describe("managed upload and task transport", () => {
+  it("enters processing when request bytes finish, before a delayed server response", async () => {
+    vi.stubGlobal("XMLHttpRequest", ManagedUploadXHR);
+    setCsrfToken("csrf-upload");
+    const progress = vi.fn();
+    const settled = vi.fn();
+    const result = api.uploadManagedContent([new File(["data"], "sample.doc")], "cat-1", "files", progress);
+    void result.then(settled);
+    const xhr = ManagedUploadXHR.instance;
+    xhr.upload.onprogress?.({ loaded: 4, total: 4 } as ProgressEvent);
+    expect(progress).toHaveBeenLastCalledWith({ phase: "uploading", loaded: 4, total: 4 });
+    xhr.upload.onload?.();
+    await Promise.resolve();
+    expect(progress).toHaveBeenLastCalledWith({ phase: "processing", loaded: 1, total: 1 });
+    expect(settled).not.toHaveBeenCalled();
+    expect(xhr.timeout).toBe(0);
+    expect(xhr.withCredentials).toBe(true);
+    expect(xhr.setRequestHeader).toHaveBeenCalledWith("X-CSRF-Token", "csrf-upload");
+    xhr.onload?.();
+    await expect(result).resolves.toMatchObject({ batch_id: "batch-1" });
+    expect(progress).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["onerror", "onabort"] as const)("fails on real transport %s after processing begins", async (event) => {
+    vi.stubGlobal("XMLHttpRequest", ManagedUploadXHR);
+    const progress = vi.fn();
+    const result = api.uploadManagedContent([new File(["data"], "sample.pdf")], "cat-1", "files", progress);
+    const assertion = expect(result).rejects.toMatchObject({ status: 0, retryable: true });
+    ManagedUploadXHR.instance.upload.onload?.();
+    ManagedUploadXHR.instance[event]?.();
+    await assertion;
+    expect(progress).toHaveBeenCalledWith({ phase: "processing", loaded: 1, total: 1 });
+  });
+
+  it.each([400, 401, 403, 409, 500])("preserves HTTP %s errors after upload", async (status) => {
+    vi.stubGlobal("XMLHttpRequest", ManagedUploadXHR);
+    const unauthorized = vi.fn();
+    const forbidden = vi.fn();
+    setUnauthorizedHandler(unauthorized);
+    setContentPermissionForbiddenHandler(forbidden);
+    const result = api.uploadManagedContent([new File(["data"], "sample.pdf")], "cat-1", "files", vi.fn());
+    const assertion = expect(result).rejects.toMatchObject({ status });
+    const xhr = ManagedUploadXHR.instance;
+    xhr.status = status;
+    xhr.responseText = JSON.stringify({ detail: "服务器拒绝上传" });
+    xhr.upload.onload?.();
+    xhr.onload?.();
+    await assertion;
+    expect(unauthorized).toHaveBeenCalledTimes(status === 401 ? 1 : 0);
+    expect(forbidden).toHaveBeenCalledTimes(status === 403 ? 1 : 0);
+  });
+
+  it("keeps task dismissal and snapshot archive separate authenticated POSTs", async () => {
+    setCsrfToken("csrf-tasks");
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ batch_id: "a/b", dismissed: true })).mockResolvedValueOnce(jsonResponse({ results: [], succeeded: 0, failed: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await api.dismissUploadTask("a/b");
+    await api.archiveUploadTask("a/b");
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/content/upload-tasks/a%2Fb/dismiss", expect.objectContaining({ method: "POST", credentials: "include", headers: { "X-CSRF-Token": "csrf-tasks" } }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/content/upload-tasks/a%2Fb/archive", expect.objectContaining({ method: "POST", credentials: "include", headers: { "X-CSRF-Token": "csrf-tasks" } }));
+  });
+});
+
 describe("api client", () => {
   it("sends cookies, JSON and CSRF for a mutating request", async () => {
     setCsrfToken("csrf-123");

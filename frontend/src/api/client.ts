@@ -780,11 +780,12 @@ export const api = {
       xhr.upload.onprogress = (event) => {
         onProgress({ phase: "uploading", loaded: event.loaded, total: event.total || 0 });
       };
+      xhr.upload.onload = () => onProgress({ phase: "processing", loaded: 1, total: 1 });
       xhr.onerror = () => reject(new ApiError(0, "", "网络连接失败，请稍后重试", null, true));
       xhr.onabort = () => reject(new ApiError(0, "", "上传已中断", null, true));
       xhr.onload = () => {
         const body = xhr.responseText || "";
-        onProgress({ phase: "processing", loaded: xhr.status >= 200 && xhr.status < 300 ? 1 : 0, total: 1 });
+
         if (xhr.status === 401 && unauthorizedHandler) {
           try { unauthorizedHandler(); } catch { /* noop */ }
         }
@@ -815,6 +816,10 @@ export const api = {
   },
   managedUploadTask: (batchId: string) =>
     jsonFetch<ManagedUploadTask>(`/api/admin/content/upload-tasks/${encodeURIComponent(batchId)}`),
+  dismissUploadTask: (batchId: string) =>
+    jsonFetch<{ batch_id: string; dismissed: true }>(`/api/admin/content/upload-tasks/${encodeURIComponent(batchId)}/dismiss`, { method: "POST" }),
+  archiveUploadTask: (batchId: string) =>
+    jsonFetch<BulkManagedContentResponse>(`/api/admin/content/upload-tasks/${encodeURIComponent(batchId)}/archive`, { method: "POST" }),
   deleteOrphanUploadTask: (batchId: string) =>
     jsonFetch<void>(`/api/admin/content/upload-tasks/${encodeURIComponent(batchId)}/orphan`, { method: "DELETE" }),
   moveManagedContent: (itemId: string, targetCategoryId: string, expectedVersionId: string) =>

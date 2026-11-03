@@ -1,0 +1,72 @@
+import { expect, test } from "@playwright/test";
+import { installAdminRoutes } from "./fixtures/admin-fixtures";
+import { expectInViewport, expectNoBodyOverflow } from "./helpers/layout";
+
+test("task dismissal stays separate from snapshot archive and preserves partial failures", async ({ page }, testInfo) => {
+  await installAdminRoutes(page);
+  let dismissCount = 0;
+  let archiveCount = 0;
+  await page.route("**/api/admin/content/upload-tasks/*/dismiss", async (route) => {
+    dismissCount += 1;
+    await route.fulfill({ status: dismissCount === 1 ? 409 : 200, contentType: "application/json", body: JSON.stringify(dismissCount === 1 ? { detail: "任务仍在处理中，请稍后重试" } : { batch_id: "batch-upload-partial", dismissed: true }) });
+  });
+  await page.route("**/api/admin/content/upload-tasks/*/archive", async (route) => {
+    archiveCount += 1;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ succeeded: 1, failed: 1, results: [{ item_id: "synthetic-item-1", version_id: "synthetic-version-1", status: "succeeded" }, { item_id: "synthetic-item-2", version_id: "synthetic-version-2", status: "failed", message: "资料版本已变化，保留后续新版本" }] }) });
+  });
+  await page.goto("/admin/content?view=uploads");
+  const row = page.getByTestId("upload-task-row").filter({ hasText: "合成长目录名称用于响应式检查" });
+  await row.getByRole("button", { name: "删除任务记录", exact: true }).click();
+  const removal = page.getByRole("dialog", { name: "删除任务记录", exact: true });
+  await expect(removal).toContainText("不会删除已上传资料");
+  await expectInViewport(removal.getByRole("button", { name: "确认删除任务记录", exact: true }));
+  await removal.getByRole("button", { name: "确认删除任务记录", exact: true }).focus();
+  await expect(removal.getByRole("button", { name: "确认删除任务记录", exact: true })).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(removal.getByRole("button", { name: "取消", exact: true })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(removal.getByRole("button", { name: "确认删除任务记录", exact: true })).toBeFocused();
+  await expectNoBodyOverflow(page);
+  await page.screenshot({ path: testInfo.outputPath("task-dismiss-confirmation.png"), fullPage: true });
+  await removal.getByRole("button", { name: "确认删除任务记录", exact: true }).press("Enter");
+  await expect(removal.getByRole("alert")).toContainText("任务仍在处理中");
+  expect(archiveCount).toBe(0);
+  await removal.getByRole("button", { name: "确认删除任务记录", exact: true }).press("Enter");
+  await expect(removal).toBeHidden();
+  await expect(page.getByText("已删除上传任务记录，不会删除已上传资料", { exact: true })).toBeVisible();
+  await row.getByRole("button", { name: "将本批资料移至回收站", exact: true }).click();
+  const archive = page.getByRole("dialog", { name: "将本批资料移至回收站", exact: true });
+  await expect(archive).toContainText("任务记录不会删除");
+  await archive.getByRole("button", { name: "确认将本批资料移至回收站", exact: true }).click();
+  await expect(archive.getByRole("status")).toContainText("资料版本已变化，保留后续新版本");
+  await expect(archive.getByRole("status")).toContainText("机电专业协同检查清单.docx");
+  await expectInViewport(archive.getByRole("button", { name: "关闭", exact: true }).filter({ hasText: "关闭" }));
+  await expectNoBodyOverflow(page);
+  await page.screenshot({ path: testInfo.outputPath("task-archive-partial.png"), fullPage: true });
+  expect(dismissCount).toBe(2);
+  expect(archiveCount).toBe(1);
+});
+
+test("unpublished media defaults to authenticated video download with unavailable transcript choices", async ({ page }, testInfo) => {
+  await installAdminRoutes(page, "media_unpublished");
+  await page.goto("/admin/content");
+  const folder = page.viewportSize()!.width < 1024 ? page.getByTestId("managed-folder-mobile-cat-company") : page.getByTestId("managed-folder-row-cat-company");
+  await folder.getByRole("button").first().click();
+  const title = "BIM 项目交付培训视频（合成长标题用于响应式检查）";
+  await page.getByRole("button", { name: `下载“${title}”`, exact: true }).filter({ visible: true }).click();
+  const dialog = page.getByRole("dialog", { name: "下载视频资料" });
+  await expect(dialog.getByRole("radio", { name: /^仅视频/ })).toHaveAttribute("aria-checked", "true");
+  await expect(dialog.getByRole("radio", { name: /^仅转录稿/ })).toBeDisabled();
+  await expect(dialog.getByRole("radio", { name: /^视频与转录稿/ })).toBeDisabled();
+  await dialog.getByRole("radio", { name: /^仅视频/ }).focus();
+  await expect(dialog.getByRole("radio", { name: /^仅视频/ })).toBeFocused();
+  await expectInViewport(dialog.getByRole("button", { name: "开始下载" }));
+  await expectNoBodyOverflow(page);
+  await page.screenshot({ path: testInfo.outputPath("unpublished-video-download-disabled.png"), fullPage: true });
+  const request = page.waitForRequest((request) => request.method() === "GET" && request.url().includes("/media-download") && new URL(request.url()).searchParams.get("part") === "video");
+  const download = page.waitForEvent("download");
+  await dialog.getByRole("button", { name: "开始下载" }).press("Enter");
+  await request;
+  expect((await download).suggestedFilename()).toBe("synthetic-video.mp4");
+  await expect(dialog).toBeHidden();
+});

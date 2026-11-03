@@ -725,12 +725,14 @@ function UploadTasksPanel({
   onRetry,
   canTranscribe,
   canDelete,
+  canArchive,
 }: {
   activeUpload: ActiveUploadState | null;
   canRetry: (task: ManagedUploadTask) => boolean;
   onRetry: (task: ManagedUploadTask) => void;
   canTranscribe: boolean;
   canDelete: boolean;
+  canArchive: boolean;
 }) {
   const [tasks, setTasks] = useState<ManagedUploadTask[]>([]);
   const [total, setTotal] = useState(0);
@@ -750,6 +752,11 @@ function UploadTasksPanel({
   const [deleteTask, setDeleteTask] = useState<ManagedUploadTask | null>(null);
   const [deleteTasks, setDeleteTasks] = useState<ManagedUploadTask[] | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteFailures, setDeleteFailures] = useState<{ label: string; reason: string }[]>([]);
+  const [archiveTask, setArchiveTask] = useState<ManagedUploadTask | null>(null);
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [archiveResult, setArchiveResult] = useState<Awaited<ReturnType<typeof adminContentApi.archiveUploadTask>> | null>(null);
   const [transcriptionTask, setTranscriptionTask] = useState<ManagedUploadTask | null>(null);
   const [schemeId, setSchemeId] = useState("");
   const [schemes, setSchemes] = useState<TranscriptionSchemeOption[]>([]);
@@ -822,67 +829,63 @@ function UploadTasksPanel({
     }
   };
   const deleteUploadTask = async () => {
-    if (!deleteTask || deleteBusy) return;
+    if (!deleteTask || deleteBusy || deleteTask.status === "processing") return;
     setDeleteBusy(true);
+    setDeleteFailures([]);
     try {
-      const full = deleteTask.entries ? deleteTask : await adminContentApi.uploadTask(deleteTask.batch_id);
-      const items = (full.entries || []).filter((entry) => entry.item_id && entry.version_id).map((entry) => ({ item_id: entry.item_id!, expected_version_id: entry.version_id! }));
-      if (!items.length) {
-        await adminContentApi.deleteOrphanUploadTask(deleteTask.batch_id);
-        toast.success("已清理无关联资料的上传任务记录");
-        setDeleteTask(null);
-        await loadTasks(true);
-        return;
-      }
-      const result = await adminContentApi.bulkArchive(items);
-      if (result.failed) throw new Error(`有 ${result.failed} 份资料未能移入回收站`);
-      toast.success(`已将 ${result.succeeded} 份资料移入回收站`);
+      await adminContentApi.dismissUploadTask(deleteTask.batch_id);
+      toast.success("已删除上传任务记录，不会删除已上传资料");
+      setSelected((current) => current.filter((id) => id !== deleteTask.batch_id));
       setDeleteTask(null);
       await loadTasks(true);
-    } catch (caught) { toast.error(caught instanceof Error ? caught.message : "删除任务及资料失败"); }
-    finally { setDeleteBusy(false); }
+    } catch (caught) {
+      const reason = caught instanceof Error ? caught.message : "删除任务记录失败";
+      setDeleteFailures([{ label: deleteTask.target_path, reason }]);
+      toast.error(reason);
+    } finally { setDeleteBusy(false); }
   };
   const deleteUploadTasks = async () => {
-    if (!deleteTasks || deleteTasks.length === 0 || deleteBusy) return;
+    if (!deleteTasks?.length || deleteBusy) return;
     setDeleteBusy(true);
+    setDeleteFailures([]);
     const failures: { label: string; reason: string }[] = [];
-    let archivedCount = 0;
-    let cleanedCount = 0;
-    try {
-      for (const task of deleteTasks) {
-        try {
-          const full = task.entries ? task : await adminContentApi.uploadTask(task.batch_id);
-          const items = (full.entries || []).filter((entry) => entry.item_id && entry.version_id).map((entry) => ({ item_id: entry.item_id!, expected_version_id: entry.version_id! }));
-          if (!items.length) {
-            await adminContentApi.deleteOrphanUploadTask(task.batch_id);
-            cleanedCount += 1;
-            continue;
-          }
-          const result = await adminContentApi.bulkArchive(items);
-          if (result.failed) throw new Error(`有 ${result.failed} 份资料未能移入回收站`);
-          archivedCount += result.succeeded;
-        } catch (taskError) {
-          failures.push({
-            label: task.upload_mode === "folder" ? "文件夹上传" : "文件上传",
-            reason: taskError instanceof Error ? taskError.message : "删除失败",
-          });
-        }
+    const failedTasks: ManagedUploadTask[] = [];
+    for (const task of deleteTasks) {
+      try {
+        await adminContentApi.dismissUploadTask(task.batch_id);
+      } catch (caught) {
+        failedTasks.push(task);
+        failures.push({ label: task.target_path, reason: caught instanceof Error ? caught.message : "删除任务记录失败" });
       }
-      const handledCount = deleteTasks.length - failures.length;
-      if (failures.length === 0) {
-        toast.success(`已将 ${archivedCount} 份资料移入回收站${cleanedCount ? `，清理 ${cleanedCount} 条无关联记录` : ""}，共处理 ${handledCount} 个任务`);
-      } else if (handledCount > 0) {
-        toast.error(`已处理 ${handledCount} 个任务，${failures.length} 个失败：${failures.map((failure) => `${failure.label}（${failure.reason}）`).join("；")}`);
-      } else {
-        toast.error(`删除失败：${failures.map((failure) => `${failure.label}（${failure.reason}）`).join("；")}`);
-      }
+    }
+    const succeeded = deleteTasks.length - failedTasks.length;
+    if (failures.length) {
+      setDeleteFailures(failures);
+      setDeleteTasks(failedTasks);
+      toast.error(`已删除 ${succeeded} 条任务记录，${failures.length} 条失败`);
+    } else {
+      toast.success(`已删除 ${succeeded} 条上传任务记录，不会删除已上传资料`);
       setDeleteTasks(null);
-      setSelected([]);
+    }
+    setSelected(failedTasks.map((task) => task.batch_id));
+    await loadTasks(true);
+    setDeleteBusy(false);
+  };
+  const archiveUploadTask = async () => {
+    if (!archiveTask || archiveBusy || archiveTask.status === "processing") return;
+    setArchiveBusy(true);
+    setArchiveError(null);
+    try {
+      const result = await adminContentApi.archiveUploadTask(archiveTask.batch_id);
+      setArchiveResult(result);
+      if (result.failed) toast.error(`已移入 ${result.succeeded} 份资料，${result.failed} 份失败，请查看逐项原因`);
+      else toast.success(`已将 ${result.succeeded} 份资料移入回收站，任务记录仍保留`);
       await loadTasks(true);
     } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "批量删除任务失败");
-      setDeleteTasks(null);
-    } finally { setDeleteBusy(false); }
+      const reason = caught instanceof Error ? caught.message : "移入回收站失败";
+      setArchiveError(reason);
+      toast.error(reason);
+    } finally { setArchiveBusy(false); }
   };
   const openBatchTranscription = async (task: ManagedUploadTask) => {
     setTranscriptionTask(task);
@@ -1155,7 +1158,7 @@ function UploadTasksPanel({
                       destructive: true,
                       disabled: deletableSelectedTasks.length === 0,
                       disabledReason: selected.length === 0 ? "请先选择上传任务" : deletableSelectedTasks.length === 0 ? "所选任务均不可删除（进行中任务不能删除）" : undefined,
-                      onSelect: () => setDeleteTasks(deletableSelectedTasks),
+                      onSelect: () => { setDeleteFailures([]); setDeleteTasks(deletableSelectedTasks); },
                     }]
                   : []),
               ]}
@@ -1312,7 +1315,8 @@ function UploadTasksPanel({
                       >
                         <ListChecks className="size-4" />
                       </IconButton>
-                      {canDelete && task.status !== "processing" && <IconButton label="删除任务及资料" tooltip="将任务及已生成资料移入回收站" className="border border-destructive/40 text-destructive hover:bg-destructive/10" onClick={() => setDeleteTask(task)}><Trash2 className="size-4" /></IconButton>}
+                      {canDelete && <IconButton label="删除任务记录" tooltip={task.status === "processing" ? "进行中的任务不能删除" : "仅删除任务记录，不会删除已上传资料"} disabled={task.status === "processing" || deleteBusy || archiveBusy} className="border border-destructive/40 text-destructive hover:bg-destructive/10" onClick={() => { setDeleteFailures([]); setDeleteTask(task); }}><Trash2 className="size-4" /></IconButton>}
+                      {canArchive && <Button size="sm" variant="outline" disabled={task.status === "processing" || deleteBusy || archiveBusy} onClick={() => { setArchiveResult(null); setArchiveError(null); setArchiveTask(task); }}>将本批资料移至回收站</Button>}
                     </>
                   </div>
                 </li>
@@ -1381,14 +1385,15 @@ function UploadTasksPanel({
       />
       <Dialog open={Boolean(deleteTask)} onOpenChange={(open) => { if (!open && !deleteBusy) setDeleteTask(null); }}>
         <DialogContent aria-describedby="upload-delete-description">
-          <DialogHeader><DialogTitle>删除任务及资料</DialogTitle><DialogDescription id="upload-delete-description">任务记录和已生成资料将一起移入回收站，不会立即永久删除。</DialogDescription></DialogHeader>
-          <div className="max-h-64 overflow-y-auto rounded-ui-md border border-border p-3 text-ui-sm">{(deleteTask?.entries || []).filter((entry) => entry.item_id).map((entry) => <div key={entry.sequence} className="flex items-center justify-between gap-3 border-b border-border py-2 last:border-0"><span className="min-w-0 break-all">{entry.relative_path || entry.filename}</span><span className="shrink-0 text-ui-xs text-muted-foreground">移入回收站</span></div>)}</div>
-          <DialogFooter><Button variant="outline" disabled={deleteBusy} onClick={() => setDeleteTask(null)}>取消</Button><Button variant="destructive" disabled={deleteBusy} onClick={() => void deleteUploadTask()}><Trash2 className="size-4" />{deleteBusy ? "处理中…" : "确认移入回收站"}</Button></DialogFooter>
+          <DialogHeader><DialogTitle>删除任务记录</DialogTitle><DialogDescription id="upload-delete-description">仅从任务列表删除此记录，不会删除已上传资料，也不会移入回收站。</DialogDescription></DialogHeader>
+          <p className="break-all text-ui-sm">{deleteTask?.target_path}</p>
+          {deleteFailures.map((failure, index) => <p key={index} role="alert" className="break-all text-ui-sm text-destructive">{failure.label}：{failure.reason}</p>)}
+          <DialogFooter><Button variant="outline" disabled={deleteBusy} onClick={() => setDeleteTask(null)}>取消</Button><Button variant="destructive" disabled={deleteBusy} onClick={() => void deleteUploadTask()}><Trash2 className="size-4" />{deleteBusy ? "处理中…" : "确认删除任务记录"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
       <Dialog open={Boolean(deleteTasks)} onOpenChange={(open) => { if (!open && !deleteBusy) setDeleteTasks(null); }}>
         <DialogContent aria-describedby="upload-batch-delete-description">
-          <DialogHeader><DialogTitle>删除所选上传任务</DialogTitle><DialogDescription id="upload-batch-delete-description">选中的 {deleteTasks?.length ?? 0} 个任务记录和已生成资料将一起移入回收站，不会立即永久删除。进行中的任务已排除在外。</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>删除所选上传任务</DialogTitle><DialogDescription id="upload-batch-delete-description">选中的 {deleteTasks?.length ?? 0} 个任务仅删除记录，不会删除已上传资料，也不会移入回收站。进行中的任务已排除在外。</DialogDescription></DialogHeader>
           <ul className="max-h-64 divide-y divide-border overflow-y-auto rounded-ui-md border border-border text-ui-sm">
             {(deleteTasks || []).map((task) => (
               <li key={task.batch_id} className="flex items-center justify-between gap-3 px-3 py-2">
@@ -1397,7 +1402,17 @@ function UploadTasksPanel({
               </li>
             ))}
           </ul>
-          <DialogFooter><Button variant="outline" disabled={deleteBusy} onClick={() => setDeleteTasks(null)}>取消</Button><Button variant="destructive" disabled={deleteBusy} onClick={() => void deleteUploadTasks()}><Trash2 className="size-4" />{deleteBusy ? "处理中…" : `确认移入回收站（${deleteTasks?.length ?? 0}）`}</Button></DialogFooter>
+          {deleteFailures.length > 0 && <div role="alert" className="max-h-48 overflow-y-auto text-ui-sm text-destructive">{deleteFailures.map((failure, index) => <p key={index} className="break-all">{failure.label}：{failure.reason}</p>)}</div>}
+          <DialogFooter><Button variant="outline" disabled={deleteBusy} onClick={() => setDeleteTasks(null)}>取消</Button><Button variant="destructive" disabled={deleteBusy} onClick={() => void deleteUploadTasks()}><Trash2 className="size-4" />{deleteBusy ? "处理中…" : `确认删除任务记录（${deleteTasks?.length ?? 0}）`}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(archiveTask)} onOpenChange={(open) => { if (!open && !archiveBusy) setArchiveTask(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>将本批资料移至回收站</DialogTitle><DialogDescription>仅处理此批次上传时关联的资料版本，不会改为删除后续新版本；版本已变化或无权限的资料会保留并显示原因。任务记录不会删除，可在回收站恢复成功移入的资料。</DialogDescription></DialogHeader>
+          <p className="break-all text-ui-sm">{archiveTask?.target_path}</p>
+          {archiveError && <p role="alert" className="break-all text-ui-sm text-destructive">{archiveError}</p>}
+          {archiveResult && <div role="status" className="space-y-2 text-ui-sm"><p>已移入 {archiveResult.succeeded} 份，失败 {archiveResult.failed} 份。</p><ul className="max-h-64 space-y-2 overflow-y-auto">{archiveResult.results.map((result, index) => { const entry = archiveTask?.entries?.find((entry) => entry.version_id === result.version_id || Boolean(result.item_id && entry.item_id === result.item_id)); return <li key={index} className="break-all">{entry?.relative_path || entry?.filename || `第 ${index + 1} 项资料`}：{result.status === "succeeded" ? "已移入回收站" : result.message || "移入失败，请刷新资料后检查权限与版本"}</li>; })}</ul></div>}
+          <DialogFooter><Button variant="outline" disabled={archiveBusy} onClick={() => setArchiveTask(null)}>{archiveResult ? "关闭" : "取消"}</Button>{!archiveResult && <Button variant="destructive" disabled={archiveBusy} onClick={() => void archiveUploadTask()}>{archiveBusy ? "处理中…" : "确认将本批资料移至回收站"}</Button>}</DialogFooter>
         </DialogContent>
       </Dialog>
       <Dialog open={Boolean(transcriptionTask)} onOpenChange={(open) => { if (!open && !transcriptionBusy) setTranscriptionTask(null); }}>
@@ -3984,11 +3999,15 @@ export function AdminManagedContentPage() {
 
   const openMediaDownload = (item: ManagedContentItem) => {
     setDownloadTarget(item);
-    setDownloadPart("all");
+    setDownloadPart(item.has_published_head ? "all" : "video");
   };
 
   const downloadMedia = async () => {
-    if (!downloadTarget) return;
+    if (!downloadTarget || busyAction?.endsWith(":download")) return;
+    if (downloadPart !== "video" && !downloadTarget.has_published_head) {
+      toast.error("尚无正式发布的转录稿，请选择仅视频");
+      return;
+    }
     const fallbackFilename =
       downloadPart === "video"
         ? downloadTarget.original_filename
@@ -5537,7 +5556,8 @@ export function AdminManagedContentPage() {
         <UploadTasksPanel
           activeUpload={activeUpload}
           canTranscribe={false}
-          canDelete={can("item.archive_draft") || can("item.archive_published")}
+          canDelete={can("item.upload")}
+          canArchive={can("item.archive_draft") || can("item.archive_published")}
           canRetry={(task) =>
             Boolean(lastUploadAttempt?.batchId === task.batch_id)
           }
@@ -8597,7 +8617,8 @@ export function AdminManagedContentPage() {
                 type="button"
                 role="radio"
                 aria-checked={downloadPart === option.value}
-                className={`flex min-h-16 items-center gap-3 rounded-ui-md border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${downloadPart === option.value ? "border-primary bg-primary/5" : "border-border hover:bg-surface-muted"}`}
+                disabled={Boolean(busyAction?.endsWith(":download")) || (option.value !== "video" && !downloadTarget?.has_published_head)}
+                className={`disabled:cursor-not-allowed disabled:opacity-50 flex min-h-16 items-center gap-3 rounded-ui-md border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${downloadPart === option.value ? "border-primary bg-primary/5" : "border-border hover:bg-surface-muted"}`}
                 onClick={() => setDownloadPart(option.value)}
               >
                 <span
@@ -8614,7 +8635,7 @@ export function AdminManagedContentPage() {
                     {option.title}
                   </span>
                   <span className="mt-0.5 block text-ui-xs text-muted-foreground">
-                    {option.description}
+                    {option.value !== "video" && !downloadTarget?.has_published_head ? "尚无正式发布的转录稿，暂不可下载" : option.description}
                   </span>
                 </span>
                 {downloadPart === option.value && (
@@ -8831,7 +8852,7 @@ export function AdminManagedContentPage() {
                 type="file"
                 className="sr-only"
                 aria-label="选择替换文件"
-                accept=".pdf,.md,.docx,.xlsx,.pptx,.xmind"
+                accept=".pdf,.md,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.xmind"
                 onChange={(event) => {
                   setUpdateFile(event.target.files?.[0] || null);
                   setUpdateConflict(null);
@@ -9006,8 +9027,8 @@ export function AdminManagedContentPage() {
               multiple
               accept={
                 isSystemAdmin
-                  ? ".pdf,.md,.docx,.xlsx,.pptx,.xmind,.mp4"
-                  : ".pdf,.md,.docx,.xlsx,.pptx,.xmind"
+                  ? ".pdf,.md,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.xmind,.mp4"
+                  : ".pdf,.md,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.xmind"
               }
               className="sr-only"
               disabled={uploading || uploadChecking || folderScanning}

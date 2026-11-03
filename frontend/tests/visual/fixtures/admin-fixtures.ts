@@ -1,6 +1,6 @@
 import type { Page, Route } from "@playwright/test";
 
-export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "asr_identity_unavailable" | "publication_failure" | "media_progress" | "media_stale_cleanup" | "media_permanent_failure" | "media_upload" | "media_conflict" | "media_library" | "shared_library";
+export type AdminScenario = "normal" | "loading" | "empty" | "error" | "disabled" | "asr_identity_unavailable" | "publication_failure" | "media_progress" | "media_stale_cleanup" | "media_permanent_failure" | "media_upload" | "media_conflict" | "media_library" | "media_unpublished" | "shared_library";
 export type WorkspaceUser = "admin" | "bim_engineer" | "member";
 
 const admin = {
@@ -1090,7 +1090,7 @@ export async function installAdminRoutes(
       return task ? json(route, task) : json(route, { detail: "合成任务不存在" }, 404);
     }
     if (path === "/api/admin/content/items-page") {
-      const fixtureItems = scenario === "media_library" ? [mediaLibraryItem] : scenario === "shared_library" ? [sharedManagedItem] : items;
+      const fixtureItems = scenario === "media_unpublished" ? [{ ...mediaLibraryItem, has_published_head: false, lifecycle_status: "pending_publication", has_pending_revision: false }] : scenario === "media_library" ? [mediaLibraryItem] : scenario === "shared_library" ? [sharedManagedItem] : items;
       const rows = scenario === "empty" ? [] : fixtureItems.map((item) => item.lifecycle_status === "publication_failed" && scenario === "publication_failure" ? { ...item, latest_publication_status: "failed", publication_attempt_count: 4, publication_failure: { code: "pdf_password_required", message: "PDF 需要密码才能解析。", retryable: false, recommended_action: "请上传已解除密码保护的 PDF。" } } : item);
       return json(route, { items: rows, total: rows.length, status_counts: rows.reduce<Record<string, number>>((counts, item) => ({ ...counts, [item.lifecycle_status]: (counts[item.lifecycle_status] || 0) + 1 }), {}) });
     }
