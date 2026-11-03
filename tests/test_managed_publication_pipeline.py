@@ -196,7 +196,14 @@ def test_pdf_preflight_reports_password_and_crypto_failures(tmp_path, monkeypatc
 
 def test_cloud_parse_uses_bounded_ascii_identity_for_long_filename(tmp_path, monkeypatch):
     part = tmp_path / (("超长规范名称" * 30) + ".pdf")
-    part.write_bytes(b"synthetic-pdf")
+    # Exercise the complete original logical name without depending on the
+    # filesystem's per-component byte limit (255 bytes on Linux). Only the
+    # synthetic payload read is mocked; the cloud identity assertions stay intact.
+    original_read_bytes = type(part).read_bytes
+    monkeypatch.setattr(
+        type(part), "read_bytes",
+        lambda path: b"synthetic-pdf" if path == part else original_read_bytes(path),
+    )
     observed = {}
 
     class Response:
