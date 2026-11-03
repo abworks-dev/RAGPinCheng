@@ -570,3 +570,60 @@ if ($script:skipped.Count -ne 200 -or $script:skippedDroppedCount -ne 5) { throw
 Discover @() | Out-Null
 if ($script:skipped.Count -ne 0 -or $script:skippedDroppedCount -ne 0) { throw 'Discovery did not reset diagnostics' }
 """)
+
+
+_WHEEL_SEEDS = ['shared-wheel-seed', 'qualified-faster-whisper-wheel-seed', 'qualified-whisperx-wheel-seed']
+
+
+@pytest.mark.parametrize('seed', _WHEEL_SEEDS)
+def test_old_flat_wheel_seed_only_is_selected(run_ps, seed):
+    run_ps('$seed = ' + _quote(seed) + r"""
+Put ('asr-data/dependency-runs/candidate-2/' + $seed + '/torch.WHL') | Out-Null
+Put ('asr-data/dependency-runs/candidate-9/' + $seed + '/current.whl') | Out-Null
+Put ('asr-data/dependency-runs/unknown/' + $seed + '/unknown.whl') | Out-Null
+$items = @(Discover @())
+if ($items.Count -ne 1 -or $items[0].kind -ne 'asr-wheel-seed-payload' -or $items[0].identity -ne 'candidate-2') { throw 'Wheel seed scope incorrect' }
+$seedRoot = Join-Path $AsrDataRoot ('dependency-runs/candidate-2/' + $seed)
+$owner = Split-Path $seedRoot -Parent
+if (-not (Referenced $seedRoot @((Join-Path $owner 'venv/Scripts/python.exe')))) { throw 'Owning run live reference ignored' }
+Put 'asr-data/dependency-runs/candidate-2/.lock' | Out-Null
+if (-not (Has-ActiveMarker $seedRoot) -or (Discover @()).Count) { throw 'Owning run marker ignored' }
+""")
+
+
+@pytest.mark.parametrize('artifact', ['unknown.bin', 'report.json', 'subdirectory/pkg.whl', 'models/weights.bin'])
+def test_wheel_seed_unknown_or_protected_content_is_retained(run_ps, artifact):
+    run_ps('Put ' + _quote('asr-data/dependency-runs/candidate-2/shared-wheel-seed/' + artifact) + r""" | Out-Null
+if ((Discover @()).Count) { throw 'Unknown or protected seed content selected' }
+if ($script:skipped.Count -ne 1 -or $script:skipped[0].reason_code -notin @('unsupported-wheel-seed-content','protected-content')) { throw 'Missing seed retention reason' }
+""")
+
+
+def test_empty_wheel_seed_is_not_a_deletion_candidate(run_ps):
+    run_ps(r"""
+[IO.Directory]::CreateDirectory((Join-Path $AsrDataRoot 'dependency-runs/candidate-2/shared-wheel-seed')) | Out-Null
+if ((Discover @()).Count) { throw 'Empty seed selected' }
+""")
+
+
+@pytest.mark.parametrize('change', ['reference', 'marker'])
+def test_wheel_seed_owning_run_change_blocks_during_apply_before_deletion(run_ps, change):
+    setup = _SANDBOX_ENTRY.replace('candidate-2/venv/python.exe', 'candidate-2/shared-wheel-seed/torch.whl')
+    mutation = r"""
+if ($script:referenceCalls -eq 3) { return @((Join-Path $AsrDataRoot 'dependency-runs/candidate-2/venv/Scripts/python.exe')) }
+""" if change == 'reference' else r"""
+if ($script:referenceCalls -eq 3) { Put 'asr-data/dependency-runs/candidate-2/.active' | Out-Null }
+"""
+    run_ps(setup + r"""
+$script:referenceCalls=0
+function References {
+    $script:referenceCalls++
+""" + mutation + r"""
+    return @()
+}
+Expect-Throw { & $entry } '*Cleanup stopped; audit records*'
+if ($script:referenceCalls -ne 3) { throw 'Owning-run mutation did not reach per-item recheck' }
+if (-not (Test-Path $payloadRoot)) { throw 'Seed removed after owning run became live' }
+$failed = Read-Json $AuditPath
+if (@($failed.deleted).Count -or $null -ne $failed.pending -or $failed.status -ne 'failed-possibly-partial') { throw 'Unexpected partial deletion before reference stop' }
+""")
