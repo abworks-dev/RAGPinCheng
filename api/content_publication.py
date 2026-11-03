@@ -165,6 +165,14 @@ def run_content_publication(index_job_id: str) -> None:
 
     try:
         object_path = _storage.resolve_object(row["storage_rel_path"])
+        if not object_path.is_file():
+            raise FileNotFoundError('managed_source_unavailable')
+        # Attachment visibility uses the immutable object directly; do not copy
+        # potentially huge native models into the RAG published-source tree.
+        from .content_attachment_types import ATTACHMENT_TYPES
+        if row['doc_type'] in ATTACHMENT_TYPES:
+            _promote(index_job_id)
+            return
         source_path = _storage.materialize_published_source(
             object_path,
             content_item_id=row["item_id"],

@@ -228,7 +228,13 @@ logger = logging.getLogger(__name__)
 _storage = ContentStorage(CONTENT_ROOT)
 _MAX_BULK_DOWNLOAD_BYTES = int(os.getenv("MAX_BULK_DOWNLOAD_MB", "1024")) * 1024 * 1024
 _MAX_RELATIVE_PATH_LENGTH = 1024
+from .content_attachments import (
+    ATTACHMENT_TYPES, ATTACHMENT_EXTENSIONS, authorized_version,
+    can_view_drafts, preview_descriptor, router as attachment_router,
+)
+router.include_router(attachment_router)
 _DOC_TYPES = {
+    **ATTACHMENT_EXTENSIONS,
     ".pdf": "pdf",
     ".md": "markdown",
     ".docx": "docx",
@@ -2032,6 +2038,7 @@ def _content_item_dto(
     *,
     retention_days: int = CONTENT_TRASH_RETENTION_DAYS,
     warning_days: int = CONTENT_TRASH_EXPIRING_WARNING_DAYS,
+    conn: sqlite3.Connection | None = None,
 ) -> ManagedContentItemDTO:
     archive_metadata = json.loads(row["archive_metadata_json"] or "{}") if "archive_metadata_json" in row.keys() else {}
     archived_at = row["archived_at"] if "archived_at" in row.keys() else None
@@ -2085,7 +2092,13 @@ def _content_item_dto(
     media_version_id = row["version_id"] or (
         f"media-pending-{row['media_id']}" if row["media_id"] else None
     )
+    attachment_preview = preview_descriptor(conn, row) if conn is not None and row['doc_type'] in ATTACHMENT_TYPES else {}
+    if attachment_preview:
+        preview_status = attachment_preview['preview_status']
     return ManagedContentItemDTO(
+        rag_enabled=row['doc_type'] not in ATTACHMENT_TYPES,
+        preview_kind=attachment_preview.get('preview_kind', 'none'),
+        preview_url=attachment_preview.get('preview_url'),
         item_id=row["item_id"],
         title=row["title"],
         content_kind=row["content_kind"],
@@ -2157,6 +2170,7 @@ def get_content_items(
         category_id=category_id,
         lifecycle_status=lifecycle_status,
         content_kind=content_kind,
+        attachment_published_only=not can_view_drafts(conn, _user),
     )
     summary_version_ids = [
         str(row["version_id"])
@@ -2167,7 +2181,7 @@ def get_content_items(
     ]
     summaries = list_managed_version_index_summaries(summary_version_ids)
     return [
-        _content_item_dto(row, summaries.get(str(row["version_id"])))
+        _content_item_dto(row, summaries.get(str(row["version_id"])), conn=conn)
         for row in rows
     ]
 
@@ -2179,7 +2193,7 @@ def get_content_items_page(
     lifecycle_status: str | None = None,
     source_origin: str | None = None,
     content_kind: Literal["document", "media_transcript"] | None = None,
-    doc_type: Literal["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "xmind", "markdown", "transcript", "other"] | None = None,
+    doc_type: Literal["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "xmind", "markdown", "transcript", "jpg", "jpeg", "png", "dwg", "dxf", "rvt", "che", "nwd", "nwc", "ifc", "skp", "max", "other"] | None = None,
     sort_by: Literal["doc_type"] | None = None,
     sort_direction: Literal["asc", "desc"] = "asc",
     limit: int = Query(25, ge=1, le=100),
@@ -2194,6 +2208,7 @@ def get_content_items_page(
         lifecycle_status=lifecycle_status,
         source_origin=source_origin,
         content_kind=content_kind,
+        attachment_published_only=not can_view_drafts(conn, _user),
         doc_type=doc_type,
         sort_by=sort_by,
         sort_direction=sort_direction,
@@ -2209,7 +2224,7 @@ def get_content_items_page(
     ]
     summaries = list_managed_version_index_summaries(summary_version_ids)
     return ManagedContentListResponse(
-        items=[_content_item_dto(row, summaries.get(str(row["version_id"]))) for row in rows],
+        items=[_content_item_dto(row, summaries.get(str(row["version_id"])), conn=conn) for row in rows],
         total=total,
         status_counts=status_counts,
     )
@@ -2653,7 +2668,7 @@ def move_managed_content_item(
     row = next((entry for entry in list_content_items(conn) if entry["item_id"] == item_id), None)
     if row is None:
         raise HTTPException(status_code=404, detail="资料不存在")
-    return _content_item_dto(row)
+    return _content_item_dto(row, conn=conn)
 
 
 @router.post(
@@ -2780,7 +2795,7 @@ def rename_managed_content_item(
     row = next((entry for entry in list_content_items(conn) if entry["item_id"] == item_id), None)
     if row is None:
         raise HTTPException(status_code=404, detail="资料不存在")
-    return _content_item_dto(row)
+    return _content_item_dto(row, conn=conn)
 
 
 @router.post("/items/{item_id}/versions", response_model=ManagedContentItemDTO)
@@ -2878,7 +2893,7 @@ async def update_managed_content_item(
     row = next((entry for entry in list_content_items(conn) if entry["item_id"] == item_id), None)
     if row is None:
         raise HTTPException(status_code=404, detail="资料不存在")
-    return _content_item_dto(row)
+    return _content_item_dto(row, conn=conn)
 
 
 @router.get("/versions/{version_id}/file")
@@ -2888,24 +2903,25 @@ def get_content_version_file(
     user: CurrentUser = Depends(require_content_permission("item.view")),
     conn: sqlite3.Connection = Depends(get_db),
 ):
-    row = conn.execute(
-        """SELECT v.original_filename,v.doc_type,o.storage_rel_path
-           FROM content_versions v
-           JOIN content_items i ON i.id=v.item_id
-           JOIN content_objects o ON o.sha256=v.object_sha256
-           WHERE v.id=? AND i.archived_at IS NULL""",
-        (version_id,),
-    ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail="资料文件不存在")
+    _require_feature()
+    row = authorized_version(conn, user, version_id)
     try:
-        path = _storage.resolve_object(row["storage_rel_path"])
+        path = _storage.resolve_object(row['storage_rel_path'])
+        if not path.is_file():
+            raise FileNotFoundError
     except (FileNotFoundError, ValueError):
-        raise HTTPException(status_code=404, detail="资料文件不存在")
-    disposition = "attachment" if download or row["doc_type"] != "pdf" else "inline"
-    if disposition == "attachment" and not has_content_permission(conn, user, "item.download"):
-        raise HTTPException(status_code=403, detail="当前账号没有下载资料的权限")
-    return FileResponse(path, filename=row["original_filename"], content_disposition_type=disposition)
+        raise HTTPException(status_code=404, detail='资料文件不存在')
+    attachment = row['doc_type'] in ATTACHMENT_TYPES
+    disposition = 'attachment' if download or row['doc_type'] != 'pdf' else 'inline'
+    needs_download = download or (attachment and row['doc_type'] not in {'jpg', 'jpeg', 'png', 'dxf', 'ifc'}) or (not attachment and disposition == 'attachment')
+    if needs_download and not has_content_permission(conn, user, 'item.download'):
+        raise HTTPException(status_code=403, detail='当前账号没有下载资料的权限')
+    if attachment:
+        audit_event(conn, 'content.downloaded' if needs_download else 'content.previewed', actor_user_id=user.id, item_id=row['item_id'], version_id=version_id)
+        conn.commit()
+    return FileResponse(path, filename=row['original_filename'], content_disposition_type=disposition,
+                        media_type='application/octet-stream' if attachment else None,
+                        headers={'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-store'})
 
 
 def _xmind_topic_payload(topic: XMindTopic) -> dict[str, object]:
@@ -2923,16 +2939,8 @@ def get_xmind_preview(
     _user: CurrentUser = Depends(require_content_permission("item.view")),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> XMindPreviewDTO:
-    row = conn.execute(
-        """SELECT v.doc_type,o.storage_rel_path
-           FROM content_versions v
-           JOIN content_items i ON i.id=v.item_id
-           JOIN content_objects o ON o.sha256=v.object_sha256
-           WHERE v.id=? AND i.archived_at IS NULL""",
-        (version_id,),
-    ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail="资料文件不存在")
+    _require_feature()
+    row = authorized_version(conn, _user, version_id)
     if row["doc_type"] != "xmind":
         raise HTTPException(status_code=400, detail="该资料不是 XMind 文件")
     try:
@@ -3201,11 +3209,14 @@ def _safe_bulk_archive_name(filename: str, used_names: set[str]) -> str:
 def _resolve_bulk_download_entries(
     conn: sqlite3.Connection,
     version_ids: list[str],
+    user: CurrentUser | None = None,
 ) -> list[tuple[Path, str]]:
     total_bytes = 0
     entries: list[tuple[Path, str]] = []
     used_names: set[str] = set()
     for version_id in _validate_bulk_version_ids(version_ids):
+        if user is not None:
+            authorized_version(conn, user, version_id)
         row = conn.execute(
             """SELECT v.original_filename,o.storage_rel_path
                FROM content_versions v
@@ -3247,6 +3258,7 @@ def _create_bulk_download_archive(entries: list[tuple[Path, str]]) -> Path:
 def _resolve_category_download_entries(
     conn: sqlite3.Connection,
     category_id: str,
+    user: CurrentUser | None = None,
 ) -> tuple[str, list[tuple[Path, str]]]:
     category = conn.execute(
         "SELECT display_code,display_name FROM category_nodes WHERE id=? AND is_active=1",
@@ -3276,15 +3288,26 @@ def _resolve_category_download_entries(
            FROM descendants d
            JOIN content_items i ON i.category_id=d.id
            JOIN content_versions v ON v.item_id=i.id
-            AND v.version_number=(
-                SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id
-            )
+            AND v.id=CASE WHEN ? AND EXISTS (
+                SELECT 1 FROM content_versions av WHERE av.item_id=i.id AND av.doc_type IN ('jpg','jpeg','png','dwg','dxf','rvt','che','nwd','nwc','ifc','skp','max')
+            ) THEN (SELECT current_version_id FROM content_item_heads WHERE item_id=i.id)
+            ELSE (SELECT id FROM content_versions v2 WHERE v2.item_id=i.id ORDER BY version_number DESC LIMIT 1) END
            JOIN content_objects o ON o.sha256=v.object_sha256
            WHERE i.archived_at IS NULL
              AND i.content_kind='document'
            ORDER BY d.relative_path COLLATE NOCASE, v.original_filename COLLATE NOCASE""",
-        (category_id,),
+        (category_id, bool(user is not None and not can_view_drafts(conn, user))),
     ).fetchall()
+    if user is not None:
+        visible = []
+        for row in rows:
+            try:
+                authorized_version(conn, user, row['version_id'])
+                visible.append(row)
+            except HTTPException as exc:
+                if exc.status_code != 404:
+                    raise
+        rows = visible
     if not rows:
         raise HTTPException(status_code=404, detail="文件夹内没有可下载的文档资料")
     total_bytes = 0
@@ -3610,7 +3633,7 @@ def bulk_download_content(
     conn: sqlite3.Connection = Depends(get_db),
 ):
     _require_feature()
-    entries = _resolve_bulk_download_entries(conn, body.version_ids)
+    entries = _resolve_bulk_download_entries(conn, body.version_ids, user)
     try:
         archive_path = _create_bulk_download_archive(entries)
     except OSError as exc:
@@ -3630,7 +3653,7 @@ def download_category_content(
     conn: sqlite3.Connection = Depends(get_db),
 ):
     _require_feature()
-    folder_name, entries = _resolve_category_download_entries(conn, category_id)
+    folder_name, entries = _resolve_category_download_entries(conn, category_id, _user)
     try:
         archive_path = _create_bulk_download_archive(entries)
     except OSError as exc:

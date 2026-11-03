@@ -84,6 +84,7 @@ import {
 import { toast } from "../../components/ui/toast";
 import { useAuth } from "../../context/AuthContext";
 import { usePdfPreview } from "../../hooks/usePdfPreview";
+import { DOCUMENT_ACCEPT, isAttachmentFormat } from "../../lib/attachment-formats";
 import { useVideoPlayer } from "../../hooks/useVideoPlayer";
 import type {
   BulkManagedContentResult,
@@ -1454,6 +1455,7 @@ const documentTypeOptions = [
   ["xmind", "XMind"],
   ["markdown", "Markdown"],
   ["transcript", "视频转录稿"],
+  ...["jpg", "jpeg", "png", "dwg", "dxf", "rvt", "che", "nwd", "nwc", "ifc", "skp", "max"].map((format) => [format, format.toUpperCase()] as const),
   ["other", "其他"],
 ] as const;
 
@@ -2215,6 +2217,7 @@ export function AdminManagedContentPage() {
   const { state } = useAuth();
   const {
     open: openDocumentPreview,
+    openVersion,
     openXMind,
     state: previewState,
   } = usePdfPreview();
@@ -2453,7 +2456,7 @@ export function AdminManagedContentPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const updateFileInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    const accept = ".pdf,.md,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.xmind";
+    const accept = DOCUMENT_ACCEPT;
     if (fileInputRef.current) fileInputRef.current.accept = accept;
     if (updateFileInputRef.current) updateFileInputRef.current.accept = accept;
   });
@@ -3026,7 +3029,7 @@ export function AdminManagedContentPage() {
     const supportsVideo = isSystemAdmin;
     const supported = incoming.filter(
       (file) =>
-        /\.(pdf|md|doc|docx|xls|xlsx|ppt|pptx|xmind)$/i.test(file.name) ||
+        /\.(pdf|md|doc|docx|xls|xlsx|ppt|pptx|xmind|jpg|jpeg|png|dwg|dxf|rvt|che|nwd|nwc|ifc|skp|max)$/i.test(file.name) ||
         (supportsVideo && /\.mp4$/i.test(file.name)),
     );
     setListDropActive(false);
@@ -3697,7 +3700,7 @@ export function AdminManagedContentPage() {
     const supportsVideo = isSystemAdmin;
     const supported = incoming.filter(
       (file) =>
-        /\.(pdf|md|doc|docx|xls|xlsx|ppt|pptx|xmind)$/i.test(file.name) ||
+        /\.(pdf|md|doc|docx|xls|xlsx|ppt|pptx|xmind|jpg|jpeg|png|dwg|dxf|rvt|che|nwd|nwc|ifc|skp|max)$/i.test(file.name) ||
         (supportsVideo && /\.mp4$/i.test(file.name)),
     );
     const oversized = supported.filter(
@@ -4797,7 +4800,7 @@ export function AdminManagedContentPage() {
       item.reclassification_status || "",
     );
     const previewable =
-      item.doc_type === "xmind" ||
+      isAttachmentFormat(item.doc_type) || item.doc_type === "xmind" ||
       Boolean(
         item.preview_parent_id &&
         ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"].includes(
@@ -5036,7 +5039,9 @@ export function AdminManagedContentPage() {
             className="border border-border max-sm:size-10"
             disabled={disabled || !previewable}
             onClick={() =>
-              item.doc_type === "xmind"
+              isAttachmentFormat(item.doc_type)
+                ? openVersion(item.version_id, item.title, item.doc_type)
+                : item.doc_type === "xmind"
                 ? openXMind(item.version_id, item.title)
                 : openDocumentPreview(
                     item.preview_parent_id!,
@@ -8100,7 +8105,7 @@ export function AdminManagedContentPage() {
                     <History className="size-4" />
                     操作记录
                   </Button>
-                  {detail.doc_type === "xmind" ? (
+                  {isAttachmentFormat(detail.doc_type) ? <Button variant="outline" onClick={() => openVersion(detail.version_id, detail.title, detail.doc_type, "managed-content-detail")}><Eye className="size-4" />预览文件</Button> : detail.doc_type === "xmind" ? (
                     <Button
                       variant="outline"
                       onClick={() =>
@@ -8852,7 +8857,7 @@ export function AdminManagedContentPage() {
                 type="file"
                 className="sr-only"
                 aria-label="选择替换文件"
-                accept=".pdf,.md,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.xmind"
+                accept={DOCUMENT_ACCEPT}
                 onChange={(event) => {
                   setUpdateFile(event.target.files?.[0] || null);
                   setUpdateConflict(null);
@@ -9027,8 +9032,8 @@ export function AdminManagedContentPage() {
               multiple
               accept={
                 isSystemAdmin
-                  ? ".pdf,.md,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.xmind,.mp4"
-                  : ".pdf,.md,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.xmind"
+                  ? DOCUMENT_ACCEPT + ",.mp4"
+                  : DOCUMENT_ACCEPT
               }
               className="sr-only"
               disabled={uploading || uploadChecking || folderScanning}

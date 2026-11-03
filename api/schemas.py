@@ -656,6 +656,9 @@ class PublicationFailureDTO(BaseModel):
 
 
 class ManagedContentItemDTO(BaseModel):
+    rag_enabled: bool = True
+    preview_kind: Literal['image', 'pdf', 'dxf', 'ifc', 'none'] = 'none'
+    preview_url: str | None = None
     item_id: str
     title: str
     content_kind: str

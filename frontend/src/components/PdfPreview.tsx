@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useRef,
@@ -8,10 +10,13 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import "react-pdf/dist/esm/Page/AnnotationLayer.css";
 import "react-pdf/dist/esm/Page/TextLayer.css";
 import { ArrowLeft, Hand, Minus, MousePointer2, Plus } from "lucide-react";
 import { usePdfPreview } from "../hooks/usePdfPreview";
+import { isAttachmentFormat } from "../lib/attachment-formats";
+const AttachmentPreview = lazy(() => import("./AttachmentPreview"));
 import { DocxPreview } from "./DocxPreview";
 import { ResourcePreviewShell } from "./ResourcePreviewShell";
 import { SpreadsheetPreview } from "./SpreadsheetPreview";
@@ -19,8 +24,8 @@ import { XMindPreview } from "./XMindPreview";
 import { IconButton } from "./ui/icon-button";
 import { PreviewZoomControls } from "./PreviewZoomControls";
 
-// PDF.js worker — use the CDN build so we don't need to bundle it.
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+// Match the locked PDF.js version and keep previews entirely same-origin.
+pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 type ZoomMode = "fit-page" | "fit-width" | "actual" | "custom";
 type InteractionMode = "pan" | "select";
@@ -431,6 +436,8 @@ export function PdfPreview() {
       <ArrowLeft className="size-4" />
     </IconButton>
   ) : null;
+
+  if (state.versionId && isAttachmentFormat(state.docType)) return <Suspense fallback={<ResourcePreviewShell open title={state.title} onClose={close}><p role="status" className="p-4">正在加载预览…</p></ResourcePreviewShell>}><AttachmentPreview key={state.versionId} versionId={state.versionId} title={state.title} onClose={close} backLabel={returnLabel} returnFocusTarget={state.returnFocusTarget} /></Suspense>;
 
   return (
     <ResourcePreviewShell open={open} title={state.title} subtitle={typeLabel} onClose={close} backAction={backAction} toolbar={toolbar}>

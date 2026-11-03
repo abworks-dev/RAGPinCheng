@@ -24,6 +24,7 @@ from src.config import (
     CONTENT_ROOT,
 )
 
+from .content_attachment_types import ATTACHMENT_TYPES
 from .content_storage import ContentStorage
 from .content_store import (
     _category_path,
@@ -116,6 +117,7 @@ def _latest_item_rows(
     category_ids: Iterable[str],
     *,
     include_archived: bool,
+    attachment_published_only: bool = False,
 ) -> list[sqlite3.Row]:
     ids = list(dict.fromkeys(category_ids))
     if not ids:
@@ -124,12 +126,14 @@ def _latest_item_rows(
     archived_clause = "" if include_archived else "AND i.archived_at IS NULL"
     return conn.execute(
         f"""SELECT i.id AS item_id,i.title,i.content_kind,i.category_id,i.archived_at,
-                   v.id AS version_id,v.original_filename,v.lifecycle_status,v.object_sha256,
+                   v.id AS version_id,v.original_filename,v.lifecycle_status,v.object_sha256,v.doc_type,
+                   EXISTS(SELECT 1 FROM content_publications p WHERE p.version_id=v.id AND p.status='published') AS was_published,
                    COALESCE(o.size_bytes,0) AS size_bytes,o.storage_rel_path
             FROM content_items i
-            JOIN content_versions v ON v.item_id=i.id AND v.version_number=(
-                SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=i.id
-            )
+            JOIN content_versions v ON v.item_id=i.id AND v.id=CASE WHEN {int(attachment_published_only)} AND EXISTS (
+                SELECT 1 FROM content_versions av WHERE av.item_id=i.id AND av.doc_type IN ('jpg','jpeg','png','dwg','dxf','rvt','che','nwd','nwc','ifc','skp','max')
+            ) THEN (SELECT current_version_id FROM content_item_heads WHERE item_id=i.id)
+            ELSE (SELECT id FROM content_versions v2 WHERE v2.item_id=i.id ORDER BY version_number DESC LIMIT 1) END
             LEFT JOIN content_objects o ON o.sha256=v.object_sha256
             WHERE i.category_id IN ({placeholders}) {archived_clause}
             ORDER BY i.updated_at DESC,i.id""",
@@ -143,6 +147,7 @@ def _direct_item_row(
     expected_version_id: str,
     *,
     include_archived: bool,
+    attachment_published_only: bool = False,
 ) -> sqlite3.Row:
     item = conn.execute(
         "SELECT category_id FROM content_items WHERE id=?", (item_id,)
@@ -151,6 +156,7 @@ def _direct_item_row(
         conn,
         [str(item["category_id"])] if item is not None else [],
         include_archived=include_archived,
+        attachment_published_only=attachment_published_only,
     )
     row = next((entry for entry in rows if str(entry["item_id"]) == item_id), None)
     if row is None:
@@ -177,6 +183,9 @@ def _item_eligibility(
     if operation == "download":
         if "item.download" not in permissions:
             return False, "当前账号没有下载权限"
+        if row['doc_type'] in ATTACHMENT_TYPES and not ({'item.upload', 'item.publish'} & permissions):
+            if status not in {'published', 'superseded'} or not row['was_published']:
+                return False, '资料尚未发布'
         if not row["storage_rel_path"]:
             return False, "资料文件不可用"
         return True, None
@@ -234,7 +243,8 @@ def create_preflight(
             )
             category_rows.append((root, row, archive_path))
 
-    item_rows = _latest_item_rows(conn, category_ids, include_archived=include_archived)
+    published_only = operation == 'download' and not ({'item.upload', 'item.publish'} & permissions)
+    item_rows = _latest_item_rows(conn, category_ids, include_archived=include_archived, attachment_published_only=published_only)
     scoped_item_ids = {str(row["item_id"]) for row in item_rows}
     for ref in item_refs:
         item_id = str(ref["item_id"])
@@ -243,6 +253,7 @@ def create_preflight(
             item_id,
             str(ref["expected_version_id"]),
             include_archived=include_archived,
+            attachment_published_only=published_only,
         )
         if item_id not in scoped_item_ids:
             item_rows.append(row)

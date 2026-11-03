@@ -9,12 +9,14 @@ import uuid
 from dataclasses import dataclass
 
 from .content_storage import StoredContentObject
+from .content_attachment_types import ATTACHMENT_TYPES
 
 
 _CATEGORY_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{1,62}$")
 _DISPLAY_CODE_RE = re.compile(r"^[0-9A-Za-z_-]{1,12}$")
 _MAX_CATEGORY_SORT_ORDER = 999_999
 _KNOWN_LIBRARY_DOC_TYPES = ("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "xmind", "markdown", "transcript")
+_KNOWN_LIBRARY_DOC_TYPES += tuple(sorted(ATTACHMENT_TYPES))
 _DOC_TYPE_SORT_ORDER = {
     "pdf": 1,
     "docx": 2,
@@ -2014,12 +2016,28 @@ _CONTENT_LIBRARY_CTE = """WITH RECURSIVE paths AS (
     )"""
 
 
+def _content_library_cte(attachment_published_only: bool) -> str:
+    if not attachment_published_only:
+        return _CONTENT_LIBRARY_CTE
+    types = ','.join("'" + kind + "'" for kind in sorted(ATTACHMENT_TYPES))
+    # A draft update must not hide the previous published attachment or expose
+    # candidate metadata. Other existing document visibility remains unchanged.
+    return _CONTENT_LIBRARY_CTE.replace(
+        'WHERE v.version_number=(\n            SELECT max(v2.version_number) FROM content_versions v2 WHERE v2.item_id=v.item_id\n        )',
+        f'''WHERE v.id=CASE WHEN EXISTS (
+            SELECT 1 FROM content_versions av WHERE av.item_id=v.item_id AND av.doc_type IN ({types})
+        ) THEN (SELECT h.current_version_id FROM content_item_heads h WHERE h.item_id=v.item_id)
+        ELSE (SELECT v2.id FROM content_versions v2 WHERE v2.item_id=v.item_id ORDER BY v2.version_number DESC LIMIT 1) END''',
+    )
+
+
 def list_content_items(
     conn: sqlite3.Connection,
     *,
     category_id: str | None = None,
     lifecycle_status: str | None = None,
     content_kind: str | None = None,
+    attachment_published_only: bool = False,
 ) -> list[sqlite3.Row]:
     if content_kind not in {None, "document", "media_transcript"}:
         raise ValueError("invalid_content_kind")
@@ -2036,7 +2054,7 @@ def list_content_items(
         params.append(content_kind)
     where = " AND ".join(clauses)
     return conn.execute(
-        _CONTENT_LIBRARY_CTE
+        _content_library_cte(attachment_published_only)
         + f""" SELECT * FROM library_rows
                  WHERE {where}
                  ORDER BY updated_at DESC,item_id""",
@@ -2062,6 +2080,7 @@ def list_content_items_page(
     archived_to: int | None = None,
     archived_by: str = "",
     archived_sort_direction: str = "desc",
+    attachment_published_only: bool = False,
 ) -> tuple[list[sqlite3.Row], int, dict[str, int]]:
     if content_kind not in {None, "document", "media_transcript"}:
         raise ValueError("invalid_content_kind")
@@ -2130,7 +2149,7 @@ def list_content_items_page(
         direction = "ASC" if sort_direction == "asc" else "DESC"
         order_by = f"CASE doc_type {cases} ELSE 7 END {direction},title COLLATE NOCASE ASC,item_id ASC"
     rows = conn.execute(
-        _CONTENT_LIBRARY_CTE
+        _content_library_cte(attachment_published_only)
         + f""" SELECT * FROM library_rows
                  WHERE {status_where}
                  ORDER BY {order_by} LIMIT ? OFFSET ?""",
@@ -2138,14 +2157,14 @@ def list_content_items_page(
     ).fetchall()
     total = int(
         conn.execute(
-            _CONTENT_LIBRARY_CTE + f"SELECT count(*) FROM library_rows WHERE {status_where}",
+            _content_library_cte(attachment_published_only) + f"SELECT count(*) FROM library_rows WHERE {status_where}",
             status_params,
         ).fetchone()[0]
     )
     counts = {
         str(row[0]): int(row[1])
         for row in conn.execute(
-            _CONTENT_LIBRARY_CTE
+            _content_library_cte(attachment_published_only)
             + f"""SELECT lifecycle_status,count(*) FROM library_rows
                   WHERE {base_where} GROUP BY lifecycle_status""",
             params,

@@ -8,6 +8,7 @@ export function ResourcePreviewShell({
   onClose,
   backAction,
   toolbar,
+  returnFocusTarget,
   mobilePresentation = "fullscreen",
   children,
 }: {
@@ -17,6 +18,7 @@ export function ResourcePreviewShell({
   onClose: () => void;
   backAction?: ReactNode;
   toolbar?: ReactNode;
+  returnFocusTarget?: HTMLElement | null;
   mobilePresentation?: "fullscreen" | "bottom-sheet";
   children: ReactNode;
 }) {
@@ -25,10 +27,10 @@ export function ResourcePreviewShell({
 
   useEffect(() => {
     if (open && !wasOpenRef.current) {
-      returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      returnFocusRef.current = returnFocusTarget ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     }
     wasOpenRef.current = open;
-  }, [open]);
+  }, [open, returnFocusTarget]);
 
   return (
     <Sheet open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
