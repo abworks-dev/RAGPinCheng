@@ -1411,7 +1411,7 @@ MIGRATIONS = (
 # Additive attachment support: retain every existing row and broaden only doc_type.
 MIGRATIONS += (Migration(45, 'versioned_non_rag_attachments', (
     'RELAX_CONTENT_VERSION_DOC_TYPE_ATTACHMENTS',
-    """CREATE TABLE content_version_previews (
+    """CREATE TABLE IF NOT EXISTS content_version_previews (
         version_id TEXT PRIMARY KEY REFERENCES content_versions(id) ON DELETE CASCADE,
         object_sha256 TEXT NOT NULL REFERENCES content_objects(sha256) ON DELETE RESTRICT,
         original_filename TEXT NOT NULL,
@@ -1419,13 +1419,13 @@ MIGRATIONS += (Migration(45, 'versioned_non_rag_attachments', (
         created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
         created_at INTEGER NOT NULL
     )""",
-    """CREATE TABLE content_version_preview_history (
+    """CREATE TABLE IF NOT EXISTS content_version_preview_history (
         id INTEGER PRIMARY KEY,
         version_id TEXT NOT NULL REFERENCES content_versions(id) ON DELETE CASCADE,
         object_sha256 TEXT NOT NULL REFERENCES content_objects(sha256) ON DELETE RESTRICT,
         created_at INTEGER NOT NULL
     )""",
-    'CREATE INDEX idx_content_preview_history_version ON content_version_preview_history(version_id)',
+    'CREATE INDEX IF NOT EXISTS idx_content_preview_history_version ON content_version_preview_history(version_id)',
 )),)
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
