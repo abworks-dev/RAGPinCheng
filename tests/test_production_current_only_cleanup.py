@@ -401,3 +401,35 @@ function Invoke-RestMethod {
     else:
         script += '& $verify'
     run_ps(script)
+
+
+@pytest.mark.parametrize('failed_port', [0, 8100, 8200])
+def test_workflow_health_evidence_is_readonly_sanitized_and_independent(run_ps, failed_port):
+    workflow = (ROOT / '.github/workflows/cleanup-production-current-only.yml').read_text()
+    step = workflow.split('      - name: Report individual unauthenticated health evidence', 1)[1].split('      - name:', 1)[0]
+    assert 'if: always()' in step
+    block = '\n'.join(line[10:] for line in step.split('        run: |\n', 1)[1].splitlines())
+    setup = r'''
+$env:GITHUB_STEP_SUMMARY = Join-Path $PWD 'health-summary.txt'
+$script:seen = @()
+function Invoke-WebRequest {
+ param($Uri,$Method,$TimeoutSec,[switch]$UseBasicParsing)
+ if ($Uri -notmatch '^http://127[.]0[.]0[.]1:(8200|8100)/health$' -or $Method -ne 'Get' -or $TimeoutSec -ne 10) { throw 'Wrong probe contract' }
+ $script:seen += $Uri
+ if ($Uri -like ('*:' + FAILED_PORT + '/*')) { throw [Net.WebException]::new('DO_NOT_EXPOSE_EXCEPTION') }
+ return [pscustomobject]@{StatusCode=200;Content='{"status":"ok","api_version":"fixture/1","model_loaded":true,"forbidden":"DO_NOT_EXPOSE_BODY"}'}
+}
+'''.replace('FAILED_PORT', str(failed_port))
+    checks = r'''
+if ($script:seen.Count -ne 2) { throw 'Both health probes must run independently' }
+$text = Get-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Raw
+if ($text -match 'DO_NOT_EXPOSE|forbidden') { throw 'Unapproved response details exposed' }
+$rows = @(Get-Content -LiteralPath $env:GITHUB_STEP_SUMMARY | ForEach-Object { ($_ -replace '^CURRENT_ONLY_HEALTH ', '') | ConvertFrom-Json })
+if ($rows.Count -ne 2 -or $rows[0].service -ne 'asr' -or $rows[1].service -ne 'gpu') { throw 'Missing per-service evidence' }
+'''
+    if failed_port:
+        index = 0 if failed_port == 8200 else 1
+        checks += f"\nif ($rows[{index}].error_type -ne 'WebException') {{ throw 'Missing sanitized failure type' }}"
+    else:
+        checks += "\nif ($rows[0].http_status -ne 200 -or $rows[1].http_status -ne 200) { throw 'Missing HTTP status' }"
+    run_ps(setup + '\n' + block + '\n' + checks)
