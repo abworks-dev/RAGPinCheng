@@ -175,15 +175,38 @@ function Referenced([string]$Path,[string[]]$References) {
     return $false
 }
 function Health {
-    foreach ($url in @($AsrHealthUrl,$GpuHealthUrl)) {
-        $uri = [uri]$url
-        if ($uri.Scheme -ne 'http' -or $uri.Host -notin @('127.0.0.1','localhost','[::1]') -or $uri.AbsolutePath -ne '/health' -or $uri.Query -or $uri.UserInfo) {
-            throw 'Health URLs must be unauthenticated local HTTP /health endpoints'
-        }
-    }
     try {
-        $asr = Invoke-RestMethod -Uri $AsrHealthUrl -Method Get -TimeoutSec 10
-        $gpu = Invoke-RestMethod -Uri $GpuHealthUrl -Method Get -TimeoutSec 10
+        $localHosts = New-Object 'System.Collections.Generic.List[string]'
+        foreach ($endpoint in @(@{ url=$AsrHealthUrl; port='8200' },@{ url=$GpuHealthUrl; port='8100' })) {
+            # Check the original spelling, not URI-normalized hosts/paths: no DNS,
+            # alternate IPv4 forms, credentials, query, fragment or path aliases.
+            if ($endpoint.url -cnotmatch '\A(?i:http)://(?<host>(?i:localhost)|127\.0\.0\.1|\[::1\]|(?:[0-9]{1,3}\.){3}[0-9]{1,3}):(?<port>[0-9]+)/health\z') {
+                throw 'invalid endpoint'
+            }
+            $hostName = $Matches['host']
+            if ($Matches['port'] -cne $endpoint.port) { throw 'invalid port' }
+            $uri = $null
+            if (-not [uri]::TryCreate($endpoint.url,[UriKind]::Absolute,[ref]$uri)) { throw 'invalid URI' }
+            if ($hostName -in @('127.0.0.1','localhost','[::1]')) { continue }
+            $address = $null
+            if (-not [Net.IPAddress]::TryParse($hostName,[ref]$address) -or
+                $address.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or
+                $address.ToString() -cne $hostName) { throw 'invalid IPv4 literal' }
+            $localHosts.Add($hostName)
+        }
+        if ($localHosts.Count -gt 0) {
+            # Enumerate only when a non-loopback literal needs proof of locality.
+            # Missing cmdlet, empty results or collection errors all fail closed.
+            $assignedAddresses = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
+                ForEach-Object { [string]$_.IPAddress })
+            foreach ($hostName in $localHosts) {
+                if ($hostName -notin $assignedAddresses) { throw 'nonlocal IPv4 literal' }
+            }
+        }
+    } catch { throw 'Health URLs must be unauthenticated local HTTP /health endpoints' }
+    try {
+        $asr = Invoke-RestMethod -Uri $AsrHealthUrl -Method Get -TimeoutSec 10 -MaximumRedirection 0
+        $gpu = Invoke-RestMethod -Uri $GpuHealthUrl -Method Get -TimeoutSec 10 -MaximumRedirection 0
         if ((Prop $asr 'status') -ne 'ok' -or (Prop $asr 'api_version') -ne 'asr-service/1' -or
             (Prop $gpu 'status') -ne 'ok' -or (Prop $gpu 'model_loaded') -ne $true) { throw 'unhealthy' }
     } catch { throw 'Production ASR/GPU health guard failed' }

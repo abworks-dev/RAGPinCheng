@@ -401,3 +401,86 @@ function Invoke-RestMethod {
     else:
         script += '& $verify'
     run_ps(script)
+
+
+@pytest.mark.parametrize('failed_port', [0, 8100, 8200])
+def test_workflow_health_evidence_is_readonly_sanitized_and_independent(run_ps, failed_port):
+    workflow = (ROOT / '.github/workflows/cleanup-production-current-only.yml').read_text()
+    step = workflow.split('      - name: Report individual unauthenticated health evidence', 1)[1].split('      - name:', 1)[0]
+    assert 'if: always()' in step
+    block = '\n'.join(line[10:] for line in step.split('        run: |\n', 1)[1].splitlines())
+    setup = r'''
+$env:GITHUB_STEP_SUMMARY = Join-Path $PWD 'health-summary.txt'
+$script:seen = @()
+function Invoke-WebRequest {
+ param($Uri,$Method,$TimeoutSec,[switch]$UseBasicParsing,$MaximumRedirection=999)
+ if ($Uri -notmatch '^http://127[.]0[.]0[.]1:(8200|8100)/health$' -or $Method -ne 'Get' -or $TimeoutSec -ne 10 -or $MaximumRedirection -ne 0) { throw 'Wrong probe contract' }
+ $script:seen += $Uri
+ if ($Uri -like ('*:' + FAILED_PORT + '/*')) { throw [Net.WebException]::new('DO_NOT_EXPOSE_EXCEPTION') }
+ return [pscustomobject]@{StatusCode=200;Content='{"status":"ok","api_version":"fixture/1","model_loaded":true,"forbidden":"DO_NOT_EXPOSE_BODY"}'}
+}
+'''.replace('FAILED_PORT', str(failed_port))
+    checks = r'''
+if ($script:seen.Count -ne 2) { throw 'Both health probes must run independently' }
+$text = Get-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Raw
+if ($text -match 'DO_NOT_EXPOSE|forbidden') { throw 'Unapproved response details exposed' }
+$rows = @(Get-Content -LiteralPath $env:GITHUB_STEP_SUMMARY | ForEach-Object { ($_ -replace '^CURRENT_ONLY_HEALTH ', '') | ConvertFrom-Json })
+if ($rows.Count -ne 2 -or $rows[0].service -ne 'asr' -or $rows[1].service -ne 'gpu') { throw 'Missing per-service evidence' }
+'''
+    if failed_port:
+        index = 0 if failed_port == 8200 else 1
+        checks += f"\nif ($rows[{index}].error_type -ne 'WebException') {{ throw 'Missing sanitized failure type' }}"
+    else:
+        checks += "\nif ($rows[0].http_status -ne 200 -or $rows[1].http_status -ne 200) { throw 'Missing HTTP status' }"
+    run_ps(setup + '\n' + block + '\n' + checks)
+
+
+@pytest.mark.parametrize('asr_url,gpu_url', [
+    ('http://192.0.2.9:8200/health', 'http://192.0.2.9:8100/health'),
+    ('http://127.0.0.1:8200/health', 'http://192.0.2.9:8100/health'),
+])
+def test_health_accepts_only_verified_host_interface_with_exact_ports(run_ps, asr_url, gpu_url):
+    run_ps('$AsrHealthUrl=' + _quote(asr_url) + ';$GpuHealthUrl=' + _quote(gpu_url) + r'''
+$script:inventories=0; $script:requests=0
+function Get-NetIPAddress {
+ param($AddressFamily,$ErrorAction)
+ if ($AddressFamily -ne 'IPv4' -or $ErrorAction -ne 'Stop') { throw 'Wrong inventory contract' }
+ $script:inventories++; return [pscustomobject]@{IPAddress='192.0.2.9'}
+}
+function Invoke-RestMethod {
+ param($Uri,$Method,$TimeoutSec,$MaximumRedirection=999)
+ if ($MaximumRedirection -ne 0 -or $Method -ne 'Get') { throw 'Health redirects or mutation allowed' }
+ $script:requests++
+ if ($Uri -like '*8200*') { return [pscustomobject]@{status='ok';api_version='asr-service/1'} }
+ return [pscustomobject]@{status='ok';model_loaded=$true}
+}
+$result=Health
+if ($script:inventories -ne 1 -or $script:requests -ne 2 -or $result.gpu -ne 'healthy') { throw 'Verified local health failed' }
+''')
+
+
+@pytest.mark.parametrize('url', [
+    'http://192.0.2.10:8200/health', 'http://remote.example:8200/health',
+    'http://127.0.0.1:8100/health', 'http://127.0.0.1:8200/health#',
+    'http://127.0.0.1:8200/%68ealth', 'http://127.0.0.1:8200/health/',
+    'http://127.0.0.1:8200/../health', 'http://192.0.2.9:8200/health?x=1',
+])
+def test_health_bad_topology_or_url_rejected_before_request(run_ps, url):
+    run_ps('$AsrHealthUrl=' + _quote(url) + r'''
+function Get-NetIPAddress { param($AddressFamily,$ErrorAction) return [pscustomobject]@{IPAddress='192.0.2.9'} }
+$script:requests=0
+function Invoke-RestMethod { $script:requests++; throw 'Unexpected network' }
+Expect-Throw { Health } '*Health URLs must be*'
+if ($script:requests) { throw 'Invalid destination was requested' }
+''')
+
+
+@pytest.mark.parametrize('inventory', ["throw 'fixture inventory unavailable'", 'return @()'])
+def test_health_local_interface_inventory_fails_closed(run_ps, inventory):
+    run_ps("$GpuHealthUrl='http://192.0.2.9:8100/health'\n" +
+           'function Get-NetIPAddress { param($AddressFamily,$ErrorAction) ' + inventory + ' }\n' + r'''
+$script:requests=0
+function Invoke-RestMethod { $script:requests++; throw 'Unexpected network' }
+Expect-Throw { Health } '*Health URLs must be*'
+if ($script:requests) { throw 'Unverified host was requested' }
+''')

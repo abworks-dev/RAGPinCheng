@@ -68,6 +68,8 @@ jobs:
       FASTER_WHISPER_ROOT: ${{ vars.PRODUCTION_FASTER_WHISPER_QUALIFICATION_ROOT }}
       QWEN3_ASR_ROOT: ${{ vars.PRODUCTION_QWEN3_ASR_QUALIFICATION_ROOT }}
       GPU_MODEL_CACHE_ROOT: ${{ vars.GPU_MODEL_CACHE_SOURCE }}
+      ASR_SERVICE_BASE_URL: ${{ vars.PRODUCTION_ASR_SERVICE_URL }}
+      GPU_SERVICE_BASE_URL: ${{ vars.GPU_SERVICE_URL }}
     steps:
       - name: Validate immutable revision and no-backup gate
         shell: powershell
@@ -135,6 +137,8 @@ jobs:
             ManifestPath = Join-Path $reportRoot 'manifest.json'
             AuditPath = Join-Path $reportRoot 'audit.json'
             MaxDeleteGB = 600
+            AsrHealthUrl = $env:ASR_SERVICE_BASE_URL.TrimEnd('/') + '/health'
+            GpuHealthUrl = $env:GPU_SERVICE_BASE_URL.TrimEnd('/') + '/health'
           }
           if ($env:OPERATION -eq 'apply') {
             $approvedRoot = Join-Path $env:RUNNER_TEMP 'current-only-approved-${{ github.run_id }}-${{ github.run_attempt }}'
@@ -150,6 +154,31 @@ jobs:
             Write-Host "CURRENT_ONLY_MANIFEST_SHA256:$sha"
             Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "CURRENT_ONLY_MANIFEST_SHA256:$sha"
             Get-Content -LiteralPath $arguments.ManifestPath -Raw -Encoding UTF8
+          }
+
+      - name: Report individual unauthenticated health evidence
+        if: always()
+        shell: powershell
+        run: |
+          # Binding evidence only; the actual guard checks the validated configured local interface.
+          foreach ($service in @(@{name='asr';port=8200},@{name='gpu';port=8100})) {
+            $row = [ordered]@{ service=$service.name; scope='loopback-only'; http_status=$null; status=$null; api_version=$null; model_loaded=$null; error_type=$null }
+            try {
+              $response = Invoke-WebRequest -UseBasicParsing -Uri ('http://127.0.0.1:{0}/health' -f $service.port) -Method Get -TimeoutSec 10 -MaximumRedirection 0
+              $row.http_status = [int]$response.StatusCode
+              $body = $response.Content | ConvertFrom-Json
+              foreach ($field in @('status','api_version','model_loaded')) {
+                if ($body.PSObject.Properties[$field]) { $row[$field] = $body.$field }
+              }
+            } catch {
+              $row.error_type = $_.Exception.GetType().Name
+              if ($_.Exception.PSObject.Properties['Response'] -and $_.Exception.Response) {
+                $row.http_status = [int]$_.Exception.Response.StatusCode
+              }
+            }
+            $line = 'CURRENT_ONLY_HEALTH ' + ($row | ConvertTo-Json -Compress)
+            Write-Host $line
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $line
           }
 
       - name: Report physical disk usage
