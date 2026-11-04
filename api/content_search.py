@@ -35,6 +35,31 @@ def normalize_query(value: str) -> str:
     return ' '.join(unicodedata.normalize('NFKC', value).casefold().split())
 
 
+def _floor_text(text: str) -> str:
+    def floor(match):
+        token = match.group(1)
+        digits = dict(zip('一二三四五六七八九', '123456789'))
+        number = digits.get(token, token)
+        return f'地下{number}层'
+    text = re.sub(r'(?:地下(?:室)?|负)([一二三四五六七八九0-9]+)层', floor, text)
+    return re.sub(r'(?<![a-z0-9])b([0-9]+)(?![a-z0-9])', floor, text)
+
+
+def _term_match(text: str | None, word: str) -> int:
+    text, word = _floor_text(normalize_query(text or '')), _floor_text(word)
+    # Numeric drawing IDs and floors must not match a longer numeric identity.
+    pattern = re.escape(word)
+    has_numeric_identity = any(char.isdigit() for char in word)
+    if has_numeric_identity and word[0].isascii() and word[0].isalnum():
+        pattern = r'(?<![a-z0-9])' + pattern
+    if has_numeric_identity and word[-1].isascii() and word[-1].isalnum():
+        pattern += r'(?![a-z0-9])'
+    for match in re.finditer(pattern, text):
+        if not re.search(r'(?:不包含|不含|没有|未设|不设|不带|无)\s*$', text[:match.start()]):
+            return 1
+    return 0
+
+
 def _grams(text: str) -> set[str]:
     # Index 1/2/3-grams so Chinese short words and numeric filenames need no tokenizer.
     return {text[i:i+n] for n in (1, 2, 3) for i in range(len(text)-n+1) if not text[i:i+n].isspace()}
@@ -108,49 +133,59 @@ def search_attachment_files(conn: sqlite3.Connection, query: str, *, categories:
     limit = max(1, min(int(limit), 20))
     scope, params = _scope(categories)
     # Each token can match within a field; grams narrow before inspecting OCR text.
-    meaningful = re.sub(r'^(?:(?:请|帮我|麻烦|给我|想要|我要|查找|搜索|找一下|找|一下)\s*)+', '', query)
-    meaningful = re.sub(r'(?:的)?(?:文件|附件)$', '', meaningful).strip()
-    meaningful = re.sub(r'的(?=[a-z0-9])', ' ', meaningful)
-    words = meaningful.split()[:12]
+    from src.attachment_search import attachment_query_terms
+    words = attachment_query_terms(query)
     if not words:
         return []
     query = ' '.join(words)
-    grams = sorted(set(g for word in words for g in (_grams(word) if len(word)<3 else {word[i:i+3] for i in range(len(word)-2)})))
-    if not grams:
-        return []
-    placeholders = ','.join('?' for _ in grams)
+    # Intersect candidates per constraint. Each floor spelling contributes one
+    # selective 2/3-gram, never a union of common single Chinese characters.
+    # Existing version indexes remain compatible; final predicates verify full terms.
+    candidate_tests, candidate_params = [], []
+    for word in words:
+        spellings = [word]
+        match = re.fullmatch(r'地下([1-9])层', _floor_text(word))
+        if match:
+            n = match.group(1)
+            cn = '一二三四五六七八九'[int(n)-1]
+            spellings += [f'b{n}', f'地下{n}层', f'地下室{n}层', f'地下{cn}层', f'地下室{cn}层', f'负{cn}层', f'负{n}层']
+        grams = sorted({spelling[:3] for spelling in spellings})
+        placeholders = ','.join('?' for _ in grams)
+        candidate_tests.append(f'(v.id IN (SELECT version_id FROM attachment_search_terms WHERE term IN ({placeholders})) '
+                               'OR v.category_id IN (SELECT id FROM paths WHERE attachment_match(category_path,?)))')
+        candidate_params.extend([*grams, word])
+    candidates = ' AND '.join(candidate_tests)
     conn.create_function('attachment_normalize', 1, normalize_query, deterministic=True)
+    conn.create_function('attachment_match', 2, _term_match, deterministic=True)
     tests = ' AND '.join('(' + ' OR '.join(
-        'instr(attachment_normalize(v.category_path),?)>0' if field == 'category_path'
-        else 'instr(COALESCE(d.filename,attachment_normalize(v.original_filename)),?)>0' if field == 'filename'
-        else 'instr(COALESCE(d.title,attachment_normalize(v.display_title)),?)>0' if field == 'title'
-        else f'instr(d.{field},?)>0' for field in FIELDS) + ')' for _ in words)
+        'attachment_match(v.category_path,?)' if field == 'category_path'
+        else 'attachment_match(COALESCE(d.filename,v.original_filename),?)' if field == 'filename'
+        else 'attachment_match(COALESCE(d.title,v.display_title),?)' if field == 'title'
+        else f'attachment_match(d.{field},?)' for field in FIELDS) + ')' for _ in words)
     test_params = [word for word in words for _ in FIELDS]
+    conn.create_function('attachment_rank', 8, lambda *texts: next(
+        (i for i, text in enumerate(texts) if any(_term_match(text, word) for word in words)), 8))
     # Paths are live, not version metadata: renames/moves must not require reindexing.
     # Match category nodes before versions; no arbitrary candidate cap can hide later
     # mixed-term matches. Only matching directories supplement the term-index branch.
-    directory_tests = ' OR '.join('instr(attachment_normalize(category_path),?)>0' for _ in words)
     # Legacy metadata fallback is filename/title only, no historical OCR scan or backfill.
     rows = conn.execute(VISIBLE_CTE + f'''SELECT v.*,d.filename AS indexed_filename,d.title AS indexed_title,
         d.aliases,d.tags,d.project,d.description,d.ocr FROM visible v
         LEFT JOIN attachment_search_documents d ON d.version_id=v.id AND d.source_sha256=v.object_sha256
           AND (d.ocr_job_id IS NULL OR EXISTS(SELECT 1 FROM image_ocr_heads oh JOIN image_ocr_jobs oj ON oj.id=oh.job_id
              WHERE oh.version_id=v.id AND oh.source_sha256=v.object_sha256 AND oh.job_id=d.ocr_job_id AND oj.status='succeeded'))
-        WHERE 1=1 {scope} AND (
-          ((v.id IN (SELECT version_id FROM attachment_search_terms WHERE term IN ({placeholders})
-             GROUP BY version_id HAVING count(DISTINCT term)=?) OR v.category_id IN
-             (SELECT id FROM paths WHERE {directory_tests})) AND {tests})
-          OR (d.version_id IS NULL AND (instr(lower(v.original_filename),?)>0 OR instr(lower(v.display_title),?)>0)))
-        ORDER BY CASE WHEN lower(v.original_filename)=? THEN 0 WHEN instr(lower(v.original_filename),?)>0 THEN 1
+        WHERE 1=1 {scope} AND ({candidates} OR d.version_id IS NULL) AND {tests}
+        ORDER BY attachment_rank(v.original_filename,v.display_title,d.aliases,d.tags,d.project,d.description,v.category_path,d.ocr),
+          CASE WHEN lower(v.original_filename)=? THEN 0 WHEN instr(lower(v.original_filename),?)>0 THEN 1
           WHEN instr(lower(v.display_title),?)>0 THEN 2 WHEN instr(d.aliases,?)>0 THEN 3
           WHEN instr(d.tags,?)>0 THEN 4 WHEN instr(d.project,?)>0 THEN 5 WHEN instr(d.description,?)>0 THEN 6
           WHEN instr(attachment_normalize(v.category_path),?)>0 THEN 7 ELSE 8 END,
           v.original_filename,v.id LIMIT ?''',
-        (*params, *grams, len(grams), *words, *test_params, *([query] * 10), limit)).fetchall()
+        (*params, *candidate_params, *test_params, *([query] * 8), limit)).fetchall()
     result = []
     for row in rows:
         texts = {field: (row['original_filename'] if field=='filename' else row['display_title'] if field=='title' else row[field] or '') for field in FIELDS}
-        matched = [field for field in FIELDS if any(word in normalize_query(texts[field]) for word in words)]
+        matched = [field for field in FIELDS if any(_term_match(texts[field], word) for word in words)]
         field = next((f for f in ('description','ocr','tags','aliases','project','category_path') if f in matched), 'filename')
         text = texts[field]
         offset = max(0, normalize_query(text).find(words[0])-40)

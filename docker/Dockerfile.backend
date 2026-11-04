@@ -62,6 +62,8 @@ COPY src/ ./src/
 COPY api/ ./api/
 COPY prompts/ ./prompts/
 COPY scripts/ ./scripts/
+# Non-sensitive checked-in text image for the isolated OCR deployment probe.
+COPY services/image_ocr/synthetic-chinese.png /app/scripts/image-ocr-synthetic.png
 
 # 3) React bundle from the build stage. api/main.py detects this directory
 #    and mounts it at / with SPA fallback.
