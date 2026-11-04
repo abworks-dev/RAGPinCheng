@@ -1854,6 +1854,10 @@ def register_uploaded_document(
         category_id=category_id,
         metadata={"sha256": stored.sha256},
     )
+    from .content_search import index_attachment_version
+    from .image_ocr_jobs import enqueue_image_ocr
+    index_attachment_version(conn, version_id)
+    enqueue_image_ocr(conn, version_id, automatic=True)
     conn.commit()
     return UploadedContent(batch_id=batch_id, item_id=item_id, version_id=version_id)
 
@@ -2853,6 +2857,11 @@ def create_content_revision(
                 "replaced_item_id": replaced_item_id,
             },
         )
+        from .content_search import index_attachment_version
+        from .image_ocr_jobs import enqueue_image_ocr
+        index_attachment_version(conn, version_id)
+        if stored is not None:
+            enqueue_image_ocr(conn, version_id, automatic=True)
         conn.commit()
         return RevisedContent(
             item_id=item_id,

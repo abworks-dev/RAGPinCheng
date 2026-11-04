@@ -43,6 +43,31 @@ describe("useChat persisted message identity", () => {
     });
   });
 
+  it("keeps independent attachment cards across reload, regeneration and answer switching", async () => {
+    const oldFile = { version_id: "file-old", title: "合成旧附件" };
+    const newFile = { version_id: "file-new", title: "合成新附件" };
+    mocks.getConversation.mockResolvedValue({ messages: [
+      { id: 10, role: "user", content: "找合成附件" },
+      { id: 11, role: "assistant", content: "旧回答", sources_for_ui: [], file_results: [oldFile], answer_versions: [{ id: 100, version_index: 1, content: "旧回答", file_results: [oldFile], sources_for_ui: [], is_active: true }] },
+    ] });
+    mocks.streamChat.mockImplementation(async function* () {
+      yield { type: "prep", data: { used_sources: [], file_results: [newFile] } };
+      yield { type: "done", data: { answer_text: "新回答", assistant_message_id: 11, sources: [], file_results: [newFile], timings: {}, history_chars: 0, budget: 0 } };
+    });
+    const { result } = renderHook(() => useChat({ conversationId: "conversation-1" }));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.messages[1].file_results).toEqual([oldFile]);
+    await act(async () => { await result.current.regenerate("11"); });
+    expect(result.current.messages[1].file_results).toEqual([newFile]); expect(result.current.messages[1].sources).toEqual([]);
+    act(() => result.current.viewAnswerVersion("11", 1)); expect(result.current.messages[1].file_results).toEqual([oldFile]);
+    act(() => result.current.viewAnswerVersion("11", 2)); expect(result.current.messages[1].file_results).toEqual([newFile]);
+  });
+
+  it("defaults older persisted and streamed messages to empty file cards", async () => {
+    const { result } = renderHook(() => useChat({ conversationId: "conversation-1" })); await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => { await result.current.send("问题"); }); expect(result.current.messages[1].file_results).toEqual([]);
+  });
+
   it("replaces the optimistic assistant id with the persisted id from done", async () => {
     const { result } = renderHook(() => useChat({ conversationId: "conversation-1" }));
     await waitFor(() => expect(result.current.loading).toBe(false));

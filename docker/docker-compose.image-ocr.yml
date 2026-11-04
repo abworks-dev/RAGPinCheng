@@ -1,0 +1,48 @@
+# Opt-in overlay only. No production enablement, secret generation, or old-image backfill.
+# docker compose -f docker/docker-compose.yml -f docker/docker-compose.image-ocr.yml --profile image-ocr ...
+services:
+  backend:
+    environment:
+      ATTACHMENT_SEARCH_ENABLED: ${ATTACHMENT_SEARCH_ENABLED:-true}
+      IMAGE_OCR_ENABLED: ${IMAGE_OCR_ENABLED:-false}
+      IMAGE_OCR_URL: http://image-ocr:8091
+      IMAGE_OCR_TOKEN: ${IMAGE_OCR_TOKEN:-}
+      IMAGE_OCR_TIMEOUT_SECONDS: ${IMAGE_OCR_TIMEOUT_SECONDS:-30}
+      IMAGE_OCR_MAX_BYTES: ${IMAGE_OCR_MAX_BYTES:-33554432}
+      IMAGE_OCR_MAX_PIXELS: ${IMAGE_OCR_MAX_PIXELS:-80000000}
+    networks: [default, image_ocr_private]
+
+  image-ocr:
+    profiles: [image-ocr]
+    build:
+      context: ../services/image_ocr
+      dockerfile: Dockerfile
+    image: pincheng-image-ocr:local-v1
+    restart: unless-stopped
+    environment:
+      IMAGE_OCR_TOKEN: ${IMAGE_OCR_TOKEN:-}
+      IMAGE_OCR_MAX_BYTES: ${IMAGE_OCR_MAX_BYTES:-33554432}
+      IMAGE_OCR_MAX_PIXELS: ${IMAGE_OCR_MAX_PIXELS:-80000000}
+      IMAGE_OCR_PROCESS_TIMEOUT_SECONDS: 25
+    networks: [image_ocr_private]
+    # No host port, content mounts, external egress, or GPU access.
+    read_only: true
+    tmpfs: [/tmp:size=128m,mode=1777]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1536m
+    cpus: 2
+    pids_limit: 64
+    healthcheck:
+      test: [CMD, python, -c, "import json,urllib.request; assert json.load(urllib.request.urlopen('http://127.0.0.1:8091/health',timeout=2))['status']=='ok'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+
+networks:
+  image_ocr_private:
+    internal: true

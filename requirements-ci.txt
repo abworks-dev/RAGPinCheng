@@ -14,3 +14,5 @@ passlib[argon2]==1.7.4
 python-multipart==0.0.32
 uvicorn==0.52.3
 pydantic==2.13.4
+# Only the local OCR service boundary tests decode synthetic image headers.
+Pillow==12.3.0

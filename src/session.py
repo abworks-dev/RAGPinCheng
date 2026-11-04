@@ -23,6 +23,7 @@ from time import perf_counter
 from typing import Iterator
 
 from .config import DECOMPOSE_MAX_CONTEXT_CHARS, ENUMERATION_TOP_K, FINAL_TOP_K, MAX_CONTEXT_CHARS, QUERY_DECOMPOSE_ENABLED
+from .attachment_search import AttachmentSearch, AttachmentValidator, file_intent, file_reference
 from .decompose import maybe_decompose
 from .intent import Intent, classify_intent, extract_series_token, is_enumeration_intent, is_ordinal_section_query
 from .answer_policy import MAX_CONTEXT_CHARS_CONFIG, AnswerPolicy, load_answer_policy
@@ -112,6 +113,7 @@ class Message:
     content: str
     sources_for_ui: list[dict] | None = None
     policy_snapshot: dict = field(default_factory=dict)
+    file_results: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -187,6 +189,7 @@ class TurnResult:
     relevance: dict = field(default_factory=dict)
     policy_snapshot: dict = field(default_factory=dict)
     citation_diagnostics: dict = field(default_factory=dict)
+    file_results: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -211,6 +214,7 @@ class StreamingTurnPrep:
     relevance: dict = field(default_factory=dict)
     policy_snapshot: dict = field(default_factory=dict)
     query_resolution: QueryResolution | None = None
+    file_results: list[dict] = field(default_factory=list)
 
 
 _USAGE_KEYS = ("prompt_tokens", "completion_tokens", "total_tokens")
@@ -362,7 +366,9 @@ def retrieve_for_turn(
 class ChatSession:
     """Drives one user-facing conversation through the 5-stage pipeline."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, attachment_search: AttachmentSearch | None = None, attachment_validator: AttachmentValidator | None = None) -> None:
+        self.attachment_search = attachment_search
+        self.attachment_validator = attachment_validator
         self.state = SessionState()
         # Populated at the end of every turn (sync or streaming).
         # Streaming callers read this AFTER consuming the text generator to
@@ -372,6 +378,83 @@ class ChatSession:
     def reset(self) -> None:
         self.state.reset()
         self.last_turn_result = None
+
+    def _file_results(self, query: str, search_query: str, categories: list[str] | None) -> list[dict]:
+        if categories == [] or self.attachment_search is None:
+            return []
+        reference = file_reference(query)
+        if reference is not None:
+            previous = next((m.file_results for m in reversed(self.state.messages) if m.role == "assistant"), [])
+            candidates = previous[reference:reference + 1] if reference >= 0 else []
+            # Stored cards are never authority for current visibility.
+            return self.attachment_validator(candidates, categories=categories) if self.attachment_validator else []
+        found: dict[str, dict] = {}
+        for text in dict.fromkeys((query, search_query)):
+            for result in self.attachment_search(text, categories=categories, limit=5):
+                found.setdefault(str(result["version_id"]), dict(result))
+        results = list(found.values())[:5]
+        return self.attachment_validator(results, categories=categories) if self.attachment_validator else results
+
+    def _attach_files(self, results: list[dict]) -> None:
+        if self.last_turn_result is not None:
+            self.last_turn_result.file_results = list(results)
+        if self.state.messages and self.state.messages[-1].role == "assistant":
+            self.state.messages[-1].file_results = list(results)
+
+    def _file_turn(self, query: str, results: list[dict]) -> TurnResult:
+        text = "找到相关文件。" if results else "未找到相关文件。"
+        snapshot = load_answer_policy().public_dict()
+        self.state.append_turn(query, text, sources_for_ui=[], policy_snapshot=snapshot)
+        self.state.last_sources = []
+        self.state.last_search_query = query
+        self.last_turn_result = TurnResult(text, [], query, [], [], None, 0, 0, False, policy_snapshot=snapshot, file_results=list(results))
+        self._attach_files(results)
+        return self.last_turn_result
+
+    def ask(self, query: str, categories: list[str] | None = None) -> TurnResult:
+        guard = validate_search_query(query, has_history=bool(self.state.messages))
+        if guard.reason == "numeric_dominant" and file_intent(query):
+            guard = QueryValidation.ok()
+        if self.attachment_search is not None and guard.passed and (file_intent(query) or file_reference(query) is not None):
+            return self._file_turn(query, self._file_results(query, query, categories))
+        result = self._ask_core(query, categories)
+        files = self._file_results(query, result.search_query, categories) if guard.passed and not result.guard_reason else []
+        if files and not result.final_sources:
+            # Replace the just-finalized abstention, not an extra turn.
+            self.state.messages = self.state.messages[:-2]
+            self.state.turn_index -= 1
+            return self._file_turn(query, files)
+        self._attach_files(files)
+        return result
+
+    def ask_stream(self, query: str, categories: list[str] | None = None) -> tuple[StreamingTurnPrep, Iterator[str]]:
+        guard = validate_search_query(query, has_history=bool(self.state.messages))
+        if guard.reason == "numeric_dominant" and file_intent(query):
+            guard = QueryValidation.ok()
+        file_only = self.attachment_search is not None and guard.passed and (file_intent(query) or file_reference(query) is not None)
+        if file_only:
+            files = self._file_results(query, query, categories)
+            prep = StreamingTurnPrep(query, False, [], [], [], 0, 0, {}, file_results=files)
+            def file_stream() -> Iterator[str]:
+                result = self._file_turn(query, files)
+                yield result.answer_text
+            return prep, file_stream()
+        prep, stream = self._ask_stream_core(query, categories)
+        files = self._file_results(query, prep.search_query, categories) if guard.passed and not prep.guard_reason else []
+        prep.file_results = files
+        if files and not prep.final_sources:
+            stream.close()
+            prep.no_source_fallback = False
+            def only_files() -> Iterator[str]:
+                yield self._file_turn(query, files).answer_text
+            return prep, only_files()
+        def attached_stream() -> Iterator[str]:
+            try:
+                yield from stream
+            finally:
+                stream.close()
+                self._attach_files(files)
+        return prep, attached_stream()
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
@@ -552,7 +635,7 @@ class ChatSession:
 
     # ── Sync entry point ──────────────────────────────────────────────────────
 
-    def ask(
+    def _ask_core(
         self, query: str, categories: list[str] | None = None
     ) -> TurnResult:
         timings: dict[str, float] = {}
@@ -757,7 +840,7 @@ class ChatSession:
 
     # ── Streaming entry point ─────────────────────────────────────────────────
 
-    def ask_stream(
+    def _ask_stream_core(
         self, query: str, categories: list[str] | None = None
     ) -> tuple[StreamingTurnPrep, Iterator[str]]:
         """Streaming variant of `ask()`.

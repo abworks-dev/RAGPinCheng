@@ -69,6 +69,7 @@ export function useChat({
             versionIndex: version.version_index,
             content: version.content,
             sources: version.sources_for_ui || undefined,
+            file_results: version.file_results || [],
             isActive: version.is_active,
             userVersionId: version.user_version_id != null ? String(version.user_version_id) : undefined,
           }));
@@ -83,6 +84,7 @@ export function useChat({
             content: m.content,
             createdAt: m.created_at,
             sources: m.sources_for_ui || undefined,
+            file_results: m.file_results || [],
             query: m.role === "assistant" ? lastUserContent : undefined,
             stage: "done",
             answerVersions: visibleAnswerVersions,
@@ -163,7 +165,7 @@ export function useChat({
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantId
-                  ? { ...m, prep: ev.data, sources: ev.data.used_sources, stage: "generating" }
+                  ? { ...m, prep: ev.data, sources: ev.data.used_sources, file_results: ev.data.file_results || [], stage: "generating" }
                   : m,
               ),
             );
@@ -188,6 +190,7 @@ export function useChat({
                         : m.id,
                       content: ev.data.answer_text || m.content,
                       sources: ev.data.sources,
+                  file_results: ev.data.file_results || [],
                       done: ev.data,
                       streaming: false,
                       stage: "done",
@@ -260,7 +263,7 @@ export function useChat({
             ? {
                 ...message,
                 content: "",
-                sources: undefined,
+                sources: undefined, file_results: [],
                 error: undefined,
                 regenerationStopped: undefined,
                 streaming: true,
@@ -281,7 +284,7 @@ export function useChat({
             setMessages((prev) =>
               prev.map((message) =>
                 message.id === assistantMessageId
-                  ? { ...message, prep: ev.data, sources: ev.data.used_sources, stage: "generating" }
+                  ? { ...message, prep: ev.data, sources: ev.data.used_sources, file_results: ev.data.file_results || [], stage: "generating" }
                   : message,
               ),
             );
@@ -305,6 +308,7 @@ export function useChat({
                       versionIndex: 1,
                       content: snapshot.content,
                       sources: snapshot.sources,
+                      file_results: snapshot.file_results || [],
                       isActive: true,
                     }];
                 const nextIndex = Math.max(...oldVersions.map((version) => version.versionIndex)) + 1;
@@ -313,6 +317,7 @@ export function useChat({
                   versionIndex: nextIndex,
                   content: ev.data.answer_text || message.content,
                   sources: ev.data.sources,
+                  file_results: ev.data.file_results || [],
                   isActive: true,
                   userVersionId: snapshot.activeUserVersionId,
                 };
@@ -325,6 +330,7 @@ export function useChat({
                   ...message,
                   content: ev.data.answer_text || message.content,
                   sources: ev.data.sources,
+                  file_results: ev.data.file_results || [],
                   done: ev.data,
                   streaming: false,
                   stage: "done",
@@ -400,7 +406,7 @@ export function useChat({
             return {
               ...message,
               content: "",
-              sources: undefined,
+              sources: undefined, file_results: [],
               error: undefined,
               streaming: true,
               stage: "retrieving",
@@ -422,7 +428,7 @@ export function useChat({
             setMessages((prev) =>
               prev.map((message) =>
                 message.id === answerSnapshot.id
-                  ? { ...message, prep: ev.data, sources: ev.data.used_sources, stage: "generating" }
+                  ? { ...message, prep: ev.data, sources: ev.data.used_sources, file_results: ev.data.file_results || [], stage: "generating" }
                   : message,
               ),
             );
@@ -477,6 +483,7 @@ export function useChat({
                     ) + 1,
                     content: ev.data.answer_text || message.content,
                     sources: ev.data.sources,
+                  file_results: ev.data.file_results || [],
                     isActive: true,
                     userVersionId: pendingUserVersionId,
                   };
@@ -484,6 +491,7 @@ export function useChat({
                     ...message,
                     content: ev.data.answer_text || message.content,
                     sources: ev.data.sources,
+                  file_results: ev.data.file_results || [],
                     done: ev.data,
                     streaming: false,
                     stage: "done",
@@ -542,6 +550,7 @@ export function useChat({
               ...message,
               content: version.content,
               sources: version.sources,
+              file_results: version.file_results || [],
               viewedVersionIndex: version.versionIndex,
               error: undefined,
             }
@@ -577,6 +586,7 @@ export function useChat({
             ...message,
             content: displayedAnswer.content,
             sources: displayedAnswer.sources,
+            file_results: displayedAnswer.file_results || [],
             query: version.content,
             answerVersions: linkedAnswers,
             allAnswerVersions: allAnswers,

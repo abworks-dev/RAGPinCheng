@@ -1,3 +1,20 @@
+export type FileResult = {
+  item_id: string;
+  version_id: string;
+  title: string;
+  original_filename: string;
+  doc_type: string;
+  file_size: number;
+  category_key: string;
+  category_path: string;
+  version_number: number;
+  matched_fields: string[];
+  snippet: string;
+  preview_kind: "image" | "pdf" | "dxf" | "ifc" | "none";
+  can_preview: boolean;
+  can_download: boolean;
+};
+
 export type Source = {
   parent_id: string;
   doc_title: string;
@@ -42,6 +59,7 @@ export type PrepData = {
   fresh_count: number;
   final_count: number;
   used_sources: Source[];
+  file_results?: FileResult[];
   no_source_fallback: boolean;
   relevance?: Record<string, unknown>;
   policy_version?: string;
@@ -55,6 +73,7 @@ export type DoneData = {
   assistant_message_id?: number | null;
   timings: Record<string, number>;
   sources: Source[];
+  file_results?: FileResult[];
   history_chars: number;
   budget: number;
   finish_reason?: string;
@@ -114,6 +133,7 @@ export type ChatMessage = {
   createdAt?: number;
   query?: string;
   sources?: Source[];
+  file_results?: FileResult[];
   prep?: PrepData;
   done?: DoneData;
   streaming?: boolean;
@@ -134,6 +154,7 @@ export type AnswerVersion = {
   versionIndex: number;
   content: string;
   sources?: Source[];
+  file_results?: FileResult[];
   isActive: boolean;
   userVersionId?: string;
 };
@@ -211,12 +232,14 @@ export type ConversationState = {
     role: "user" | "assistant" | "system";
     content: string;
     sources_for_ui?: Source[] | null;
+    file_results?: FileResult[];
     created_at?: number;
     answer_versions?: {
       id: number;
       version_index: number;
       content: string;
       sources_for_ui?: Source[] | null;
+      file_results?: FileResult[];
       created_at: number;
       is_active: boolean;
       user_version_id?: number | null;
@@ -591,7 +614,22 @@ export type ManagedContentItem = {
   publication_status?: string | null;
 };
 
+export type AttachmentSearchMetadata = { version_id: string; description: string; tags: string[]; project: string; aliases: string[]; revision: number };
+export type AttachmentOcrJob = { id: string; version_id: string; source_sha256: string; attempt_number: number; status: "pending" | "running" | "succeeded" | "no_text" | "failed" | "cancelled" | "stale"; error_code: string | null; created_at: number; updated_at: number };
+export type AttachmentOcrState = {
+  version_id: string;
+  current_job_id: string | null;
+  jobs: AttachmentOcrJob[];
+  enabled?: boolean;
+  available?: boolean;
+  reason_code?: string | null;
+};
+
 export type ManagedAttachmentInfo = {
+  can_preview?: boolean;
+  can_download?: boolean;
+  search_enabled?: boolean;
+  ocr_status?: string;
   version_id: string;
   original_filename: string;
   doc_type: string;

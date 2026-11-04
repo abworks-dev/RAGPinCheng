@@ -1,3 +1,4 @@
+import { FileResultCards } from "./FileResultCards";
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
@@ -134,6 +135,13 @@ function AnswerStatus({ msg }: { msg: ChatMessage }) {
     label = "正在理解问题并检索企业知识…";
     tone = "warning";
     pulse = true;
+  } else if (
+    sourceCount === 0 && (msg.file_results?.length || 0) > 0 &&
+    (stage === "generating" || stage === "streaming" ||
+      (stage === "done" && msg.content && msg.done?.finish_reason !== "retrieval_low_confidence"))
+  ) {
+    label = `已找到 ${msg.file_results!.length} 个附件，仅提供文件匹配`;
+    pulse = stage !== "done";
   } else if (stage === "generating") {
     label = noSources
       ? "未检索到可用资料，正在组织回复…"
@@ -735,6 +743,7 @@ export function Message({
                 </CitationContext.Provider>
               ) : null}
             </div>
+            <FileResultCards results={msg.file_results || []} />
             {msg.error && (
               <div className="mt-2 flex items-start gap-2 rounded-ui-md border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive">
                 <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />

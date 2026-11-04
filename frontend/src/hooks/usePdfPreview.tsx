@@ -22,6 +22,7 @@ export interface PdfPreviewLocation {
 export type PdfPreviewReturnTarget = "managed-content-detail" | "managed-content-review";
 
 export interface PdfPreviewState {
+  endpointMode?: "admin" | "chat";
   returnFocusTarget?: HTMLElement | null;
   /** The parent_id of the source to preview, or null if closed. */
   parentId: string | null;
@@ -44,6 +45,7 @@ interface PdfPreviewContextValue {
   open: (parentId: string, title: string, docType?: string, pageNumber?: number, location?: PdfPreviewLocation, returnTo?: PdfPreviewReturnTarget | null) => void;
   openXMind: (versionId: string, title: string, returnTo?: PdfPreviewReturnTarget | null) => void;
   openVersion: (versionId: string, title: string, docType: string, returnTo?: PdfPreviewReturnTarget | null) => void;
+  openAttachment: (versionId: string, title: string, docType: string) => void;
   close: () => void;
   setPage: (page: number) => void;
 }
@@ -82,6 +84,11 @@ export function PdfPreviewProvider({ children }: { children: React.ReactNode }) 
     setState({ parentId: null, versionId, title, docType, pageNumber: 1, location: {}, returnTo, returnFocusTarget: document.activeElement instanceof HTMLElement ? document.activeElement : null });
   }, []);
 
+  const openAttachment = useCallback((versionId: string, title: string, docType: string) => {
+    window.dispatchEvent(new CustomEvent("resource-preview-open", { detail: { kind: "document" } }));
+    setState({ parentId: null, versionId, title, docType, pageNumber: 1, location: {}, returnTo: null, endpointMode: "chat", returnFocusTarget: document.activeElement instanceof HTMLElement ? document.activeElement : null });
+  }, []);
+
   const close = useCallback(() => {
     setState({ parentId: null, versionId: null, title: "", docType: "pdf", pageNumber: 1, location: {}, returnTo: null });
   }, []);
@@ -91,8 +98,8 @@ export function PdfPreviewProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   const value = useMemo<PdfPreviewContextValue>(
-    () => ({ state, open, openXMind, openVersion, close, setPage }),
-    [state, open, openXMind, openVersion, close, setPage],
+    () => ({ state, open, openXMind, openVersion, openAttachment, close, setPage }),
+    [state, open, openXMind, openVersion, openAttachment, close, setPage],
   );
 
   return (
