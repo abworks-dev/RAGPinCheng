@@ -6,7 +6,7 @@ Opt-in CPU service for original single-frame JPG/JPEG/PNG only. No cloud client,
 
 - `POST /v1/ocr`, multipart `file`, `Authorization: Bearer <IMAGE_OCR_TOKEN>`; missing token fails closed. Never log or commit a real token.
 - Returns `text`, bounded text/confidence/box `blocks`, `engine`, and content-derived `model_version`. Empty text is a successful `no_text` job upstream.
-- Default input limit 32 MiB, 80 million pixels, edge 32768; one request at a time; upload timeout 10 s and isolated worker timeout 25 s. Each worker exits after one image; canceled/timed-out workers are terminated.
+- Default input limit 32 MiB, 80 million pixels, edge 32768; one request at a time; upload timeout 10 s and isolated worker timeout 25 s. Each worker exits after one image; service-coroutine cancellation or timeout terminates its process. Canceling an application job fences result activation immediately, but an already-running HTTP/native request can continue until its bounded deadline.
 - Longest inference image edge is 4096, boxes map back to original coordinates. Small print, rotated text, low contrast, and dense drawings can be inaccurate: OCR is discovery assistance, not verified engineering facts.
 - `GET /health` is unauthenticated readiness, not model accuracy verification. API `available` describes configuration only, not this health endpoint.
 

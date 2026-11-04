@@ -38,7 +38,7 @@
 
 集中配置见 [config](<../../src/config.py>)：`ATTACHMENT_SEARCH_ENABLED=true`；`IMAGE_OCR_ENABLED=false`。OCR 默认 URL 为 `http://image-ocr:8091`，请求超时 30 秒，输入上限 33554432 字节、80000000 像素。OCR 服务独立部署并使用内部鉴权；令牌通过安全配置提供，不在文档/日志输出。关闭 OCR 不关闭元数据检索；关闭附件搜索不删除已存数据或执行索引 Reset。
 
-验证入口：[搜索与权限](<../../tests/test_attachment_search.py>)、[OCR 队列](<../../tests/test_image_ocr_jobs.py>)、[OCR 服务](<../../tests/test_image_ocr_service.py>)、[聊天单元](<../../tests/test_attachment_chat.py>)、[真实端口合成集成](<../../tests/test_attachment_chat_integration.py>)、[前端组件](<../../frontend/src/components/attachment-search.test.tsx>)及[浏览器夹具](<../../frontend/tests/visual/attachment-search.spec.ts>)。本地聊天/版本回归 20 项通过；OCR 服务本地 12 项通过，包含实际中文 UTF-8、空白与英文图片。父任务最终集成后端 15 文件 269 项通过；前端完整单元 65 文件 576 项通过、1 项既有跳过，构建通过。合成浏览器基线四种视口 52 项通过；文件卡成功状态修正后，桌面/移动定向 4 项再次通过，截图已检查。上述浏览器使用合成聊天夹具，不替代真实后端浏览器、远端 CI、生产验证或用户验收。
+验证入口：[搜索与权限](<../../tests/test_attachment_search.py>)、[OCR 队列](<../../tests/test_image_ocr_jobs.py>)、[OCR 服务](<../../tests/test_image_ocr_service.py>)、[聊天单元](<../../tests/test_attachment_chat.py>)、[真实端口合成集成](<../../tests/test_attachment_chat_integration.py>)、[前端组件](<../../frontend/src/components/attachment-search.test.tsx>)及[浏览器夹具](<../../frontend/tests/visual/attachment-search.spec.ts>)。本地聊天/版本回归 20 项通过；OCR 服务本地 12 项通过，包含实际中文 UTF-8、空白与英文图片；另用后端真实 HTTP 客户端访问仅绑定回环地址的临时服务，合成图片识别出“消防通道项目110”，验证后已停止服务。父任务最终集成后端 15 文件 269 项通过；前端完整单元 65 文件 576 项通过、1 项既有跳过，构建通过。合成浏览器基线四种视口 52 项通过；文件卡成功状态修正后，桌面/移动定向 4 项再次通过，截图已检查。上述浏览器使用合成聊天夹具，不替代真实后端浏览器、远端 CI、生产验证或用户验收。
 
 检索质量补测：6 个固定合成查询各执行 10 次，Recall@1=1.000、Recall@5=1.000、MRR=1.000，无命中保护 1/1；该微型夹具观测 p95=0.332 ms。它只证明这些精确名称/元数据/目录/OCR 排序用例，不代表真实语料覆盖率、端到端聊天时延或生产 SLA。
 

@@ -110,7 +110,7 @@ jobs:
         if: env.RUN_PYTHON == 'true'
         run: |
           python -m venv .venv-ocr
-          .venv-ocr/bin/pip install -r services/image_ocr/requirements.txt
+          .venv-ocr/bin/pip install -r services/image_ocr/requirements.txt pytest==9.1.1
           .venv-ocr/bin/python -m pytest services/image_ocr/test_engine.py -q
       - name: Set up Node.js
         if: env.RUN_FRONTEND == 'true'
@@ -132,6 +132,7 @@ jobs:
         run: |
           touch .env
           docker compose -f docker/docker-compose.yml config --quiet
+          docker compose -f docker/docker-compose.yml -f docker/docker-compose.image-ocr.yml --profile image-ocr config --quiet
       - name: Report skipped validation scopes
         if: env.RUN_COLLABORATION != 'true' && env.RUN_PYTHON != 'true' && env.RUN_FRONTEND != 'true' && env.RUN_COMPOSE != 'true'
         run: echo "No validation scope matched this change."
