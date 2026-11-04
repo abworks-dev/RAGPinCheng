@@ -48,6 +48,25 @@ def test_file_only_numeric_name_and_scope(streaming):
     assert session.ask("找图片11", []).file_results == []
 
 
+@pytest.mark.parametrize('streaming', [False, True])
+def test_natural_language_request_uses_literal_attachment_port(streaming):
+    query = '帮我寻找一个地下室一层含开闭所的案例图纸'
+    seen = []
+    def search(value, *, categories=None, limit=5):
+        seen.append((value, categories))
+        return [card()]
+    session = ChatSession(attachment_search=search)
+    if streaming:
+        prep, stream = session.ask_stream(query, ['synthetic'])
+        list(stream)
+        result = session.last_turn_result
+    else:
+        result = session.ask(query, ['synthetic'])
+    assert result.file_results == [card()]
+    assert result.sources == [] and result.answer is None
+    assert seen == [(query, ['synthetic'])]
+
+
 def test_ordinal_revalidates_previous_position_without_search():
     session = ChatSession(attachment_search=lambda *a, **k: [card(), card("v2")], attachment_validator=lambda results, **k: results)
     session.ask("查找附件")

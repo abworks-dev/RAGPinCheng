@@ -103,6 +103,9 @@ jobs:
           tests/test_attachment_search.py
           tests/test_image_ocr_jobs.py
           tests/test_image_ocr_service.py
+          tests/test_image_ocr_container_check.py
+          tests/test_controlled_ocr_deploy.py
+          tests/test_image_ocr_runtime_probe.py
           tests/test_attachment_chat.py
           tests/test_attachment_chat_integration.py
           tests/test_answer_regeneration.py
@@ -112,6 +115,11 @@ jobs:
           python -m venv .venv-ocr
           .venv-ocr/bin/pip install -r services/image_ocr/requirements.txt pytest==9.1.1
           .venv-ocr/bin/python -m pytest services/image_ocr/test_engine.py -q
+      - name: Build and verify isolated OCR container
+        if: env.RUN_COMPOSE == 'true'
+        run: |
+          docker build -t pincheng-image-ocr:ci services/image_ocr
+          python3 scripts/check_image_ocr_container.py --image pincheng-image-ocr:ci
       - name: Set up Node.js
         if: env.RUN_FRONTEND == 'true'
         uses: actions/setup-node@v4

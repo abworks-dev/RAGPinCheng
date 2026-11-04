@@ -222,6 +222,58 @@ def test_synthetic_retrieval_golden_and_latency(search_env, monkeypatch):
     conn.close()
 
 
+@pytest.mark.parametrize('query', [
+    '帮我寻找一个地下室一层含开闭所的案例图纸',
+    '请查找地下一层包含开闭所的图纸',
+    '找负一层带有开闭所的图纸',
+    '搜索 b1 开闭所 图纸',
+])
+def test_natural_language_plan_constraints(search_env, query):
+    names = ['地下室一层_开闭所.dwg', '地下室二层_开闭所.dwg',
+             '地上一层_开闭所.dwg', '地下室一层_消防泵房.dwg',
+             '地下室一层_不含开闭所.dwg', 'opaque.dwg']
+    entries = [upload(search_env, name) for name in names]
+    for entry in entries:
+        publish(search_env, entry['version_id'])
+    conn = connect(search_env[3])
+    update_search_metadata(conn, entries[-1]['version_id'], project='合成项目甲', description='地下一层 开闭所 平面布置')
+    conn.commit()
+    ids = [card['version_id'] for card in search_attachment_files(conn, query, categories=None)]
+    assert ids == [entries[0]['version_id'], entries[-1]['version_id']]
+    assert search_attachment_files(conn, query, categories=[]) == []
+    assert search_attachment_files(conn, query, categories=['unrelated']) == []
+    assert [c['version_id'] for c in search_attachment_files(conn, '找合成项目甲 地下一层含开闭所的图纸', categories=None)] == [entries[-1]['version_id']]
+    for negative in ('找合成项目乙 地下一层含开闭所的图纸', '找地下三层含开闭所的图纸',
+                     '找地下一层不含开闭所的图纸', '找地下一层没有开闭所的图纸',
+                     '找地下一层开闭所 设备编号123 图纸'):
+        assert search_attachment_files(conn, negative, categories=None) == []
+    conn.close()
+
+
+def test_lexical_parser_keeps_unknown_identity_and_bounds():
+    from src.attachment_search import attachment_query_terms
+    from api.content_search import _term_match
+    assert attachment_query_terms('找内含项目 地下一层含开闭所的图纸') == ['内含项目', '地下一层', '开闭所']
+    assert attachment_query_terms('消防图纸') == ['消防图纸']
+    assert attachment_query_terms('找' + ' '.join(f'id{i}' for i in range(13))) == []
+    assert _term_match('ABC1234.dwg', 'abc123') == 0
+    assert _term_match('XABC123.dwg', 'abc123') == 0
+    assert _term_match('abc123.DWG', 'abc123') == 1
+    assert _term_match('B11 开闭所', 'b1') == 0
+    assert _term_match('地下十一层 开闭所', '地下一层') == 0
+    assert _term_match('地下室一层 不含开闭所', '开闭所') == 0
+
+
+def test_exact_name_stopwords_and_numeric_near_misses(search_env):
+    entries = [upload(search_env, name) for name in ('不含开闭所的案例图纸.dwg', '图片11.png', '图片111.png')]
+    for entry in entries:
+        publish(search_env, entry['version_id'])
+    conn = connect(search_env[3])
+    assert search_attachment_files(conn, '不含开闭所的案例图纸.dwg', categories=None)[0]['version_id'] == entries[0]['version_id']
+    assert [c['version_id'] for c in search_attachment_files(conn, '图片11', categories=None)] == [entries[1]['version_id']]
+    conn.close()
+
+
 def test_upgrade_from_45_and_replay(tmp_path, monkeypatch):
     from api import db_migrations
     path = tmp_path/'upgrade.sqlite'

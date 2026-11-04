@@ -28,6 +28,15 @@ on:
         options:
           - PRESERVE_EXISTING
           - REQUIRE_EMPTY
+      image_ocr_action:
+        description: Preserve OCR state, enable private local CPU OCR, or disable without backfill
+        required: true
+        default: PRESERVE_CURRENT
+        type: choice
+        options:
+          - PRESERVE_CURRENT
+          - ENABLE_LOCAL
+          - DISABLE_LOCAL
       schema_migration:
         description: Explicitly apply pending forward-only application SQLite migrations
         required: true
@@ -72,12 +81,20 @@ jobs:
       TRANSCRIPTION_ADMISSION_ACTION: ${{ inputs.transcription_admission }}
       CONTENT_ROOT_POLICY: ${{ inputs.content_root_policy }}
       SCHEMA_MIGRATION_ACTION: ${{ inputs.schema_migration }}
+      IMAGE_OCR_ACTION: ${{ inputs.image_ocr_action }}
       CONFIGURED_TRANSCRIPTION_ADMITTED_PROFILE_IDS: ${{ vars.TRANSCRIPTION_ADMITTED_PROFILE_IDS }}
       DEPLOY_COMMIT_SHA: ${{ github.sha }}
     steps:
       - name: Back up, deploy, and strictly verify the selected App commit
         run: |
           set -euo pipefail
+          # Resolved private Compose files and all backups may contain credentials.
+          # Never upload/dump these files or enable shell tracing.
+          umask 077
+          case "${IMAGE_OCR_ACTION}" in
+            PRESERVE_CURRENT|ENABLE_LOCAL|DISABLE_LOCAL) ;;
+            *) echo "ERROR: invalid image OCR action"; exit 1 ;;
+          esac
 
           [ "${CONFIRM_PRODUCTION}" = "DEPLOY_APP" ] || {
             echo "ERROR: App-only production deployment was not confirmed"
@@ -309,6 +326,7 @@ jobs:
               "content_reclassification_jobs": ("pending", "applying", "committing", "rolling_back"),
               "content_bulk_operations": ("queued", "running", "packaging"),
               "index_jobs": ("pending", "running", "uploading", "queued_mineru", "parsing", "chunking", "embedding"),
+              "image_ocr_jobs": ("pending", "running"),
               "transcript_publication_index_jobs": ("pending", "parsing", "chunking", "embedding"),
               "transcription_jobs": ("pending", "running", "processing"),
           }
@@ -385,6 +403,12 @@ jobs:
           echo "APP_ONLY_CONTENT_DISK status=ready available_kib=${CONTENT_AVAILABLE_KIB} required_kib=12582912"
 
           ORIGINAL_COMPOSE_OVERRIDE="${COMPOSE_OVERRIDE}"
+          # Dedicated app-owned state, outside checkout and workflow artifacts.
+          OCR_STATE_DIR="$(dirname "${ORIGINAL_COMPOSE_OVERRIDE}")/image-ocr-managed"
+          case "${OCR_STATE_DIR}/" in
+            "${REPO_PATH}/"*) echo "ERROR: OCR state must be outside the checkout"; exit 1 ;;
+          esac
+          [ ! -L "${OCR_STATE_DIR}" ] || { echo "ERROR: OCR state cannot be a symlink"; exit 1; }
           if [ "${SOURCE_DECOUPLING_COMPLETE:-false}" = "true" ]; then
             SANITIZER="${BACKUP_DIR}/.sanitize-source-decoupled-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.py"
             SANITIZED_OVERRIDE="${BACKUP_DIR}/.compose-private-source-decoupled-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
@@ -417,7 +441,7 @@ jobs:
           DEPLOY_COMPOSE=(docker compose -p ragpincheng-prod \
             "${COMPOSE_FILES[@]}" --env-file "${COMPOSE_ENV_FILE}")
           COMPOSE_DIAGNOSTIC_PATH="${BACKUP_DIR}/.compose-source-decoupled-diagnostic-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
-          "${DEPLOY_COMPOSE[@]}" config --format json > "${COMPOSE_DIAGNOSTIC_PATH}.tmp"
+          "${DEPLOY_COMPOSE[@]}" config --no-env-resolution --format json > "${COMPOSE_DIAGNOSTIC_PATH}.tmp"
           mv "${COMPOSE_DIAGNOSTIC_PATH}.tmp" "${COMPOSE_DIAGNOSTIC_PATH}"
           DIAGNOSTIC_PATH="${COMPOSE_DIAGNOSTIC_PATH}" python3 - <<'PY'
           import json
@@ -438,12 +462,22 @@ jobs:
               + json.dumps(backend.get("tmpfs", []), ensure_ascii=True)
           )
           PY
-          CURRENT_COMPOSE_FILES=(
-            -f "${REPO_PATH}/docker/docker-compose.yml"
-            -f "${ORIGINAL_COMPOSE_OVERRIDE}"
-          )
+          # Never merge a retained complete stack back over the public base:
+          # doing so resurrects retired /app/docs binds alongside its tmpfs.
+          if [ -f "${OCR_STATE_DIR}/compose.json" ]; then
+            CURRENT_COMPOSE_FILES=(-f "${OCR_STATE_DIR}/compose.json")
+          else
+            # Already sanitized private stack + final source-decoupled !override.
+            CURRENT_COMPOSE_FILES=("${COMPOSE_FILES[@]}")
+          fi
           COMPOSE=(docker compose -p ragpincheng-prod \
             "${CURRENT_COMPOSE_FILES[@]}" --env-file "${COMPOSE_ENV_FILE}")
+          PREVIOUS_OCR_ENABLED="$("${COMPOSE[@]}" exec -T backend python -c \
+            'from src import config; print("true" if getattr(config,"IMAGE_OCR_ENABLED",False) else "false")')"
+          case "${PREVIOUS_OCR_ENABLED}" in
+            true|false) ;;
+            *) echo "ERROR: invalid current OCR enablement"; exit 1 ;;
+          esac
 
           remove_legacy_recovery_backend() {
             local candidate project service host_port container_port
@@ -885,16 +919,82 @@ jobs:
           }
           printf '%s\n' "${OLD_IMAGE_ID}" > "${BACKUP_PATH}/backend-image.txt"
           printf '%s\n' "${ROLLBACK_IMAGE_TAG}" > "${BACKUP_PATH}/backend-rollback-tag.txt"
+          OCR_HELPER="${BACKUP_PATH}/controlled_ocr_deploy.py"
+          git show "${DEPLOY_COMMIT_SHA}:scripts/controlled_ocr_deploy.py" > "${OCR_HELPER}"
+          python3 "${OCR_HELPER}" snapshot --directory "${OCR_STATE_DIR}" --backup "${BACKUP_PATH}/image-ocr"
+          # Preserve private config/env files as opaque owner-only backup copies.
+          cp -p "${ORIGINAL_COMPOSE_OVERRIDE}" "${BACKUP_PATH}/compose-private.before"
+          cp -p "${COMPOSE_ENV_FILE}" "${BACKUP_PATH}/compose-env.before"
+          chmod 600 "${BACKUP_PATH}/compose-private.before" "${BACKUP_PATH}/compose-env.before"
+          "${DEPLOY_COMPOSE[@]}" config --no-env-resolution --format json > "${BACKUP_PATH}/ocr-base.json"
+          ASR_ENABLED="${PREVIOUS_ASR_ENABLED}" \
+            TRANSCRIPTION_ADMITTED_PROFILE_IDS="${PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS}" \
+            "${COMPOSE[@]}" config --no-env-resolution --format json > "${BACKUP_PATH}/rollback-compose.json"
+          # This immutable complete prior stack is the sole rollback input.
+          COMPOSE=(docker compose -p ragpincheng-prod \
+            -f "${BACKUP_PATH}/rollback-compose.json" --env-file "${COMPOSE_ENV_FILE}")
+          OLD_OCR_CONTAINER="$("${COMPOSE[@]}" ps -aq image-ocr 2>/dev/null || true)"
+          if [ -n "${OLD_OCR_CONTAINER}" ]; then
+            OLD_OCR_IMAGE_ID="$(docker inspect --format '{{.Image}}' "${OLD_OCR_CONTAINER}")"
+          else
+            OLD_OCR_IMAGE_ID="$(docker image inspect pincheng-image-ocr:local-v1 --format '{{.Id}}' 2>/dev/null || true)"
+          fi
+          if [ "${PREVIOUS_OCR_ENABLED}" = "true" ]; then
+            [ -n "${OLD_OCR_CONTAINER}" ] && [ -n "${OLD_OCR_IMAGE_ID}" ] || {
+              echo "ERROR: enabled OCR requires a retained current service/image for rollback"
+              exit 1
+            }
+          fi
+          OCR_ROLLBACK_TAG="pincheng-image-ocr:rollback-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [ -n "${OLD_OCR_IMAGE_ID}" ]; then
+            docker tag "${OLD_OCR_IMAGE_ID}" "${OCR_ROLLBACK_TAG}"
+          fi
+          printf '%s\n' "${OLD_OCR_IMAGE_ID}" > "${BACKUP_PATH}/image-ocr-image.before"
           echo "APP_ONLY_BACKUP status=complete path=${BACKUP_PATH} rollback_image=retained"
 
           rollback_backend() {
             echo "APP_ONLY_ROLLBACK status=starting"
+            if [ -f "${OCR_STATE_DIR}/compose.json" ]; then
+              docker compose -p ragpincheng-prod -f "${OCR_STATE_DIR}/compose.json" \
+                --env-file "${COMPOSE_ENV_FILE}" stop image-ocr || return 1
+            fi
+            python3 "${OCR_HELPER}" restore --directory "${OCR_STATE_DIR}" --backup "${BACKUP_PATH}/image-ocr" || return 1
+            if [ -n "${OLD_OCR_IMAGE_ID}" ]; then
+              docker tag "${OCR_ROLLBACK_TAG}" pincheng-image-ocr:local-v1 || return 1
+            fi
+            if [ "${PREVIOUS_OCR_ENABLED}" = "true" ]; then
+              "${COMPOSE[@]}" up -d --no-deps --force-recreate image-ocr || return 1
+            fi
             export ASR_ENABLED="${PREVIOUS_ASR_ENABLED}"
             export TRANSCRIPTION_ADMITTED_PROFILE_IDS="${PREVIOUS_TRANSCRIPTION_ADMITTED_PROFILE_IDS}"
             if ! "${COMPOSE[@]}" stop backend; then
               echo "APP_ONLY_ROLLBACK status=failed stage=stop-backend"
               return 1
             fi
+            # Restore databases only for a schema change or failed integrity;
+            # OCR/config/probe failures alone must not rewind user records.
+            RESTORE_DATABASES=false
+            if [ -f "${BACKUP_PATH}/app-deploy-started" ]; then
+              RESTORE_DATABASES="$(SRC="${BACKUP_PATH}" DST="${DATA_PATH}" python3 - <<'PY'
+          import os, sqlite3
+          from pathlib import Path
+          def schema_version(path):
+              with sqlite3.connect(f'file:{path}?mode=ro', uri=True) as database:
+                  if database.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+                      raise ValueError('sqlite_integrity_failed')
+                  if database.execute('PRAGMA foreign_key_check').fetchone():
+                      raise ValueError('sqlite_foreign_keys_failed')
+                  exists = database.execute("SELECT 1 FROM sqlite_master WHERE name='app_schema_migrations'").fetchone()
+                  return database.execute('SELECT max(version) FROM app_schema_migrations').fetchone()[0] if exists else None
+          try:
+              changed = any(schema_version(Path(os.environ['SRC']) / name) != schema_version(Path(os.environ['DST']) / name) for name in ('app.sqlite', 'parents.sqlite'))
+          except (sqlite3.Error, OSError, ValueError):
+              changed = True
+          print('true' if changed else 'false')
+          PY
+              )" || return 1
+            fi
+            if [ "${RESTORE_DATABASES}" = "true" ]; then
             if ! SRC="${BACKUP_PATH}" DST="${DATA_PATH}" python3 - <<'PY'
           import os
           import shutil
@@ -938,6 +1038,7 @@ jobs:
               echo "APP_ONLY_ROLLBACK status=failed stage=restore-databases"
               return 1
             fi
+            fi
             if ! docker tag "${ROLLBACK_IMAGE_TAG}" pincheng-rag-backend:latest; then
               echo "APP_ONLY_ROLLBACK status=failed stage=restore-image-tag"
               return 1
@@ -967,6 +1068,22 @@ jobs:
                   echo "APP_ONLY_ROLLBACK status=failed stage=verify-admission"
                   return 1
                 fi
+                if ! "${COMPOSE[@]}" exec -T backend python -c \
+                  'from src import config; import sys; enabled=bool(getattr(config,"IMAGE_OCR_ENABLED",False)); assert enabled == (sys.argv[1] == "true"); assert not enabled or bool(config.IMAGE_OCR_TOKEN)' "${PREVIOUS_OCR_ENABLED}"; then
+                  echo "APP_ONLY_ROLLBACK status=failed stage=verify-ocr-state"
+                  return 1
+                fi
+                if [ "${PREVIOUS_OCR_ENABLED}" = "true" ]; then
+                  RESTORED_OCR_CONTAINER="$("${COMPOSE[@]}" ps -q image-ocr)"
+                  [ -n "${RESTORED_OCR_CONTAINER}" ] || return 1
+                  RESTORED_OCR_IMAGE="$(docker inspect --format '{{.Image}}' "${RESTORED_OCR_CONTAINER}")"
+                  [ "${RESTORED_OCR_IMAGE}" = "${OLD_OCR_IMAGE_ID}" ] || return 1
+                  RESTORED_OCR_HEALTH="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "${RESTORED_OCR_CONTAINER}")"
+                  if [ "${RESTORED_OCR_HEALTH}" != "healthy" ]; then
+                    sleep 5
+                    continue
+                  fi
+                fi
                 docker image rm "${ROLLBACK_IMAGE_TAG}" >/dev/null 2>&1 || \
                   echo "WARNING: retained rollback tag could not be removed"
                 echo "APP_ONLY_ROLLBACK status=complete image=${OLD_IMAGE_ID}"
@@ -982,12 +1099,35 @@ jobs:
           (
             set -euo pipefail
             git merge --ff-only "${DEPLOY_COMMIT_SHA}"
+            python3 "${OCR_HELPER}" prepare --directory "${OCR_STATE_DIR}" \
+              --repository "${REPO_PATH}" --base "${BACKUP_PATH}/ocr-base.json" \
+              --action "${IMAGE_OCR_ACTION}" --previous-enabled "${PREVIOUS_OCR_ENABLED}"
+            export COMPOSE_OVERRIDE="${OCR_STATE_DIR}/compose.json"
+            DEPLOY_COMPOSE=(docker compose -p ragpincheng-prod \
+              -f "${COMPOSE_OVERRIDE}" --env-file "${COMPOSE_ENV_FILE}")
+            "${DEPLOY_COMPOSE[@]}" config --quiet
+            OCR_TARGET_ENABLED="$(python3 -c 'import json,sys; print("true" if json.load(open(sys.argv[1]))["enabled"] else "false")' "${OCR_STATE_DIR}/state.json")"
+            if [ "${OCR_TARGET_ENABLED}" = "true" ]; then
+              "${DEPLOY_COMPOSE[@]}" build image-ocr
+              "${DEPLOY_COMPOSE[@]}" up -d --no-deps --force-recreate image-ocr
+              OCR_CONTAINER="$("${DEPLOY_COMPOSE[@]}" ps -q image-ocr)"
+              [ -n "${OCR_CONTAINER}" ]
+              for ATTEMPT in $(seq 1 36); do
+                OCR_HEALTH="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "${OCR_CONTAINER}")"
+                [ "${OCR_HEALTH}" = "healthy" ] && break
+                sleep 5
+              done
+              [ "${OCR_HEALTH}" = "healthy" ]
+            else
+              "${DEPLOY_COMPOSE[@]}" stop image-ocr
+            fi
             DEPLOY_SCRIPT="${RUNNER_TEMP}/deploy-app-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sh"
             trap 'rm -f "${DEPLOY_SCRIPT}" "${DEPLOY_SCRIPT}.tmp"' EXIT
             git show "${DEPLOY_COMMIT_SHA}:scripts/deploy-app.sh" > "${DEPLOY_SCRIPT}.tmp"
             mv "${DEPLOY_SCRIPT}.tmp" "${DEPLOY_SCRIPT}"
             chmod 700 "${DEPLOY_SCRIPT}"
             echo "TRANSCRIPTION_ADMISSION action=${TRANSCRIPTION_ADMISSION_ACTION} source=workflow-environment"
+            touch "${BACKUP_PATH}/app-deploy-started"
             bash "${DEPLOY_SCRIPT}"
             COMPOSE=("${DEPLOY_COMPOSE[@]}")
 
@@ -1026,6 +1166,11 @@ jobs:
             verify_gpu_identity
             verify_gpu_inference
             verify_transcription_admission
+            "${COMPOSE[@]}" exec -T backend python -m scripts.verify_local_image_ocr
+            "${COMPOSE[@]}" exec -T backend python -c \
+              'from src.config import IMAGE_OCR_ENABLED; import sys; assert IMAGE_OCR_ENABLED == (sys.argv[1] == "true")' "${OCR_TARGET_ENABLED}"
+            python3 "${OCR_HELPER}" verify-history --database "${APP_DATABASE}" \
+              --baseline "${BACKUP_PATH}/app.sqlite"
             [ "$(git rev-parse HEAD)" = "${DEPLOY_COMMIT_SHA}" ]
             echo "APP_ONLY_DEPLOY status=success target=${DEPLOY_COMMIT_SHA} image=${EXPECTED_IMAGE_ID}"
           )
