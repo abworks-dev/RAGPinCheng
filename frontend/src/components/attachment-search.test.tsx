@@ -12,14 +12,27 @@ afterEach(cleanup);
 beforeEach(() => { vi.clearAllMocks(); mocks.attachmentSearchInfo.mockResolvedValue(metadata); mocks.attachmentOcr.mockResolvedValue({ version_id: "version-1", current_job_id: null, jobs: [] }); mocks.updateAttachmentSearchMetadata.mockResolvedValue(metadata); });
 function panel(docType = "png", canEdit = true) { render(<AttachmentSearchPanel versionId="version-1" docType={docType} canEdit={canEdit} />); fireEvent.click(screen.getByText("文件搜索信息与原图文字识别")); }
 describe("attachment discovery separation", () => {
+  it("toggles details closed explicitly, preserves action order and dismisses with Escape", () => {
+    render(<PdfPreviewProvider><FileResultCards results={[file]} /></PdfPreviewProvider>);
+    const more = screen.getByRole("button", { name: "更多信息：合成文件" });
+    const details = document.getElementById(more.getAttribute("aria-controls")!)!;
+    fireEvent.click(more); expect(more).toHaveAttribute("aria-expanded", "true");
+    expect(more.compareDocumentPosition(screen.getByRole("button", { name: "预览附件" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(more); expect(more).toHaveAttribute("aria-expanded", "false");
+    expect(details.className).toContain("invisible opacity-0"); expect(details.className).not.toContain("group-focus-within:visible");
+    fireEvent.click(more); fireEvent.keyDown(more, { key: "Escape" });
+    expect(more).toHaveAttribute("aria-expanded", "false"); expect(more).toHaveFocus();
+  });
   it("shows independent file match reasons without technical identifiers or implied citations", () => {
     render(<PdfPreviewProvider><FileResultCards results={[file]} /></PdfPreviewProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "更多信息：合成文件" }));
     expect(screen.getByText("匹配：OCR 文字")).toBeInTheDocument(); expect(screen.getByText(/不作为正文问答依据/)).toBeInTheDocument();
     expect(screen.queryByText("internal-item")).not.toBeInTheDocument(); expect(screen.queryByText("internal-category")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "下载原文件" })).toBeDisabled(); expect(screen.getByRole("button", { name: "预览附件" })).toBeEnabled();
   });
   it("opens a chat version without fabricating parent identity", () => {
     render(<PdfPreviewProvider><FileResultCards results={[file]} /></PdfPreviewProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "更多信息：合成文件" }));
     fireEvent.click(screen.getByRole("button", { name: "预览附件" }));
     expect(screen.getByRole("button", { name: "预览附件" })).toBeInTheDocument();
   });

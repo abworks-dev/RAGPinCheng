@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { FileResult } from "../types";
 import { api } from "../api/client";
 import { usePdfPreview } from "../hooks/usePdfPreview";
 import { Button } from "./ui/button";
+import { AttachmentThumbnail } from "./AttachmentThumbnail";
 
 const fields: Record<string, string> = { title: "标题", original_filename: "文件名", description: "描述", tags: "标签", project: "项目", aliases: "别名", category_path: "分类", ocr_text: "OCR 文字" };
 export function FileResultCards({ results }: { results: FileResult[] }) {
@@ -10,11 +12,12 @@ export function FileResultCards({ results }: { results: FileResult[] }) {
 }
 function AttachmentCards({ results }: { results: FileResult[] }) {
   const { openAttachment } = usePdfPreview();
+  const strip = useRef<HTMLUListElement>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  if (!results.length) return null;
   const download = async (file: FileResult) => {
+    if (!file.can_download || busy !== null) return;
     setBusy(file.version_id); setError(""); setSuccess("");
     try {
       const result = await api.downloadChatAttachment(file.version_id, file.original_filename);
@@ -24,23 +27,44 @@ function AttachmentCards({ results }: { results: FileResult[] }) {
     } catch (reason) { setError(reason instanceof Error ? reason.message : "下载失败，请重试"); }
     finally { setBusy(null); }
   };
-  return <section aria-label="找到的附件" className="mt-4 min-w-0 space-y-2">
-    <h3 className="text-sm font-medium">相关附件 · {results.length}</h3>
+  const scroll = (direction: number) => strip.current?.scrollBy({ left: direction * 212, behavior: "smooth" });
+  return <section aria-label="找到的附件" className="mt-4 w-full min-w-0 max-w-full space-y-2">
+    <div className="flex min-w-0 items-center justify-between gap-2"><h3 className="text-sm font-medium">相关附件 · {results.length}</h3><div className="flex shrink-0 gap-1">
+      <Button size="icon" variant="ghost" aria-label="向左滚动附件" title="向左滚动附件" onClick={() => scroll(-1)}><ChevronLeft aria-hidden="true" className="h-4 w-4" /></Button>
+      <Button size="icon" variant="ghost" aria-label="向右滚动附件" title="向右滚动附件" onClick={() => scroll(1)}><ChevronRight aria-hidden="true" className="h-4 w-4" /></Button>
+    </div></div>
     <p className="text-xs text-muted-foreground">按文件信息或 OCR 文字匹配，不作为正文问答依据；未解析模型内容或理解图片。</p>
-    <ul className="space-y-2">{results.map(file => <li key={file.version_id} className="min-w-0 rounded-ui-md border border-border bg-card p-3">
-      <h4 className="break-words text-sm font-medium [overflow-wrap:anywhere]">{file.title || file.original_filename}</h4>
-      <p className="mt-1 break-words text-xs text-muted-foreground [overflow-wrap:anywhere]">{file.original_filename} · {file.doc_type.toUpperCase()} · {(file.file_size / 1024 / 1024).toFixed(2)} MB · v{file.version_number}</p>
-      {file.category_path && <p className="mt-1 break-words text-xs">{file.category_path}</p>}
-      <p className="mt-2 break-words text-xs text-muted-foreground">匹配：{file.matched_fields.map(value => fields[value] || "文件信息").join("、") || "文件信息"}</p>
-      {file.snippet && <p className="mt-1 whitespace-pre-wrap break-words text-sm [overflow-wrap:anywhere]">{file.snippet}</p>}
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="outline" disabled={!file.can_preview} title={file.can_preview ? "预览所选版本" : "此附件暂无可用预览"} onClick={() => openAttachment(file.version_id, file.title || file.original_filename, file.doc_type)}>预览附件</Button>
-        <Button size="sm" variant="outline" disabled={!file.can_download || busy !== null} title={!file.can_download ? "无原文件下载权限" : "下载所选版本"} onClick={() => void download(file)}>{busy === file.version_id ? "下载中…" : "下载原文件"}</Button>
-        {!file.can_preview && <span className="text-xs text-muted-foreground">暂无可用预览</span>}
-        {!file.can_download && <span className="text-xs text-muted-foreground">无下载权限</span>}
-      </div>
-    </li>)}</ul>
+    <ul ref={strip} aria-label="附件列表" className="flex w-full min-w-0 max-w-full snap-x gap-3 overflow-x-auto overscroll-x-contain py-1" onFocusCapture={event => { const card = (event.target as HTMLElement).closest("li"); card?.scrollIntoView?.({ block: "nearest", inline: "nearest" }); }}>
+      {results.map(file => <AttachmentCard key={file.version_id} file={file} busy={busy} onDownload={() => void download(file)} onPreview={() => openAttachment(file.version_id, file.title || file.original_filename, file.doc_type)} />)}
+    </ul>
     {error && <p role="alert" className="break-words text-sm text-destructive">{error}</p>}
     {success && <p role="status" className="text-xs">{success}</p>}
   </section>;
+}
+function AttachmentCard({ file, busy, onDownload, onPreview }: { file: FileResult; busy: string | null; onDownload: () => void; onPreview: () => void }) {
+  const [expanded, setExpanded] = useState<boolean | null>(null);
+  const id = useId();
+  const title = file.title || file.original_filename;
+  return <li className="group relative w-[12.5rem] min-w-0 max-w-full shrink-0 snap-start overflow-hidden rounded-ui-md border border-border bg-card" onFocusCapture={event => { if ((event.target as HTMLElement).matches(":focus-visible") && expanded !== false) setExpanded(true); }} onBlurCapture={event => { if (expanded !== true && !event.currentTarget.contains(event.relatedTarget as Node | null)) setExpanded(null); }} onKeyDown={event => { if (event.key === "Escape") { event.currentTarget.querySelector<HTMLButtonElement>("button")?.focus(); setExpanded(false); } }}>
+    <Button size="sm" variant="ghost" className="absolute bottom-2 right-2 z-10 px-2 text-xs" aria-label={`更多信息：${title}`} aria-expanded={expanded === true} aria-controls={id} onClick={() => setExpanded(value => !value)}>更多</Button>
+    <div className="relative h-[9.5rem] min-w-0">
+      <AttachmentThumbnail file={file} />
+      <div id={id} className={`absolute inset-0 flex min-w-0 flex-col bg-card/95 p-2 transition-opacity ${expanded === true ? "visible opacity-100" : expanded === false ? "invisible opacity-0" : "invisible opacity-0 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"}`}>
+        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto break-words text-xs [overflow-wrap:anywhere]" tabIndex={0} aria-label={`${title}的详细信息`}>
+          <p>{file.category_path || "未分类"} · v{file.version_number} · {(file.file_size / 1024 / 1024).toFixed(2)} MB</p>
+          <p className="text-muted-foreground">匹配：{file.matched_fields.map(value => fields[value] || "文件信息").join("、") || "文件信息"}</p>
+          {file.snippet && <p className="whitespace-pre-wrap">{file.snippet}</p>}
+          {!file.can_preview && <p>暂无可用预览</p>}{!file.can_download && <p>无下载权限</p>}
+        </div>
+        <div className="mt-2 flex shrink-0 flex-wrap gap-1">
+          <Button size="sm" variant="outline" className="px-2 text-xs" disabled={!file.can_preview} title={file.can_preview ? "预览所选版本" : "此附件暂无可用预览"} onClick={() => { setExpanded(true); onPreview(); }}>预览附件</Button>
+          <Button size="sm" variant="outline" className="px-2 text-xs" disabled={!file.can_download || busy !== null} title={!file.can_download ? "无原文件下载权限" : "下载所选版本"} onClick={onDownload}>{busy === file.version_id ? "下载中…" : "下载原文件"}</Button>
+        </div>
+      </div>
+    </div>
+    <div className="min-w-0 p-2">
+      <h4 title={`${title} · ${file.original_filename}`} className="line-clamp-2 h-10 break-words text-sm font-medium leading-5 [overflow-wrap:anywhere]">{file.original_filename}</h4>
+      <div className="mt-1 flex items-center justify-between gap-1"><span className="truncate text-xs text-muted-foreground">{file.doc_type.toUpperCase()}</span></div>
+    </div>
+  </li>;
 }
