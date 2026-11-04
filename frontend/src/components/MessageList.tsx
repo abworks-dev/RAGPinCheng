@@ -176,20 +176,20 @@ export function MessageList({
   if (messages.length === 0) {
     return (
       <div className={`flex items-center justify-center px-6 text-center ${centeredEmpty ? "flex-none" : "flex-1"}`}>
-        <div className="max-w-lg">
-          <h1 className="text-xl font-semibold text-foreground">从企业知识中找到可靠答案</h1>
-          <p className="text-muted mt-2">
-            统一管理公司多年积累的<strong>行业规范与标准</strong>、<strong>客户要求</strong>、
-            <strong>内部标准</strong>、<strong>项目资料</strong>与<strong>培训视频</strong>，
-            帮助员工快速查标准、查经验，并辅助新人培训。
+        <div className="w-full max-w-xl py-5 sm:py-8">
+          <p className="mb-3 text-ui-xs font-medium tracking-widest text-muted-foreground">品成 · 企业知识工作台</p>
+          <h1 className="text-2xl font-semibold leading-snug tracking-tight text-foreground sm:text-3xl">从企业知识中找到可靠答案</h1>
+          <p className="mx-auto mt-4 max-w-md text-ui-sm leading-7 text-muted-foreground">
+            查阅行业规范、客户要求、内部标准与项目经验。<br className="hidden sm:block" />
+            提问时带上项目背景或标准名称，让问题更清晰。
           </p>
-          <p className="text-muted mt-3 text-sm">
-            试着问：
-            <br />
-            <code className="text-xs">Revit 建模交付时的命名规则是什么？</code>
-            <br />
-            <code className="text-xs">XX 客户对图层有哪些特殊要求？</code>
-          </p>
+          <div className="mt-6 border-t border-border pt-4 text-left">
+            <p className="mb-2 text-ui-xs font-medium text-muted-foreground">提问参考</p>
+            <ul className="space-y-2 text-ui-sm leading-6 text-foreground">
+              <li>Revit 建模交付时的命名规则是什么？</li>
+              <li>项目使用的客户标准对图层有哪些要求？</li>
+            </ul>
+          </div>
         </div>
       </div>
     );
