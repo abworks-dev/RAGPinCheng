@@ -308,7 +308,7 @@ def test_upgrade_from_44_preserves_old_rows_and_allows_attachments(tmp_path, mon
     path = tmp_path / 'upgrade.sqlite'
     migrations = db_migrations.MIGRATIONS
     with monkeypatch.context() as patch:
-        patch.setattr(db_migrations, 'MIGRATIONS', migrations[:-1])
+        patch.setattr(db_migrations, 'MIGRATIONS', tuple(m for m in migrations if m.version <= 44))
         init_db(path, backup_dir=tmp_path / 'backups')
     conn = connect(path)
     conn.execute("INSERT INTO users(employee_id,real_name,password_hash,role,is_active,created_at) VALUES ('legacy','Legacy','unused','user',1,1)")
@@ -319,7 +319,7 @@ def test_upgrade_from_44_preserves_old_rows_and_allows_attachments(tmp_path, mon
     init_db(path, backup_dir=tmp_path / 'backups')
     init_db(path, backup_dir=tmp_path / 'backups')
     conn = connect(path)
-    assert conn.execute('SELECT max(version) FROM app_schema_migrations').fetchone()[0] == 45
+    assert conn.execute('SELECT max(version) FROM app_schema_migrations').fetchone()[0] == db_migrations.CURRENT_SCHEMA_VERSION
     assert conn.execute("SELECT real_name FROM users WHERE employee_id='legacy'").fetchone()[0] == 'Legacy'
     assert [tuple(row) for row in conn.execute('SELECT * FROM category_nodes ORDER BY id')] == category_rows
     schema = conn.execute("SELECT sql FROM sqlite_master WHERE name='content_versions'").fetchone()[0]

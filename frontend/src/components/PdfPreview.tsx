@@ -437,7 +437,7 @@ export function PdfPreview() {
     </IconButton>
   ) : null;
 
-  if (state.versionId && isAttachmentFormat(state.docType)) return <Suspense fallback={<ResourcePreviewShell open title={state.title} onClose={close}><p role="status" className="p-4">正在加载预览…</p></ResourcePreviewShell>}><AttachmentPreview key={state.versionId} versionId={state.versionId} title={state.title} onClose={close} backLabel={returnLabel} returnFocusTarget={state.returnFocusTarget} /></Suspense>;
+  if (state.versionId && (state.endpointMode === "chat" || isAttachmentFormat(state.docType))) return <Suspense fallback={<ResourcePreviewShell open title={state.title} onClose={close}><p role="status" className="p-4">正在加载预览…</p></ResourcePreviewShell>}><AttachmentPreview key={state.versionId} versionId={state.versionId} endpointMode={state.endpointMode} title={state.title} onClose={close} backLabel={returnLabel} returnFocusTarget={state.returnFocusTarget} /></Suspense>;
 
   return (
     <ResourcePreviewShell open={open} title={state.title} subtitle={typeLabel} onClose={close} backAction={backAction} toolbar={toolbar}>

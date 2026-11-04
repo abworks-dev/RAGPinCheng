@@ -103,6 +103,7 @@ def list_messages(conn: sqlite3.Connection, conversation_id: str) -> list[sqlite
     return conn.execute(
         "SELECT m.id, m.role, COALESCE(uv.content, v.content, m.content) AS content, "
         "COALESCE(v.sources_json, m.sources_json) AS sources_json, "
+        "COALESCE(v.file_results_json, m.file_results_json) AS file_results_json, "
         "v.policy_version, v.policy_json, m.created_at "
         "FROM messages m "
         "LEFT JOIN message_answer_heads h ON h.assistant_message_id = m.id "
@@ -118,7 +119,7 @@ def list_answer_versions(
     conn: sqlite3.Connection, assistant_message_id: int
 ) -> list[sqlite3.Row]:
     return conn.execute(
-        "SELECT v.id, v.version_index, v.content, v.sources_json, v.created_at, "
+        "SELECT v.id, v.version_index, v.content, v.sources_json, v.file_results_json, v.created_at, "
         "v.user_version_id, "
         "CASE WHEN h.active_version_id = v.id THEN 1 ELSE 0 END AS is_active "
         "FROM message_answer_versions v "
@@ -201,6 +202,43 @@ def _policy_snapshot_from_json(raw: str | None) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def _file_results_from_json(raw: str | None) -> list[dict]:
+    try:
+        value = json.loads(raw) if raw else []
+    except (ValueError, TypeError):
+        return []
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def configure_attachment_search(session: ChatSession, user) -> None:
+    """Bind request-authorized ports; each invocation gets a fresh DB connection."""
+    from src.config import ATTACHMENT_SEARCH_ENABLED
+    if not ATTACHMENT_SEARCH_ENABLED:
+        return
+    from .content_search import search_attachment_files, revalidate_attachment_results
+    def validate(results, *, categories=None):
+        conn = connect()
+        try:
+            return revalidate_attachment_results(conn, results, categories=categories, user=user)
+        finally:
+            conn.close()
+    def search(query, *, categories=None, limit=5):
+        conn = connect()
+        try:
+            return revalidate_attachment_results(conn, search_attachment_files(conn, query, categories=categories, limit=limit), categories=categories, user=user)
+        finally:
+            conn.close()
+    session.attachment_search = search
+    session.attachment_validator = validate
+
+
+def _persist_file_results(conn, plan, message, assistant_id):
+    raw = json.dumps(message.file_results, ensure_ascii=False)
+    conn.execute("UPDATE message_answer_versions SET file_results_json = ? WHERE id = (SELECT id FROM message_answer_versions WHERE assistant_message_id = ? ORDER BY version_index DESC LIMIT 1)", (raw, assistant_id))
+    if plan.edit_assistant_message_id is None and plan.regenerate_assistant_message_id is None:
+        conn.execute("UPDATE messages SET file_results_json = ? WHERE id = ?", (raw, assistant_id))
+
+
 def hydrate_session(conn: sqlite3.Connection, conv_row: sqlite3.Row) -> ChatSession:
     """Build a fresh ChatSession populated from the DB conversation state."""
     session = ChatSession()
@@ -213,6 +251,7 @@ def hydrate_session(conn: sqlite3.Connection, conv_row: sqlite3.Row) -> ChatSess
             except Exception:
                 sources_for_ui = None
         session.state.messages.append(Message(
+            file_results=_file_results_from_json(m["file_results_json"]),
             role=m["role"],
             content=m["content"],
             sources_for_ui=sources_for_ui,
@@ -394,6 +433,7 @@ def persist_turn(
             update_sql += " WHERE id = ?"
             params.append(plan.conversation_id)
             conn.execute(update_sql, params)
+            _persist_file_results(conn, plan, asst_msg, plan.edit_assistant_message_id)
             conn.commit()
             plan.persisted_assistant_message_id = plan.edit_assistant_message_id
             return
@@ -483,6 +523,7 @@ def persist_turn(
                     plan.conversation_id,
                 ),
             )
+            _persist_file_results(conn, plan, asst_msg, plan.regenerate_assistant_message_id)
             conn.commit()
             plan.persisted_assistant_message_id = plan.regenerate_assistant_message_id
             return
@@ -541,6 +582,7 @@ def persist_turn(
         update_sql += " WHERE id = ?"
         params.append(plan.conversation_id)
         conn.execute(update_sql, params)
+        _persist_file_results(conn, plan, asst_msg, persisted_assistant_message_id)
         conn.commit()
         plan.persisted_assistant_message_id = persisted_assistant_message_id
         # Abstention observability loop: record refusals/not-found turns so the
@@ -598,7 +640,8 @@ def prepare_regeneration(
     session = ChatSession()
     prior_rows = conn.execute(
         "SELECT m.id, m.role, COALESCE(uv.content, v.content, m.content) AS content, "
-        "COALESCE(v.sources_json, m.sources_json) AS sources_json "
+        "COALESCE(v.sources_json, m.sources_json) AS sources_json, "
+        "COALESCE(v.file_results_json, m.file_results_json) AS file_results_json "
         "FROM messages m "
         "LEFT JOIN message_answer_heads h ON h.assistant_message_id = m.id "
         "LEFT JOIN message_answer_versions v ON v.id = h.active_version_id "
@@ -609,6 +652,7 @@ def prepare_regeneration(
     ).fetchall()
     for row in prior_rows:
         session.state.messages.append(Message(
+            file_results=_file_results_from_json(row["file_results_json"]),
             role=row["role"],
             content=row["content"],
             sources_for_ui=json.loads(row["sources_json"]) if row["sources_json"] else None,
@@ -681,6 +725,7 @@ def wrap_stream_with_persistence(
         for chunk in raw_stream:
             yield chunk
     finally:
+        raw_stream.close()
         persist_turn(plan, session)
 
 

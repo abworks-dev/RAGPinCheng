@@ -100,6 +100,18 @@ jobs:
           tests/test_schema_migration_gate.py
           tests/test_content_reclassification.py
           tests/test_managed_publication_pipeline.py
+          tests/test_attachment_search.py
+          tests/test_image_ocr_jobs.py
+          tests/test_image_ocr_service.py
+          tests/test_attachment_chat.py
+          tests/test_attachment_chat_integration.py
+          tests/test_answer_regeneration.py
+      - name: Test bundled local OCR on synthetic images
+        if: env.RUN_PYTHON == 'true'
+        run: |
+          python -m venv .venv-ocr
+          .venv-ocr/bin/pip install -r services/image_ocr/requirements.txt
+          .venv-ocr/bin/python -m pytest services/image_ocr/test_engine.py -q
       - name: Set up Node.js
         if: env.RUN_FRONTEND == 'true'
         uses: actions/setup-node@v4

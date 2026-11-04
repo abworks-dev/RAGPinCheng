@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { ChatMessage, Source } from "../types";
+import type { ChatMessage, FileResult, Source } from "../types";
 import { calculateCitationTooltipPlacement, Message } from "./Message";
 
 const videoPlayerOpen = vi.hoisted(() => vi.fn());
@@ -184,6 +184,35 @@ describe("Message assistant actions", () => {
     const status = screen.getByRole("status");
     expect(status).toHaveTextContent("正在输出回答，基于 1 份资料");
     expect(status.querySelector(".bg-success")).toBeInTheDocument();
+  });
+
+  const matchedFile: FileResult = {
+    item_id: "synthetic-item", version_id: "synthetic-version", title: "合成附件",
+    original_filename: "synthetic.png", doc_type: "png", file_size: 1024,
+    category_key: "synthetic-category", category_path: "合成分类", version_number: 1,
+    matched_fields: ["description"], snippet: "合成匹配", preview_kind: "image",
+    can_preview: true, can_download: false,
+  };
+
+  it.each(["generating", "streaming", "done"] as const)("shows honest file-only status during %s", (stage) => {
+    render(<Message msg={assistant({ stage, sources: [], file_results: [matchedFile, { ...matchedFile, version_id: "synthetic-second-version" }], prep: prep(0, true) })} conversationId="conversation-1" turnIndex={1} />);
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("已找到 2 个附件，仅提供文件匹配");
+    expect(status).not.toHaveTextContent(/未检索到|回答基于|基于 .* 份资料/);
+    expect(status.querySelector(".bg-destructive")).not.toBeInTheDocument();
+    expect(status.querySelector(".bg-success")).toBeInTheDocument();
+  });
+
+  it.each(["generating", "streaming", "done"] as const)("keeps RAG source status for mixed results during %s", (stage) => {
+    render(<Message msg={assistant({ stage, file_results: [matchedFile], prep: prep(1) })} conversationId="conversation-1" turnIndex={1} />);
+    expect(screen.getByRole("status")).toHaveTextContent(/1 份资料/);
+    expect(screen.getByRole("status")).not.toHaveTextContent("仅提供文件匹配");
+  });
+
+  it("preserves low-confidence refusal even when files match", () => {
+    render(<Message msg={assistant({ stage: "done", sources: [], file_results: [matchedFile], done: { answer_text: "资料不足", sources: [], timings: {}, history_chars: 0, budget: 0, finish_reason: "retrieval_low_confidence" } })} conversationId="conversation-1" turnIndex={1} />);
+    expect(screen.getByRole("status")).toHaveTextContent("资料相关性不足，未生成回答");
+    expect(screen.getByRole("status").querySelector(".bg-destructive")).toBeInTheDocument();
   });
 
   it("shows a destructive status when streaming without retrieved sources", () => {

@@ -18,7 +18,7 @@ from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
 from src.config import CONTENT_MANAGEMENT_ENABLED, RERANK_ENABLED, EXTERNAL_MEDIA_SCAN_POLL_SECONDS
-from src.config import ASR_ENABLED, ASR_SERVICE_TOKEN
+from src.config import ASR_ENABLED, ASR_SERVICE_TOKEN, IMAGE_OCR_TIMEOUT_SECONDS
 
 from .auth import bootstrap_admin_from_env
 from .maintenance import run_cleanup
@@ -53,6 +53,11 @@ from .routes_admin_asr import router as admin_asr_router
 from .routes_auth import router as auth_router
 from .routes_chat import router as chat_router
 from .routes_content import router as content_router
+from .routes_attachment_search import (
+    router as attachment_search_router,
+    admin_router as attachment_search_admin_router,
+)
+from .image_ocr_jobs import start_image_ocr_worker
 from .routes_media import router as media_router
 from .routes_media_transcript import router as media_transcript_router
 from .routes_external_media import router as external_media_router, run_due_external_scans
@@ -215,10 +220,13 @@ async def lifespan(app: FastAPI):
         recover_transcription_on_boot()
     else:
         recover_transcription_on_boot(enqueue_pending=False)
+    image_ocr_stop, image_ocr_thread = start_image_ocr_worker()
     logger.info("api ready")
     try:
         yield
     finally:
+        image_ocr_stop.set()
+        await asyncio.to_thread(image_ocr_thread.join, IMAGE_OCR_TIMEOUT_SECONDS + 5)
         sweeper_task.cancel()
         trash_cleanup_task.cancel()
         try:
@@ -264,6 +272,8 @@ app.include_router(core_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(content_router, prefix="/api")
+app.include_router(attachment_search_router, prefix="/api/attachments")
+app.include_router(attachment_search_admin_router, prefix="/api/admin/content")
 app.include_router(admin_router, prefix="/api")
 app.include_router(admin_asr_router, prefix="/api")
 app.include_router(media_router, prefix="/api")

@@ -15,6 +15,7 @@ __pycache__/
 .codex-worktrees/
 jieba-0.42.1.tar.gz
 .venv/
+.venv-ocr/
 .venv-whisperx/
 .whisperx-cache/
 .whisperx-wheelhouse/

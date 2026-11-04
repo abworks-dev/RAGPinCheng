@@ -63,6 +63,32 @@ async function openAttachment(page: Page, format: string, options: { fail?: bool
   return page.getByRole("dialog", { name: item.title, exact: true });
 }
 
+test("metadata editing and OCR lifecycle remain version bound", async ({ page }, testInfo) => {
+  const sheet = await openAttachment(page, "png");
+  let metadata = { version_id: "version-1", description: "合成原图说明", tags: ["图纸"], project: "合成项目", aliases: [], revision: 1 };
+  let status = "no_text";
+  await page.route("**/api/admin/content/versions/version-1/search-info", route => route.fulfill({ json: metadata }));
+  await page.route("**/api/admin/content/versions/version-1/search-metadata", route => { expect(route.request().headers()["x-csrf-token"]).toBe("synthetic-csrf-token"); metadata = { ...metadata, ...route.request().postDataJSON(), revision: 2 }; return route.fulfill({ json: metadata }); });
+  await page.route("**/api/admin/content/versions/version-1/ocr", route => {
+    if (route.request().method() === "POST") { status = "running"; return route.fulfill({ json: { id: "job-1", status } }); }
+    return route.fulfill({ json: { version_id: "version-1", current_job_id: null, jobs: [{ id: "job-1", status }] } });
+  });
+  await page.route("**/api/admin/content/versions/version-1/ocr/cancel", route => { status = "cancelled"; return route.fulfill({ json: { version_id: "version-1", cancelled: 1 } }); });
+  await sheet.getByText("文件搜索信息与原图文字识别", { exact: true }).click();
+  await expect(sheet.getByLabel("描述", { exact: true })).toHaveValue("合成原图说明");
+  await sheet.getByLabel("描述", { exact: true }).fill("合成更新说明");
+  await sheet.getByRole("button", { name: "保存搜索信息" }).click();
+  await expect(sheet.getByText("当前版本文件搜索信息已保存")).toBeVisible();
+  await expect(sheet.getByText(/此状态不表示已理解图片/)).toBeVisible();
+  await sheet.getByRole("button", { name: "重新识别原图文字" }).click();
+  await expect(sheet.getByRole("button", { name: "重新识别原图文字" })).toBeDisabled();
+  await expect(sheet.getByRole("button", { name: "取消识别", exact: true })).toBeEnabled();
+  await sheet.getByRole("button", { name: "取消识别", exact: true }).click();
+  await expect(sheet.getByText(/已取消 · 暂无有效文字结果/)).toBeVisible();
+  await expectNoBodyOverflow(page);
+  await page.screenshot({ path: testInfo.outputPath(`attachment-search-success-${page.viewportSize()!.width}x${page.viewportSize()!.height}.png`) });
+});
+
 test("image native size rotate fit metadata and keyboard focus", async ({ page }, testInfo) => {
   const sheet = await openAttachment(page, "png");
   await expect(sheet.getByText("1200 × 800 像素")).toBeVisible();
@@ -71,7 +97,7 @@ test("image native size rotate fit metadata and keyboard focus", async ({ page }
   await sheet.getByRole("button", { name: "适合窗口", exact: true }).click();
   await sheet.getByText("文件信息 · 原文件预览").click();
   await expect(sheet.getByText("synthetic.png", { exact: true })).toBeVisible();
-  await expect(sheet.getByText("不参与 · 不创建检索索引")).toBeVisible();
+  await expect(sheet.getByText("不作为正文问答依据；文件信息可搜索，已启用的 OCR 文字可搜索")).toBeVisible();
   await expect(sheet.getByText("合成目录", { exact: true })).toBeVisible();
   await expect(sheet.getByText("网页上传", { exact: true })).toBeVisible();
   await expect(sheet.getByText("v1（待发布版本）", { exact: true })).toBeVisible();

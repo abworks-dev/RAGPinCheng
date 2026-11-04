@@ -4,6 +4,24 @@ import { api, setCsrfToken } from "./client";
 afterEach(() => { setCsrfToken(null); vi.unstubAllGlobals(); });
 
 describe("version bound attachment transport", () => {
+  it("uses only dedicated chat routes for safe metadata preview and download", async () => {
+    const fetcher = vi.fn().mockImplementation(async () => new Response("{}", { headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetcher);
+    await api.managedAttachmentInfo("version/1", undefined, "chat");
+    await api.managedAttachmentBytes("version/1", true, new AbortController().signal, "chat");
+    await api.downloadChatAttachment("version/1", "synthetic.png");
+    expect(fetcher.mock.calls.map(call => call[0])).toEqual(["/api/attachments/versions/version%2F1/info", "/api/attachments/versions/version%2F1/preview", "/api/attachments/versions/version%2F1/download"]);
+    for (const [, init] of fetcher.mock.calls) expect(init.credentials).toBe("include");
+  });
+  it("sends approved metadata fields and CSRF through version bound admin mutations", async () => {
+    const fetcher = vi.fn().mockImplementation(async () => new Response("{}", { headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetcher); setCsrfToken("synthetic-token");
+    const metadata = { description: "合成描述", tags: ["图纸"], project: "合成项目", aliases: ["合成别名"] };
+    await api.updateAttachmentSearchMetadata("version/1", metadata); await api.startAttachmentOcr("version/1"); await api.cancelAttachmentOcr("version/1");
+    expect(fetcher.mock.calls.map(call => call[0])).toEqual(["/api/admin/content/versions/version%2F1/search-metadata", "/api/admin/content/versions/version%2F1/ocr", "/api/admin/content/versions/version%2F1/ocr/cancel"]);
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual(metadata);
+    for (const [, init] of fetcher.mock.calls) { expect(init.credentials).toBe("include"); expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("synthetic-token"); }
+  });
   it("uses a separate sidecar endpoint with credentials and CSRF", async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response("{}", { headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetcher); setCsrfToken("synthetic-token");

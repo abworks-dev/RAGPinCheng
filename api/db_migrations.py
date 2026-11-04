@@ -1427,6 +1427,45 @@ MIGRATIONS += (Migration(45, 'versioned_non_rag_attachments', (
     )""",
     'CREATE INDEX IF NOT EXISTS idx_content_preview_history_version ON content_version_preview_history(version_id)',
 )),)
+MIGRATIONS += (Migration(46, 'attachment_search_and_original_image_ocr', (
+    "ALTER TABLE messages ADD COLUMN file_results_json TEXT NOT NULL DEFAULT '[]'",
+    "ALTER TABLE message_answer_versions ADD COLUMN file_results_json TEXT NOT NULL DEFAULT '[]'",
+    """CREATE TABLE IF NOT EXISTS attachment_search_metadata (
+        version_id TEXT PRIMARY KEY REFERENCES content_versions(id) ON DELETE CASCADE,
+        description TEXT NOT NULL DEFAULT '', tags_json TEXT NOT NULL DEFAULT '[]',
+        project TEXT NOT NULL DEFAULT '', aliases_json TEXT NOT NULL DEFAULT '[]',
+        revision INTEGER NOT NULL DEFAULT 1, updated_at INTEGER NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS attachment_search_documents (
+        version_id TEXT PRIMARY KEY REFERENCES content_versions(id) ON DELETE CASCADE,
+        source_sha256 TEXT NOT NULL, metadata_revision INTEGER NOT NULL DEFAULT 0,
+        title TEXT NOT NULL, filename TEXT NOT NULL, aliases TEXT NOT NULL,
+        tags TEXT NOT NULL, project TEXT NOT NULL, description TEXT NOT NULL,
+        ocr TEXT NOT NULL DEFAULT '', ocr_job_id TEXT, updated_at INTEGER NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS attachment_search_terms (
+        term TEXT NOT NULL, version_id TEXT NOT NULL REFERENCES content_versions(id) ON DELETE CASCADE,
+        field TEXT NOT NULL, PRIMARY KEY(term,version_id,field)
+    ) WITHOUT ROWID""",
+    "CREATE INDEX IF NOT EXISTS idx_attachment_terms_version ON attachment_search_terms(version_id)",
+    """CREATE TABLE IF NOT EXISTS image_ocr_jobs (
+        id TEXT PRIMARY KEY, version_id TEXT NOT NULL REFERENCES content_versions(id) ON DELETE CASCADE,
+        source_sha256 TEXT NOT NULL, attempt_number INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('pending','running','succeeded','no_text','failed','cancelled','stale')),
+        lease_token TEXT, lease_until INTEGER, error_code TEXT,
+        text TEXT, blocks_json TEXT, engine TEXT, model_version TEXT,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        UNIQUE(version_id,attempt_number)
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_image_ocr_active ON image_ocr_jobs(version_id) WHERE status IN ('pending','running')",
+    "CREATE INDEX IF NOT EXISTS idx_image_ocr_queue ON image_ocr_jobs(status,lease_until,created_at)",
+    """CREATE TABLE IF NOT EXISTS image_ocr_heads (
+        version_id TEXT PRIMARY KEY REFERENCES content_versions(id) ON DELETE CASCADE,
+        job_id TEXT NOT NULL UNIQUE REFERENCES image_ocr_jobs(id) ON DELETE CASCADE,
+        source_sha256 TEXT NOT NULL, updated_at INTEGER NOT NULL
+    )""",
+)),)
+
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
     {

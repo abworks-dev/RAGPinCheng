@@ -1,4 +1,7 @@
 import type {
+  AttachmentSearchMetadata,
+  AttachmentOcrState,
+  AttachmentOcrJob,
   AdminConversation,
   AdminFeedbackEntry,
   AdminFeedbackResponse,
@@ -923,10 +926,15 @@ export const api = {
       `/api/admin/content/versions/${encodeURIComponent(versionId)}/preview`,
       { method: "POST", body: JSON.stringify({}) },
     ),
-  managedAttachmentInfo: (versionId: string, signal?: AbortSignal) =>
-    jsonFetch<ManagedAttachmentInfo>(`/api/admin/content/versions/${encodeURIComponent(versionId)}/info`, { signal }),
-  managedAttachmentBytes: async (versionId: string, preview: boolean, signal: AbortSignal) => {
-    const path = `/api/admin/content/versions/${encodeURIComponent(versionId)}/${preview ? "preview" : "file?download=false"}`;
+  attachmentSearchInfo: (versionId: string, signal?: AbortSignal) => jsonFetch<AttachmentSearchMetadata>(`/api/admin/content/versions/${encodeURIComponent(versionId)}/search-info`, { signal }),
+  updateAttachmentSearchMetadata: (versionId: string, value: Pick<AttachmentSearchMetadata, "description" | "tags" | "project" | "aliases">) => jsonFetch<AttachmentSearchMetadata>(`/api/admin/content/versions/${encodeURIComponent(versionId)}/search-metadata`, { method: "PATCH", body: JSON.stringify(value) }),
+  attachmentOcr: (versionId: string, signal?: AbortSignal) => jsonFetch<AttachmentOcrState>(`/api/admin/content/versions/${encodeURIComponent(versionId)}/ocr`, { signal }),
+  startAttachmentOcr: (versionId: string) => jsonFetch<AttachmentOcrJob>(`/api/admin/content/versions/${encodeURIComponent(versionId)}/ocr`, { method: "POST", body: JSON.stringify({}) }),
+  cancelAttachmentOcr: (versionId: string) => jsonFetch<{ version_id: string; cancelled: number }>(`/api/admin/content/versions/${encodeURIComponent(versionId)}/ocr/cancel`, { method: "POST", body: JSON.stringify({}) }),
+  managedAttachmentInfo: (versionId: string, signal?: AbortSignal, mode: "admin" | "chat" = "admin") =>
+    jsonFetch<ManagedAttachmentInfo>(`${mode === "chat" ? "/api/attachments" : "/api/admin/content"}/versions/${encodeURIComponent(versionId)}/info`, { signal }),
+  managedAttachmentBytes: async (versionId: string, preview: boolean, signal: AbortSignal, mode: "admin" | "chat" = "admin") => {
+    const path = `${mode === "chat" ? "/api/attachments" : "/api/admin/content"}/versions/${encodeURIComponent(versionId)}/${preview ? "preview" : "file?download=false"}`;
     const response = await rawFetch(path, { signal });
     if (!response.ok) { await response.body?.cancel(); throw new ApiError(response.status, "", "无法读取资料预览，请检查权限或下载原文件"); }
     const max = 32 * 1024 * 1024;
@@ -1026,6 +1034,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({}),
     }),
+  downloadChatAttachment: (versionId: string, fallbackFilename: string) =>
+    fileFetch(`/api/attachments/versions/${encodeURIComponent(versionId)}/download`, fallbackFilename),
   downloadManagedContentFile: (versionId: string, fallbackFilename: string) =>
     fileFetch(`/api/admin/content/versions/${encodeURIComponent(versionId)}/file?download=true`, fallbackFilename),
   downloadManagedMedia: (

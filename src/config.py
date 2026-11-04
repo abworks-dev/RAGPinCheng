@@ -138,6 +138,21 @@ OFFICE_MIN_FREE_DISK_MB = int(os.getenv("OFFICE_MIN_FREE_DISK_MB", "1024"))
 CONTENT_HEAD_ENFORCEMENT = os.getenv("CONTENT_HEAD_ENFORCEMENT", "compat").strip().lower()
 if CONTENT_HEAD_ENFORCEMENT not in {"compat", "strict"}:
     raise ValueError("CONTENT_HEAD_ENFORCEMENT must be 'compat' or 'strict'")
+# Attachment discovery is independent of RAG evidence; OCR is local and opt-in.
+ATTACHMENT_SEARCH_ENABLED = os.getenv("ATTACHMENT_SEARCH_ENABLED", "true").strip().lower() in (
+    "1", "true", "yes", "on",
+)
+IMAGE_OCR_ENABLED = os.getenv("IMAGE_OCR_ENABLED", "false").strip().lower() in (
+    "1", "true", "yes", "on",
+)
+IMAGE_OCR_URL = os.getenv("IMAGE_OCR_URL", "http://image-ocr:8091").rstrip("/")
+IMAGE_OCR_TOKEN = os.getenv("IMAGE_OCR_TOKEN", "")
+IMAGE_OCR_TIMEOUT_SECONDS = int(os.getenv("IMAGE_OCR_TIMEOUT_SECONDS", "30"))
+IMAGE_OCR_MAX_BYTES = int(os.getenv("IMAGE_OCR_MAX_BYTES", "33554432"))
+IMAGE_OCR_MAX_PIXELS = int(os.getenv("IMAGE_OCR_MAX_PIXELS", "80000000"))
+if IMAGE_OCR_TIMEOUT_SECONDS < 1 or IMAGE_OCR_MAX_BYTES < 1 or IMAGE_OCR_MAX_PIXELS < 1:
+    raise ValueError("image OCR limits must be positive")
+
 CONTENT_TRASH_RETENTION_DAYS = int(os.getenv("CONTENT_TRASH_RETENTION_DAYS", "90"))
 CONTENT_TRASH_EXPIRING_WARNING_DAYS = int(os.getenv("CONTENT_TRASH_EXPIRING_WARNING_DAYS", "7"))
 if not 0 <= CONTENT_TRASH_EXPIRING_WARNING_DAYS <= CONTENT_TRASH_RETENTION_DAYS:

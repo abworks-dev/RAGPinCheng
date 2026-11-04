@@ -1777,7 +1777,25 @@ class PublishTranscriptVersionResponse(BaseModel):
 
 
 # SSE event payload helpers (not validated on the wire, but documented).
+class FileResultDTO(BaseModel):
+    item_id: str
+    version_id: str
+    title: str
+    original_filename: str
+    doc_type: str
+    file_size: int
+    category_key: str
+    category_path: str
+    version_number: int
+    matched_fields: list[str] = Field(default_factory=list)
+    snippet: str = ""
+    preview_kind: str
+    can_preview: bool = False
+    can_download: bool = False
+
+
 class PrepEvent(BaseModel):
+    file_results: list[FileResultDTO] = Field(default_factory=list)
     search_query: str
     rewrite_applied: bool
     history_chars: int
@@ -1794,6 +1812,7 @@ class PrepEvent(BaseModel):
 
 
 class DoneEvent(BaseModel):
+    file_results: list[FileResultDTO] = Field(default_factory=list)
     timings: dict[str, float]
     sources: list[SourceDTO]
     answer_text: str
@@ -1948,6 +1967,7 @@ class BulkDeleteTranscriptVersionsResponse(BaseModel):
 
 
 class AnswerVersionDTO(BaseModel):
+    file_results: list[FileResultDTO] = Field(default_factory=list)
     id: int
     version_index: int
     content: str
@@ -1966,6 +1986,7 @@ class UserQuestionVersionDTO(BaseModel):
 
 
 class MessageDTO(BaseModel):
+    file_results: list[FileResultDTO] = Field(default_factory=list)
     id: int | None = None
     role: str
     content: str

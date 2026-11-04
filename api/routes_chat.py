@@ -19,6 +19,8 @@ from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 from .auth import CurrentUser, require_csrf, require_user
 from .conversation_runtime import (
     TurnPersistencePlan,
+    configure_attachment_search,
+    _file_results_from_json,
     create_conversation,
     delete_conversation,
     get_conversation,
@@ -98,9 +100,11 @@ def get_my_conversation(
         raise HTTPException(status_code=404, detail="conversation not found")
     if row["user_id"] != user.id and user.role != "admin":
         raise HTTPException(status_code=403, detail="forbidden")
+    from .content_search import revalidate_attachment_results
     msgs_rows = list_messages(conn, conversation_id)
     messages = [
         MessageDTO(
+            file_results=revalidate_attachment_results(conn, _file_results_from_json(m["file_results_json"]), user=user),
             id=m["id"],
             role=m["role"],
             content=m["content"],
@@ -113,6 +117,7 @@ def get_my_conversation(
             answer_versions=(
                 [
                     {
+                        "file_results": revalidate_attachment_results(conn, _file_results_from_json(v["file_results_json"]), user=user),
                         "id": v["id"],
                         "version_index": v["version_index"],
                         "content": v["content"],
@@ -303,6 +308,7 @@ async def chat(
                 finally:
                     hydrate_conn.close()
 
+                configure_attachment_search(session, user)
                 prep, raw_stream = await asyncio.to_thread(
                     session.ask_stream,
                     query,
@@ -323,6 +329,7 @@ async def chat(
                 )
 
                 yield event("prep", {
+                    "file_results": prep.file_results,
                     "search_query": prep.search_query,
                     "rewrite_applied": prep.rewrite_applied,
                     "query_resolution": (
@@ -408,6 +415,7 @@ async def chat(
                 result = session.last_turn_result
                 if result is not None:
                     yield event("done", {
+                        "file_results": session.attachment_validator(result.file_results, categories=categories) if session.attachment_validator else [],
                         "answer_text": result.answer_text,
                         "assistant_message_id": plan.persisted_assistant_message_id,
                         "timings": result.timings,
