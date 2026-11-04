@@ -105,6 +105,7 @@ jobs:
           tests/test_image_ocr_service.py
           tests/test_image_ocr_container_check.py
           tests/test_controlled_ocr_deploy.py
+          tests/test_deploy_compose_stack.py
           tests/test_image_ocr_runtime_probe.py
           tests/test_attachment_chat.py
           tests/test_attachment_chat_integration.py
