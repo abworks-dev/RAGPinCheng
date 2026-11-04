@@ -5,6 +5,7 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { useAuth } from "../context/AuthContext";
+import { AuthPageLayout } from "../components/AuthPageLayout";
 
 export function RegisterPage() {
   const { register } = useAuth();
@@ -37,12 +38,12 @@ export function RegisterPage() {
   }
 
   return (
-    <main className="flex min-h-full items-center justify-center bg-background px-4 py-10 text-foreground">
-      <Card className="w-full max-w-sm shadow-surface">
-        <CardHeader className="pb-5">
-          <div className="mb-3 h-1.5 w-12 rounded-full bg-primary" aria-hidden="true" />
-          <CardTitle>注册 · 品成 BIM 知识库</CardTitle>
-          <CardDescription>填写用户名、姓名和密码</CardDescription>
+    <AuthPageLayout>
+      <Card className="w-full border-border/80 shadow-surface sm:p-3">
+        <CardHeader className="pb-6">
+          <p className="mb-2 text-ui-xs font-medium text-muted-foreground">加入知识协作</p>
+          <CardTitle className="text-ui-xl tracking-tight">注册 · 品成 BIM 知识库</CardTitle>
+          <CardDescription className="pt-2">填写用户名、姓名和密码，创建你的账号。</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={onSubmit} className="space-y-4">
@@ -126,6 +127,6 @@ export function RegisterPage() {
           </div>
         </CardContent>
       </Card>
-    </main>
+    </AuthPageLayout>
   );
 }
