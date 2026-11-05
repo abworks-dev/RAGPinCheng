@@ -26,7 +26,7 @@ describe("UserMenu collapsed layout", () => {
     auth.refreshUser.mockReset();
     auth.refreshUser.mockImplementation(async () => auth.user);
   });
-  it("keeps the avatar circular and centers it in the collapsed sidebar", () => {
+  it("uses the shared avatar radius and centers it in the collapsed sidebar", () => {
     render(
       <MemoryRouter>
         <UserMenu collapsed />
@@ -37,7 +37,19 @@ describe("UserMenu collapsed layout", () => {
     const avatar = screen.getByText("管");
 
     expect(button).toHaveClass("w-10", "justify-center", "p-1");
-    expect(avatar).toHaveClass("h-8", "w-8", "shrink-0", "rounded-full");
+    expect(avatar).toHaveClass("h-8", "w-8", "shrink-0", "rounded-ui-md");
+  });
+
+  it("focuses the opened menu and restores the account trigger on Escape", async () => {
+    render(<MemoryRouter><UserMenu /></MemoryRouter>);
+    const trigger = screen.getByRole("button", { name: "账户：管理员" });
+    fireEvent.click(trigger);
+    const entry = await screen.findByRole("button", { name: "管理工作台" });
+    await waitFor(() => expect(entry).toHaveFocus());
+    fireEvent.keyDown(entry, { key: "Escape" });
+    expect(trigger).toHaveFocus();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(entry).not.toBeInTheDocument();
   });
 
   it("shows the management workspace to administrators", async () => {

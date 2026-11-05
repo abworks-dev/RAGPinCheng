@@ -149,7 +149,7 @@ export function AdminUsersPage() {
   }
 
   return (
-    <section className="space-y-5" aria-labelledby="admin-users-title">
+    <section className="admin-page admin-users space-y-5" aria-labelledby="admin-users-title">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div><p className="text-ui-xs font-medium text-primary">运营管理</p>
           <h1 id="admin-users-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">用户管理</h1>
@@ -158,7 +158,7 @@ export function AdminUsersPage() {
         <Button variant="outline" size="sm" onClick={() => { setPermissionUser(null); setManagingGroups(true); }}><Settings className="size-4" />权限组管理</Button>
       </header>
 
-      <Card className="shadow-surface">
+      <Card className="admin-toolbar shadow-surface">
         <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
           <div className="w-full sm:max-w-xl">
             <label htmlFor="user-filter" className="sr-only">
@@ -206,7 +206,7 @@ export function AdminUsersPage() {
       ) : (
         <Card className="overflow-hidden shadow-surface">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[58rem] text-ui-sm">
+            <table className="admin-users-table w-full min-w-[58rem] text-ui-sm">
               <caption className="sr-only">用户账号、角色、状态、使用情况和管理员操作</caption>
               <thead className="border-b border-border bg-surface-muted text-muted-foreground">
                 <tr>

@@ -3,17 +3,17 @@ import { cn } from "../../lib/utils";
 
 export const Card = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn("rounded-ui-2xl border border-border bg-card text-card-foreground", className)} {...props} />
+    <div ref={ref} data-slot="card" className={cn("min-w-0 rounded-ui-xl border border-border bg-card text-card-foreground", className)} {...props} />
   ),
 );
 Card.displayName = "Card";
 
 export function CardHeader({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("flex flex-col space-y-1.5 p-6", className)} {...props} />;
+  return <div data-slot="card-header" className={cn("flex min-w-0 flex-col space-y-1.5 p-5 sm:p-6", className)} {...props} />;
 }
 
 export function CardTitle({ className, ...props }: HTMLAttributes<HTMLHeadingElement>) {
-  return <h2 className={cn("text-ui-xl font-semibold leading-tight tracking-tight", className)} {...props} />;
+  return <h2 data-slot="card-title" className={cn("text-ui-xl font-semibold leading-tight tracking-tight", className)} {...props} />;
 }
 
 export function CardDescription({ className, ...props }: HTMLAttributes<HTMLParagraphElement>) {
@@ -21,9 +21,9 @@ export function CardDescription({ className, ...props }: HTMLAttributes<HTMLPara
 }
 
 export function CardContent({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("p-6 pt-0", className)} {...props} />;
+  return <div data-slot="card-content" className={cn("min-w-0 p-5 pt-0 sm:p-6 sm:pt-0", className)} {...props} />;
 }
 
 export function CardFooter({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("flex items-center p-6 pt-0", className)} {...props} />;
+  return <div data-slot="card-footer" className={cn("flex flex-wrap items-center gap-2 p-5 pt-0 sm:p-6 sm:pt-0", className)} {...props} />;
 }

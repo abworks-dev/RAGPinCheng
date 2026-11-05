@@ -212,46 +212,84 @@ html.admin-scrollbar-stable {
   background: linear-gradient(to bottom, rgb(var(--background) / 0), rgb(var(--background)) 90%);
 }
 
-/* Tighter list spacing inside chat bubbles */
+/* Answer typography: readable Chinese rhythm, with local scrolling for rich content. */
+.prose-tight {
+  min-width: 0;
+  line-height: 1.85;
+  overflow-wrap: anywhere;
+}
+.prose-tight > :first-child { margin-top: 0; }
+.prose-tight > :last-child { margin-bottom: 0; }
 .prose-tight ul, .prose-tight ol {
-  margin: 0.25rem 0;
-  padding-left: 1.25rem;
+  margin: 0.75rem 0;
+  padding-left: 1.5rem;
 }
-.prose-tight li {
-  margin: 0.125rem 0;
-}
-.prose-tight p {
-  margin: 0.5rem 0;
-}
+.prose-tight ul { list-style-type: disc; }
+.prose-tight ol { list-style-type: decimal; }
+.prose-tight li { margin: 0.25rem 0; padding-left: 0.125rem; }
+.prose-tight li::marker { color: rgb(var(--muted-foreground)); }
+.prose-tight p { margin: 0.75rem 0; }
 .prose-tight code {
-  background: #f1f5f9;
-  padding: 1px 4px;
-  border-radius: 4px;
-  font-size: 0.9em;
+  background: rgb(var(--muted-surface));
+  color: rgb(var(--foreground));
+  padding: 0.125rem 0.3rem;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.875em;
 }
 .prose-tight pre {
-  background: #0f172a;
-  color: #e2e8f0;
-  padding: 12px;
-  border-radius: 8px;
+  max-width: 100%;
+  background: rgb(var(--muted-surface));
+  color: rgb(var(--foreground));
+  border: 1px solid rgb(var(--border));
+  padding: 1rem;
+  border-radius: var(--radius-lg);
   overflow-x: auto;
-  font-size: 0.85em;
-  margin: 0.5rem 0;
+  font-size: 0.875em;
+  line-height: 1.65;
+  margin: 1rem 0;
+  overscroll-behavior-x: contain;
 }
+.prose-tight pre code { background: transparent; color: inherit; padding: 0; font-size: inherit; }
 .prose-tight table {
+  max-width: 100%;
   border-collapse: collapse;
-  margin: 0.5rem 0;
+  margin: 1rem 0;
   display: block;
   overflow-x: auto;
+  font-size: 0.875em;
+  font-variant-numeric: tabular-nums;
+  overscroll-behavior-x: contain;
 }
 .prose-tight th, .prose-tight td {
-  border: 1px solid #e5e7eb;
-  padding: 4px 8px;
+  min-width: 6rem;
+  border-bottom: 1px solid rgb(var(--border));
+  padding: 0.625rem 0.875rem;
+  text-align: start;
+  vertical-align: top;
 }
-.prose-tight h1, .prose-tight h2, .prose-tight h3 {
+.prose-tight th { background: rgb(var(--muted-surface)); font-weight: 600; }
+.prose-tight tbody tr:nth-child(even) { background: rgb(var(--muted-surface) / 0.4); }
+.prose-tight h1, .prose-tight h2, .prose-tight h3, .prose-tight h4 {
+  color: rgb(var(--foreground));
   font-weight: 600;
-  margin: 0.6rem 0 0.3rem;
+  line-height: 1.5;
+  margin: 1.5rem 0 0.5rem;
+  text-wrap: pretty;
 }
+.prose-tight h1 { font-size: 1.375em; }
+.prose-tight h2 { font-size: 1.2em; }
+.prose-tight h3 { font-size: 1.0625em; }
+.prose-tight blockquote {
+  margin: 1rem 0;
+  border-left: 3px solid rgb(var(--primary) / 0.4);
+  padding: 0.25rem 0 0.25rem 1rem;
+  color: rgb(var(--muted-foreground));
+}
+.prose-tight hr { border-color: rgb(var(--border)); margin: 1.5rem 0; }
+.prose-tight a:not([data-citation]) { text-underline-offset: 0.2em; }
+.prose-tight img { max-width: 100%; height: auto; border-radius: var(--radius-md); }
+.prose-tight .katex-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
 
 /* Blinking caret while streaming */
 .caret::after {
@@ -288,14 +326,17 @@ html.dark body { background-color: #0b1020; color: #e5e7eb; }
 .dark .border-red-200 { border-color: #7f1d1d; }
 .dark .text-red-600 { color: #fca5a5; }
 
-.dark .prose-tight code {
-  background: #1f2937;
-  color: #e5e7eb;
+@media (prefers-reduced-motion: reduce) {
+  .caret::after { animation: none; }
 }
-.dark .prose-tight pre {
-  background: #020617;
+
+@layer base {
+  body {
+    background: rgb(var(--background));
+    color: rgb(var(--foreground));
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: rgb(var(--primary) / 0.18); }
+  :where(button, input, select, textarea) { -webkit-tap-highlight-color: transparent; }
 }
-.dark .prose-tight th, .dark .prose-tight td {
-  border-color: #374151;
-}
-.dark .caret::after { color: #6b7280; }

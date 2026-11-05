@@ -413,13 +413,17 @@ describe("AdminDocumentsPage", () => {
     render(<AdminDocumentsPage />);
     await screen.findByText(failedJob.title);
 
-    const selectPage = screen.getByRole("checkbox", { name: "全选当前页索引任务" });
+    const selectPageControls = screen.getAllByRole("checkbox", { name: "全选当前页索引任务" });
+    expect(selectPageControls).toHaveLength(2);
+    const [compactSelectPage, headerSelectPage] = selectPageControls;
     const selectJob = screen.getByRole("checkbox", { name: `选择${failedJob.title}` });
-    fireEvent.click(selectPage);
+    fireEvent.click(headerSelectPage);
+    selectPageControls.forEach((control) => expect(control).toBeChecked());
     expect(selectJob).toBeChecked();
     expect(screen.getByRole("button", { name: "批量操作（1）" })).toBeInTheDocument();
 
-    fireEvent.click(selectPage);
+    fireEvent.click(compactSelectPage);
+    selectPageControls.forEach((control) => expect(control).not.toBeChecked());
     expect(selectJob).not.toBeChecked();
     expect(screen.getByRole("button", { name: "批量操作" })).toBeInTheDocument();
   });
@@ -439,13 +443,20 @@ describe("AdminDocumentsPage", () => {
     render(<AdminDocumentsPage />);
     await screen.findByText("批量任务 25");
 
-    const selectPage = screen.getByRole("checkbox", { name: "全选当前页索引任务" });
-    fireEvent.click(selectPage);
-    screen.getAllByRole("checkbox", { name: /选择批量任务/ }).forEach((checkbox) => expect(checkbox).toBeChecked());
+    const selectPageControls = screen.getAllByRole("checkbox", { name: "全选当前页索引任务" });
+    expect(selectPageControls).toHaveLength(2);
+    const [compactSelectPage, headerSelectPage] = selectPageControls;
+    const rowCheckboxes = screen.getAllByRole("checkbox", { name: /选择批量任务/ });
+    expect(rowCheckboxes).toHaveLength(25);
+    fireEvent.click(compactSelectPage);
+    selectPageControls.forEach((control) => expect(control).toBeChecked());
+    rowCheckboxes.forEach((checkbox) => expect(checkbox).toBeChecked());
     expect(screen.getByRole("button", { name: "批量操作（25）" })).toBeInTheDocument();
 
-    fireEvent.click(selectPage);
-    screen.getAllByRole("checkbox", { name: /选择批量任务/ }).forEach((checkbox) => expect(checkbox).not.toBeChecked());
+    fireEvent.click(headerSelectPage);
+    selectPageControls.forEach((control) => expect(control).not.toBeChecked());
+    rowCheckboxes.forEach((checkbox) => expect(checkbox).not.toBeChecked());
+    expect(screen.getByRole("button", { name: "批量操作" })).toBeDisabled();
   });
 
   it("allows the latest published task to be republished", async () => {

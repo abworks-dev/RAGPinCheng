@@ -48,7 +48,7 @@ export function AdminConversationsPage() {
   }
 
   return (
-    <section className="space-y-5" aria-labelledby="admin-conversations-title">
+    <section className="admin-page admin-conversations space-y-5" aria-labelledby="admin-conversations-title">
       <header>
         <p className="text-ui-xs font-medium text-primary">运营管理</p>
         <h1 id="admin-conversations-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">
@@ -57,7 +57,7 @@ export function AdminConversationsPage() {
         <p className="mt-1 text-ui-sm text-muted-foreground">按用户或主题查找近期对话，并在详情区查看完整消息。</p>
       </header>
 
-      <Card className="shadow-surface">
+      <Card className="admin-toolbar shadow-surface">
         <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
           <div className="w-full sm:max-w-xl">
             <label htmlFor="conversation-filter" className="sr-only">
@@ -93,7 +93,7 @@ export function AdminConversationsPage() {
       ) : list.length === 0 ? (
         <EmptyState title="暂无对话" description="当前还没有可供管理员查看的对话记录。" />
       ) : (
-        <div className="grid gap-4 xl:h-[calc(100vh-17rem)] xl:min-h-[34rem] xl:grid-cols-[minmax(19rem,0.9fr)_minmax(0,1.5fr)]">
+        <div className="grid gap-4 xl:h-[calc(100dvh-19rem)] xl:min-h-[28rem] xl:grid-cols-[minmax(17rem,0.8fr)_minmax(0,1.65fr)]">
           <Card className="flex min-h-0 flex-col overflow-hidden shadow-surface">
             <div className="border-b border-border px-4 py-3">
               <h2 className="text-ui-sm font-semibold text-foreground">对话列表</h2>

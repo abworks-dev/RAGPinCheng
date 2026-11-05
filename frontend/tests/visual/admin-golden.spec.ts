@@ -23,7 +23,11 @@ for (const [navigationLabel, heading, slug] of [["资料管理", "资料管理",
     }
     await page.getByRole("link", { name: navigationLabel === "索引任务" ? "资料管理" : navigationLabel, exact: true }).click();
     if (navigationLabel === "索引任务") await page.getByRole("tab", { name: "发布任务", exact: true }).click();
-    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+    await expect(page.getByRole("heading", {
+      name: navigationLabel === "索引任务" ? "发布任务" : heading,
+      level: navigationLabel === "索引任务" ? 2 : 1,
+      exact: true,
+    })).toBeVisible();
     const viewport = page.viewportSize()!;
     if (heading === "资料管理") {
       expect(await page.evaluate(() => Math.max(document.body.scrollWidth, document.documentElement.scrollWidth))).toBeLessThanOrEqual(viewport.width);
@@ -233,7 +237,20 @@ test("索引任务区域 accepted golden", async ({ page }) => {
   await page.getByRole("link", { name: "资料管理", exact: true }).click();
   await page.getByRole("tab", { name: "发布任务", exact: true }).click();
   const managedActivity = page.locator('section[aria-labelledby="managed-index-view-title"]');
-  await expect(page.getByText("文档解析服务请求失败。", { exact: true })).toBeVisible();
+  await expect(managedActivity.getByRole("heading", { name: "发布任务", level: 2, exact: true })).toBeVisible();
+  await expect(managedActivity.getByText("文档解析服务请求失败，请稍后重试。", { exact: true })).toBeVisible();
   const viewport = page.viewportSize()!;
-  await expect(managedActivity).toHaveScreenshot(`index-monitor-managed-normal-${viewport.width}x${viewport.height}.png`);
+  // Expand the independently scrolling desktop main only for complete region evidence.
+  // Keep production styles and the separate full-page viewport golden unchanged.
+  const captureStyle = await page.addStyleTag({ content: `
+    @media (min-width: 1024px) {
+      .admin-workspace { height: auto !important; overflow: visible !important; }
+      .admin-content { overflow: visible !important; }
+    }
+  ` });
+  try {
+    await expect(managedActivity).toHaveScreenshot(`index-monitor-managed-normal-${viewport.width}x${viewport.height}.png`);
+  } finally {
+    await captureStyle.evaluate((element) => element.remove());
+  }
 });

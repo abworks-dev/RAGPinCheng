@@ -12,9 +12,9 @@ import { ProductionRuntimeStatus } from "./ProductionRuntimeStatus";
 import { formatBytes } from "../../lib/admin-formatters";
 
 const pageHeading = (
-  <div>
+  <div className="admin-page-heading">
     <p className="text-ui-xs font-medium text-primary">总览</p>
-    <h1 className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">系统概览</h1>
+    <h1 id="admin-overview-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">系统概览</h1>
     <p className="mt-2 max-w-2xl text-ui-sm text-muted-foreground">
       查看用户、对话和消息的整体情况。
     </p>
@@ -70,7 +70,7 @@ export function AdminOverviewPage({ onOpenMaintenance }: AdminOverviewPageProps)
 
   if (error) {
     return (
-      <div className="space-y-6">
+      <div className="admin-page admin-overview space-y-5" aria-labelledby="admin-overview-title">
         {pageHeading}
         <ErrorState title="系统概览加载失败" description={error} className="bg-card" />
       </div>
@@ -79,7 +79,7 @@ export function AdminOverviewPage({ onOpenMaintenance }: AdminOverviewPageProps)
 
   if (!stats) {
     return (
-      <div className="space-y-6">
+      <div className="admin-page admin-overview space-y-5" aria-labelledby="admin-overview-title">
         {pageHeading}
         <Card className="shadow-surface">
           <LoadingState className="min-h-48" label="正在加载系统概览…" />
@@ -98,7 +98,7 @@ export function AdminOverviewPage({ onOpenMaintenance }: AdminOverviewPageProps)
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="admin-page admin-overview space-y-5" aria-labelledby="admin-overview-title">
       {pageHeading}
 
       <section aria-labelledby="overview-stats-heading" className="space-y-3">
@@ -108,7 +108,7 @@ export function AdminOverviewPage({ onOpenMaintenance }: AdminOverviewPageProps)
           </h2>
           <span className="text-ui-xs text-muted-foreground">当前数据</span>
         </div>
-        <dl className="grid grid-cols-1 overflow-hidden rounded-ui-xl border border-border bg-card divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-3 xl:divide-y">
+        <dl className="admin-overview-metrics grid grid-cols-2 overflow-hidden rounded-ui-lg border border-border bg-card divide-y divide-border sm:grid-cols-3 xl:grid-cols-6">
           {cards.map(([label, value, hint]) => (
             <div key={label} className="min-w-0 p-4 sm:p-5">
               <dt className="text-ui-xs font-medium text-muted-foreground">{label}</dt>

@@ -189,7 +189,7 @@ export function AdminAsrSettingsPage() {
     { label: "发布申请", value: `${pendingReleaseCount}`, detail: `待处理 / 共 ${settings.release_requests.length} 个` },
   ];
 
-  return <section aria-labelledby="admin-asr-title" className="space-y-5">
+  return <section aria-labelledby="admin-asr-title" className="admin-page admin-asr space-y-5">
     <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
         <p className="text-ui-xs font-medium text-primary">转录服务</p>
@@ -203,7 +203,7 @@ export function AdminAsrSettingsPage() {
         </IconButton>
       </div>
     </header>
-    <div className="grid grid-cols-3 gap-2 sm:gap-3" aria-label="转录配置概览">
+    <div className="admin-metrics grid grid-cols-3" aria-label="转录配置概览">
       {summaryItems.map((item) => <Card key={item.label} className="shadow-surface">
         <CardContent className="p-3 sm:p-4">
           <p className="text-ui-xs font-medium text-muted-foreground">{item.label}</p>

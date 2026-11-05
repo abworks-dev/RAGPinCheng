@@ -854,7 +854,6 @@ test.describe("索引任务", () => {
     await expect(page.getByText("批量上限回归任务 25", { exact: true })).toBeVisible();
     await expectNoBodyOverflow(page);
 
-    if (page.viewportSize()!.width < 1024) return;
     const selectPage = page.getByRole("checkbox", { name: "全选当前页索引任务" });
     await selectPage.click();
     await expect(selectPage).toBeChecked();
@@ -887,13 +886,20 @@ test.describe("索引任务", () => {
     const publishedRow = page.getByText("已发布的合成资料", { exact: true }).locator("xpath=ancestor::tr");
     await expect(publishedRow.getByRole("button", { name: "重新发布" })).toBeEnabled();
 
-    if (page.viewportSize()!.width >= 1024) {
+    {
       const selectPage = page.getByRole("checkbox", { name: "全选当前页索引任务" });
       const firstRowCheckbox = page.getByRole("checkbox", { name: "选择资料管理发布失败的合成长文件名资料" });
-      const [headerBox, rowBox] = await Promise.all([selectPage.boundingBox(), firstRowCheckbox.boundingBox()]);
-      expect(headerBox).not.toBeNull();
-      expect(rowBox).not.toBeNull();
-      expect(Math.abs((headerBox!.x + headerBox!.width / 2) - (rowBox!.x + rowBox!.width / 2))).toBeLessThanOrEqual(1);
+      await expect(selectPage).toBeVisible();
+      await expect(firstRowCheckbox).toBeVisible();
+      if (page.viewportSize()!.width >= 1400) {
+        const [headerBox, rowBox] = await Promise.all([selectPage.boundingBox(), firstRowCheckbox.boundingBox()]);
+        expect(headerBox).not.toBeNull();
+        expect(rowBox).not.toBeNull();
+        expect(Math.abs((headerBox!.x + headerBox!.width / 2) - (rowBox!.x + rowBox!.width / 2))).toBeLessThanOrEqual(1);
+      } else {
+        await expect(publishedRow.getByRole("link", { name: "查看文件", exact: true })).toBeVisible();
+        await expect(publishedRow.getByRole("button", { name: "重新发布", exact: true })).toBeVisible();
+      }
       await selectPage.click();
       await expect(firstRowCheckbox).toBeChecked();
       const selectedBulk = page.getByRole("button", { name: "批量操作（2）" });

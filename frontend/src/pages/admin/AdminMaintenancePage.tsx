@@ -191,8 +191,8 @@ export function AdminMaintenancePage() {
   const lastRun = status.last_run;
 
   return (
-    <div className="space-y-6" aria-labelledby="maintenance-title">
-      <div>
+    <div className="admin-page admin-settings space-y-5" aria-labelledby="maintenance-title">
+      <div className="admin-page-heading">
         <p className="text-ui-xs font-medium text-primary">总览</p>
         <h1 id="maintenance-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">系统维护</h1>
         <p className="mt-2 max-w-2xl text-ui-sm text-muted-foreground">配置历史对话保留策略，检查影响范围并追踪清理结果。</p>
