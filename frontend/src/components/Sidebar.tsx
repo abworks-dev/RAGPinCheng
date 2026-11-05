@@ -38,9 +38,9 @@ export function Sidebar({
   const conversationScroll = useAutoHideScrollbar<HTMLDivElement>();
   const [conversationScrolledFromTop, setConversationScrolledFromTop] = useState(false);
   return (
-    <aside className={`flex h-full shrink-0 flex-col bg-sidebar text-sidebar-foreground transition-[width] duration-normal ${collapsed ? "w-16" : "w-[17rem]"}`}>
-      <div className="overflow-hidden px-3 py-3">
-        <div className="mb-3 flex h-9 items-center justify-between gap-2">
+    <aside className={`flex h-full shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-normal motion-reduce:transition-none ${collapsed ? "w-16" : "w-[16rem]"}`}>
+      <div className="overflow-hidden px-4 pb-4 pt-5">
+        <div className="mb-6 flex h-9 items-center justify-between gap-2">
           {collapsed && onToggleCollapsed ? (
             <button
               type="button"
@@ -66,7 +66,7 @@ export function Sidebar({
           type="button"
           onClick={onNewChat}
           title="新建对话"
-          className={`inline-flex h-9 items-center justify-center rounded-ui-md bg-primary text-sm font-medium text-primary-foreground hover:opacity-90 ${collapsed ? "w-9" : "w-full gap-2 px-3"}`}
+          className={`inline-flex h-10 items-center justify-center rounded-ui-md bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${collapsed ? "w-9" : "w-full gap-2 px-3"}`}
         >
           <Plus className="size-4" />
           {!collapsed && "新建对话"}
@@ -96,7 +96,7 @@ export function Sidebar({
         </div>
       </div>
 
-      <div className={`space-y-1 py-2 ${collapsed ? "px-3" : "px-2"}`}>
+      <div className={`space-y-1 border-t border-sidebar-border py-3 ${collapsed ? "px-3" : "px-2"}`}>
         <ThemeMenu collapsed={collapsed} />
         <UserMenu collapsed={collapsed} />
       </div>

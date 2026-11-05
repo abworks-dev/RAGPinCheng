@@ -405,7 +405,7 @@ export function AdminFeedbackPage() {
   const hasSearchFilters = Boolean(query || searchInput || kind || rating);
 
   return (
-    <section className="space-y-5" aria-labelledby="admin-feedback-title">
+    <section className="admin-page admin-feedback space-y-5" aria-labelledby="admin-feedback-title">
       <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="text-ui-xs font-medium text-primary">运营管理</p>
@@ -424,7 +424,7 @@ export function AdminFeedbackPage() {
         </div>
       </header>
 
-      <section aria-label="反馈状态概览" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section aria-label="反馈状态概览" className="admin-metrics grid grid-cols-2 lg:grid-cols-4">
         {(["pending", "in_progress", "resolved", "archived"] as FeedbackStatus[]).map((item) => (
           <FeedbackSummaryCard
             key={item}

@@ -24,20 +24,25 @@ export function ThemeMenu({ collapsed = false }: { collapsed?: boolean }) {
   }, []);
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative" onKeyDown={(event) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        ref.current?.querySelector<HTMLButtonElement>("button")?.focus();
+      }
+    }}>
       <button
         type="button"
         aria-label={`主题：${current.label}`}
         title={`主题：${current.label}`}
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className={`flex h-10 items-center rounded-ui-md text-muted-foreground hover:bg-secondary hover:text-foreground ${collapsed ? "w-10 justify-center p-0" : "w-full gap-3 pl-4 pr-2"}`}
+        className={`flex h-10 items-center rounded-ui-md text-muted-foreground transition-colors duration-normal hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${collapsed ? "w-10 justify-center p-0" : "w-full gap-3 pl-4 pr-2"}`}
       >
         <CurrentIcon className="size-4 shrink-0" />
         {!collapsed && <span className="text-sm">{current.label}</span>}
       </button>
       {open && (
-        <div className={`absolute bottom-11 z-dropdown w-44 rounded-ui-md border border-border bg-popover p-1.5 text-popover-foreground shadow-overlay ${collapsed ? "left-12" : "left-0"}`}>
+        <div data-theme-menu className={`absolute bottom-11 z-dropdown w-44 rounded-ui-md border border-border bg-popover p-1.5 text-popover-foreground shadow-overlay ${collapsed ? "left-12" : "left-0"}`}>
           {options.map((option) => {
             const OptionIcon = option.icon;
             return (
@@ -48,7 +53,7 @@ export function ThemeMenu({ collapsed = false }: { collapsed?: boolean }) {
                   setTheme(option.value);
                   setOpen(false);
                 }}
-                className="flex w-full items-center gap-2 rounded-ui-sm px-2.5 py-2 text-left text-sm hover:bg-secondary"
+                className="flex w-full items-center gap-2 rounded-ui-sm px-2.5 py-2 text-left text-sm transition-colors duration-normal hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <OptionIcon className="size-4" />
                 <span className="flex-1">{option.label}</span>

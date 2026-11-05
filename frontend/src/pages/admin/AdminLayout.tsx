@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import "./admin-workspace.css";
 import {
   AudioLines,
   FileText,
@@ -122,11 +123,12 @@ export function AdminLayout() {
   if (user && currentPath && !currentTab) return <Navigate to={`/admin/${tabs[0].path}`} replace />;
 
   return (
-    <div className="flex min-h-full flex-col bg-admin-background text-foreground lg:h-screen lg:flex-row lg:overflow-hidden">
+    <div className="admin-workspace flex min-h-full flex-col bg-admin-background text-foreground lg:h-dvh lg:flex-row lg:overflow-hidden">
+      <a href="#admin-main" className="admin-skip-link">跳至工作区</a>
       <aside
         className={cn(
-          "flex shrink-0 flex-col bg-sidebar text-sidebar-foreground lg:h-full lg:transition-[width] lg:duration-normal",
-          sidebarCollapsed ? "lg:w-16" : "lg:w-[17rem]",
+          "admin-sidebar flex shrink-0 flex-col bg-sidebar text-sidebar-foreground lg:h-full lg:transition-[width] lg:duration-normal",
+          sidebarCollapsed ? "lg:w-16" : "lg:w-60",
         )}
       >
         <div className="overflow-hidden border-b border-sidebar-border px-3 py-3 lg:border-b-0">
@@ -185,7 +187,7 @@ export function AdminLayout() {
                           "flex h-control-md min-w-0 items-center overflow-hidden rounded-ui-lg text-left text-ui-sm font-medium transition-colors duration-normal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                           sidebarCollapsed ? "lg:w-9 lg:justify-center lg:px-0" : "gap-3 px-3",
                           isActive
-                            ? "bg-primary text-primary-foreground shadow-surface"
+                            ? "bg-primary/10 text-primary ring-1 ring-inset ring-primary/15"
                             : "text-muted-foreground hover:bg-surface-muted hover:text-foreground",
                         )}
                       >
@@ -199,17 +201,27 @@ export function AdminLayout() {
             ))}
           </nav>
         </div>
-        <div className={cn("mt-auto hidden space-y-1 py-2 lg:block", sidebarCollapsed ? "px-3" : "px-2")}>
+        <div className={cn("mt-auto grid grid-cols-2 gap-1 border-t border-sidebar-border py-2 lg:block lg:space-y-1 lg:border-t-0", sidebarCollapsed ? "px-3" : "px-2")}>
           <ThemeMenu collapsed={sidebarCollapsed} />
           <UserMenu adminContext collapsed={sidebarCollapsed} />
         </div>
       </aside>
 
-      <main className="min-w-0 flex-1 p-4 sm:p-6 lg:overflow-y-auto lg:p-8 lg:[scrollbar-gutter:stable]">
-        <div className="mx-auto max-w-7xl">
-          <Outlet />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 py-2 sm:px-6">
+          <nav aria-label="当前位置" className="flex min-w-0 items-center gap-2 text-ui-xs text-muted-foreground">
+            <span>{user ? workspaceLabel(user) : "管理工作台"}</span>
+            <span aria-hidden="true">/</span>
+            <span className="font-medium text-foreground" aria-current="page">{currentTab?.label || "管理工作台"}</span>
+          </nav>
+          <NavLink to="/" className="rounded-ui-sm px-2 py-1 text-ui-xs font-medium text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">返回知识问答</NavLink>
         </div>
-      </main>
+        <main id="admin-main" tabIndex={-1} className="admin-content min-w-0 flex-1 p-4 focus:outline-none sm:p-6 lg:overflow-y-auto lg:[scrollbar-gutter:stable]">
+          <div className="mx-auto max-w-7xl">
+            <Outlet />
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

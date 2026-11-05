@@ -46,10 +46,10 @@ export function ResourcePreviewShell({
           mobilePresentation === "bottom-sheet" ? "resource-preview-sheet--bottom" : ""
         }`}
       >
-        <SheetHeader className="flex min-h-14 items-center gap-3 space-y-0 border-b border-border px-4 py-0 pr-16">
+        <SheetHeader className="flex min-h-[4.5rem] items-center gap-3 space-y-0 border-b border-border bg-card px-4 py-3 pr-16 sm:px-5 sm:pr-16">
           {backAction}
           <div className="min-w-0 flex-1">
-            <SheetTitle className="truncate text-sm font-semibold">{title}</SheetTitle>
+            <SheetTitle title={title} className="truncate text-sm font-semibold tracking-tight text-foreground">{title}</SheetTitle>
             {subtitle
               ? <SheetDescription className="truncate text-[11px]">{subtitle}</SheetDescription>
               : <SheetDescription className="sr-only">资源预览</SheetDescription>}

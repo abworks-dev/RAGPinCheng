@@ -68,7 +68,7 @@ export function FeedbackBar({
   ) ?? -1;
 
   return (
-    <div className="ml-auto flex shrink-0 items-center gap-1" aria-label="回答操作">
+    <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-0.5" aria-label="回答操作">
       {msg.answerVersions && msg.answerVersions.length > 1 && (
         <div className="inline-flex items-center gap-0.5 text-xs text-muted-foreground" aria-label="回答版本">
           <IconButton
@@ -81,7 +81,7 @@ export function FeedbackBar({
           >
             <ChevronLeft className="size-4" />
           </IconButton>
-          <span className="min-w-8 text-center">
+          <span className="min-w-8 text-center tabular-nums">
             {viewedPosition + 1} / {msg.answerVersions.length}
           </span>
           <IconButton

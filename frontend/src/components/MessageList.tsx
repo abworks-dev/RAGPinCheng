@@ -176,14 +176,14 @@ export function MessageList({
   if (messages.length === 0) {
     return (
       <div className={`flex items-center justify-center px-6 text-center ${centeredEmpty ? "flex-none" : "flex-1"}`}>
-        <div className="w-full max-w-xl py-5 sm:py-8">
-          <p className="mb-3 text-ui-xs font-medium tracking-widest text-muted-foreground">品成 · 企业知识工作台</p>
-          <h1 className="text-2xl font-semibold leading-snug tracking-tight text-foreground sm:text-3xl">从企业知识中找到可靠答案</h1>
-          <p className="mx-auto mt-4 max-w-md text-ui-sm leading-7 text-muted-foreground">
+        <div className="w-full max-w-[44rem] py-4 text-left sm:py-8">
+          <p className="mb-4 text-ui-xs font-medium tracking-wide text-primary">品成 · 企业知识工作台</p>
+          <h1 className="max-w-lg text-balance text-[1.75rem] font-semibold leading-snug tracking-tight text-foreground sm:text-[2.25rem]">从企业知识中找到可靠答案</h1>
+          <p className="mt-4 max-w-lg text-ui-sm leading-7 text-muted-foreground">
             查阅行业规范、客户要求、内部标准与项目经验。<br className="hidden sm:block" />
             提问时带上项目背景或标准名称，让问题更清晰。
           </p>
-          <div className="mt-6 border-t border-border pt-4 text-left">
+          <div className="mt-7 border-l-2 border-primary/25 pl-4 text-left">
             <p className="mb-2 text-ui-xs font-medium text-muted-foreground">提问参考</p>
             <ul className="space-y-2 text-ui-sm leading-6 text-foreground">
               <li>Revit 建模交付时的命名规则是什么？</li>
@@ -207,7 +207,7 @@ export function MessageList({
       <div
         ref={scrollbar.ref}
         data-message-scroll-container
-        className={`h-full overflow-y-auto py-6 ${scrollbar.className}`}
+        className={`h-full overflow-y-auto overscroll-contain py-5 sm:py-8 ${scrollbar.className}`}
         onScroll={handleScroll}
         onMouseEnter={scrollbar.interactionProps.onMouseEnter}
         onMouseMove={scrollbar.interactionProps.onMouseMove}
@@ -219,7 +219,7 @@ export function MessageList({
             key={turn.id}
             ref={(element) => { turnRefs.current[turn.id] = element; }}
             data-turn-id={turn.id}
-            className="scroll-mt-6"
+            className="scroll-mt-6 pb-5 sm:pb-8"
           >
             {turn.messages.map((message, messageIndex) => {
               const turnUserMessage = turn.messages.find((item) => item.role === "user");

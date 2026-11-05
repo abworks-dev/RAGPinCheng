@@ -37,7 +37,8 @@ describe("Sidebar brand", () => {
     expect(screen.getByText("知识问答工作台")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "收起会话侧栏" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "主题：跟随系统" })).toHaveClass("pl-4", "pr-2", "w-full");
-    expect(container.querySelector("aside")).not.toHaveClass("border-r");
+    expect(container.querySelector("aside")).toHaveClass("border-r", "border-sidebar-border", "bg-sidebar");
+    expect(screen.getByRole("button", { name: "新建对话" })).toBeEnabled();
     expect(container.querySelector(".scroll-fade-sidebar-start")).not.toBeInTheDocument();
   });
 

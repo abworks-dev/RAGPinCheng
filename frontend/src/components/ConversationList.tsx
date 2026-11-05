@@ -20,12 +20,13 @@ export function ConversationList({
   const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
 
   if (loading && conversations.length === 0) {
-    return <div className="px-2 py-3 text-xs text-muted">加载对话列表…</div>;
+    return <div role="status" className="space-y-3 px-3 py-4 text-xs text-muted-foreground"><span>加载对话列表…</span><div aria-hidden="true" className="h-9 rounded-ui-md bg-secondary motion-safe:animate-pulse" /><div aria-hidden="true" className="h-9 rounded-ui-md bg-secondary/60 motion-safe:animate-pulse" /></div>;
   }
   if (conversations.length === 0) {
     return (
-      <div className="px-2 py-3 text-xs text-muted">
-        还没有对话。点击上方“+ 新建对话”开始。
+      <div className="mx-1 rounded-ui-md border border-dashed border-sidebar-border px-3 py-5 text-xs leading-6 text-muted-foreground">
+        <p className="font-medium text-sidebar-foreground">对话会保留在这里</p>
+        <p className="mt-1">新建对话，开始查阅企业知识。</p>
       </div>
     );
   }
@@ -51,24 +52,22 @@ export function ConversationList({
         const active = c.id === currentId;
         return (
           <li key={c.id}>
-            <div
-              className={
-                "group flex items-center gap-1 rounded-lg px-2 py-2 text-sm cursor-pointer " +
-                (active
-                  ? "bg-accent/10 text-ink"
-                  : "hover:bg-gray-100 dark:hover:bg-gray-800 text-ink opacity-90")
-              }
-              onClick={() => onSelect(c.id)}
-              title={c.title}
-            >
-              <div className="min-w-0 flex-1 truncate">{c.title}</div>
+            <div className={`group flex items-center gap-1 rounded-ui-md border px-1 transition-colors ${active ? "border-primary/15 bg-primary/10 text-sidebar-foreground" : "border-transparent text-sidebar-foreground/80 hover:bg-secondary"}`}>
+              <button
+                type="button"
+                onClick={() => onSelect(c.id)}
+                aria-current={active ? "page" : undefined}
+                title={c.title}
+                className="min-w-0 flex-1 truncate rounded-ui-sm px-2 py-3 text-left text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >{c.title}</button>
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   setDeleteTarget(c);
                 }}
-                className="inline-flex size-7 items-center justify-center rounded-ui-sm text-muted opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                className="inline-flex size-8 shrink-0 items-center justify-center rounded-ui-sm text-muted-foreground transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100"
+                aria-label={`删除对话：${c.title}`}
                 title="删除对话"
               >
                 <Trash2 className="size-3.5" />

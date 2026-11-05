@@ -59,7 +59,9 @@ describe("AdminLayout route boundary", () => {
   it("keeps the brand, theme, and admin actions in the sidebar", async () => {
     renderAdmin();
     expect(screen.getByText("品成 BIM 知识库")).toBeInTheDocument();
-    expect(screen.getByText("管理工作台")).toBeInTheDocument();
+    expect(within(screen.getByRole("complementary")).getByText("管理工作台")).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "当前位置" })).toHaveTextContent("系统概览");
+    expect(screen.getByRole("link", { name: "跳至工作区" })).toHaveAttribute("href", "#admin-main");
     expect(screen.getByRole("button", { name: /主题：/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /测试管理员/ }));
     expect(await screen.findByRole("button", { name: "返回对话" })).toBeInTheDocument();
@@ -71,7 +73,7 @@ describe("AdminLayout route boundary", () => {
     fireEvent.click(screen.getByRole("button", { name: "收起管理侧栏" }));
     expect(container.querySelector("aside")).toHaveClass("lg:w-16");
     fireEvent.click(screen.getByRole("button", { name: "展开管理侧栏" }));
-    expect(container.querySelector("aside")).toHaveClass("lg:w-[17rem]");
+    expect(container.querySelector("aside")).toHaveClass("lg:w-60");
   });
 
   it("exposes every management entry through an explicit mobile menu", () => {

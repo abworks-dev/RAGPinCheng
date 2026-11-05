@@ -107,7 +107,8 @@ test.describe("转录任务", () => {
     await installAdminRoutes(page);
     await page.goto("/admin/media?media_id=media-ready&workbench=1");
     await expect(page).toHaveURL(/\/admin\/content\?(?=[^#]*view=transcription)(?=[^#]*media_id=media-ready)(?=[^#]*workbench=1)/);
-    await expect(page.locator("h1").filter({ hasText: "转录任务" })).toBeVisible();
+    await expect(page.locator("h1#managed-content-title")).toHaveText("资料管理");
+    await expect(page.locator("h2#admin-media-title")).toHaveText("转录任务");
     await expect(page.getByRole("dialog", { name: "项目交付培训" })).toBeVisible();
     await expectNoBodyOverflow(page);
   });

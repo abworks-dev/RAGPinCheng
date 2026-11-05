@@ -122,8 +122,8 @@ export function AdminAnswerPolicyPage() {
   if (error || !policy) return <ErrorState title="回答策略加载失败" description={error || "暂无可用策略"} action={<Button variant="outline" onClick={() => void load()}>重试</Button>} />;
 
   return (
-    <div className="space-y-6" aria-labelledby="answer-policy-title">
-      <div>
+    <div className="admin-page admin-settings space-y-5" aria-labelledby="answer-policy-title">
+      <div className="admin-page-heading">
         <p className="text-ui-xs font-medium text-primary">总览 / 系统管理员</p>
         <h1 id="answer-policy-title" className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">回答策略</h1>
         <p className="mt-2 max-w-2xl text-ui-sm text-muted-foreground">统一调整回答长度、上下文范围和低相关性保护。策略按请求读取，保存后新请求生效。</p>
