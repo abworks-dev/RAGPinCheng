@@ -16,6 +16,8 @@ const files = [file,
 for (const scenario of ["success", "error", "stale"]) test(`chat-only attachment strip dedicated preview ${scenario}`, async ({ page }, testInfo) => {
   const failure = scenario === "error";
   const stale = scenario === "stale";
+  const touch = page.viewportSize()!.width < 600 ? await page.context().newCDPSession(page) : null;
+  if (touch) await touch.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
   await installChatRoutes(page);
   const requests: string[] = [];
   const externalRequests: string[] = [];
@@ -77,6 +79,15 @@ for (const scenario of ["success", "error", "stale"]) test(`chat-only attachment
   await page.mouse.move(5, 5);
   await page.screenshot({ animations: "disabled", path: testInfo.outputPath("attachment-strip-compact.png") });
   const more = cards.getByRole("button", { name: `更多信息：${file.title}`, exact: true });
+  await expect(more.locator("svg")).toBeVisible();
+  await expect(more).toHaveText("");
+  const fineHover = await page.evaluate(() => matchMedia("(hover: hover) and (pointer: fine)").matches);
+  expect(fineHover).toBe(page.viewportSize()!.width >= 600);
+  await expect(more.locator("../..")).toHaveCSS("opacity", fineHover ? "0" : "1");
+  const filenameStrip = items.first().getByRole("heading");
+  expect(await filenameStrip.evaluate(element => element.parentElement!.getBoundingClientRect().height)).toBeLessThanOrEqual(37);
+  const initialPanelId = await more.getAttribute("aria-controls");
+  await expect(page.locator(`[id="${initialPanelId}"]`)).toHaveCSS("visibility", "hidden");
   expect(await more.evaluate(element => { const box = element.getBoundingClientRect(); const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2); return hit === element || element.contains(hit); })).toBe(true);
   if (page.viewportSize()!.width < 600) await more.click();
   else await items.first().hover();
@@ -85,7 +96,14 @@ for (const scenario of ["success", "error", "stale"]) test(`chat-only attachment
   await expect(page.locator(`[id="${panelId}"]`)).toHaveCSS("opacity", "1");
   const preview = items.first().getByRole("button", { name: "预览附件", exact: true });
   expect(await preview.evaluate(element => { const box = element.getBoundingClientRect(); const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2); return hit === element || element.contains(hit); })).toBe(true);
-  await expect(items.first().getByRole("button", { name: "下载原文件", exact: true })).toBeDisabled();
+  const download = items.first().getByRole("button", { name: "下载原文件", exact: true });
+  await expect(download).toBeDisabled();
+  await expect(preview).toHaveText(""); await expect(preview.locator("svg")).toBeVisible();
+  await expect(download).toHaveText("");
+  await download.locator("..").hover();
+  await expect(page.getByRole("tooltip")).toHaveText("无原文件下载权限");
+  const layerColor = await page.locator(`[id="${panelId}"]`).evaluate(element => getComputedStyle(element).backgroundColor);
+  expect(layerColor).toMatch(/0\.8\)/);
   await page.screenshot({ animations: "disabled", path: testInfo.outputPath("attachment-strip-details.png") });
   await more.focus(); await page.keyboard.press("Tab");
   await expect(items.first().getByLabel(`${file.title}的详细信息`)).toBeFocused();
@@ -135,6 +153,7 @@ for (const scenario of ["success", "error", "stale"]) test(`chat-only attachment
     await expect.poll(() => strip.evaluate(element => element.scrollLeft)).toBeLessThan(beforeSwipe - 50);
     await cdp.detach();
   }
+  await touch?.detach();
   expect(requests.filter(url => url.includes("/api/admin/content/"))).toEqual([]);
   expect(externalRequests).toEqual([]);
   expect(requests.filter(url => /\/download$|\/original$/.test(url))).toEqual([]);

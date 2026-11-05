@@ -23,6 +23,21 @@ describe("attachment discovery separation", () => {
     fireEvent.click(more); fireEvent.keyDown(more, { key: "Escape" });
     expect(more).toHaveAttribute("aria-expanded", "false"); expect(more).toHaveFocus();
   });
+  it("uses a narrow filename strip and named icon actions with an explanatory disabled tooltip", () => {
+    render(<PdfPreviewProvider><FileResultCards results={[file]} /></PdfPreviewProvider>);
+    const more = screen.getByRole("button", { name: "更多信息：合成文件" });
+    expect(more.textContent).toBe(""); expect(more.querySelector("svg")).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "synthetic.png" })).toHaveClass("truncate");
+    fireEvent.click(more);
+    for (const label of ["预览附件", "下载原文件"]) {
+      const button = screen.getByRole("button", { name: label });
+      expect(button.textContent).toBe(""); expect(button.querySelector("svg")).not.toBeNull();
+    }
+    const download = screen.getByRole("button", { name: "下载原文件" });
+    fireEvent.focus(download.parentElement!);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("无原文件下载权限");
+    expect(download).toBeDisabled();
+  });
   it("shows independent file match reasons without technical identifiers or implied citations", () => {
     render(<PdfPreviewProvider><FileResultCards results={[file]} /></PdfPreviewProvider>);
     fireEvent.click(screen.getByRole("button", { name: "更多信息：合成文件" }));
