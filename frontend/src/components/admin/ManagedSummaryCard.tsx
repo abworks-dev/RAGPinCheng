@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Card, CardContent } from "../ui/card";
+import { Card } from "../ui/card";
 
 type SummaryTone = "primary" | "success" | "warning" | "destructive";
 
@@ -25,14 +25,15 @@ export function ManagedSummaryCard({
   onClick?: () => void;
   active?: boolean;
 }) {
-  const content = <CardContent className="relative p-4">
-    <span className={`flex items-center justify-between text-ui-xs font-medium text-muted-foreground ${active ? toneClasses[tone] : ""}`}>
-      <span>{label}</span>
-      <span className={toneClasses[tone]} aria-hidden="true">{icon}</span>
+  // Headerless summaries own their spacing; CardContent intentionally removes top padding.
+  const content = <span className="relative flex min-w-0 items-start gap-3 p-4">
+    <span className={`mt-0.5 shrink-0 ${toneClasses[tone]}`} aria-hidden="true">{icon}</span>
+    <span className="flex min-w-0 flex-col gap-2">
+      <span className={`break-words text-ui-xs font-medium leading-5 text-muted-foreground ${active ? toneClasses[tone] : ""}`}>{label}</span>
+      <span className="block text-ui-xl font-semibold leading-7 tabular-nums text-foreground">{value}</span>
     </span>
-    <span className="mt-2 block text-ui-xl font-semibold tabular-nums text-foreground">{value}</span>
-  </CardContent>;
+  </span>;
   return <Card data-active={active} className={`admin-summary overflow-hidden shadow-none ${active ? "border-primary bg-primary/5" : ""}`}>
-    {onClick ? <button type="button" className="block w-full text-left transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-pressed={active} onClick={onClick}>{content}</button> : content}
+    {onClick ? <button type="button" className="block w-full text-left transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" aria-pressed={active} onClick={onClick}>{content}</button> : content}
   </Card>;
 }
