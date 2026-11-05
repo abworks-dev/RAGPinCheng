@@ -3,6 +3,9 @@ import { readFileSync } from "node:fs";
 import { installChatRoutes } from "./fixtures/admin-fixtures";
 import { expectNoBodyOverflow } from "./helpers/layout";
 
+// Chromium headless otherwise hides native scrollbars, making pointer-drag QA impossible.
+test.use({ launchOptions: { ignoreDefaultArgs: ["--hide-scrollbars"] } });
+
 // Checked-in synthetic OCR artwork, never a customer document or external URL.
 const png = readFileSync(new URL("../../../services/image_ocr/synthetic-chinese.png", import.meta.url));
 const file = { item_id: "synthetic-item", version_id: "synthetic-version", title: "合成长中文附件名称与项目图纸".repeat(3), original_filename: "synthetic-long-file-name.png", doc_type: "png", file_size: 1024, category_key: "internal-key", category_path: "合成分类 / " + "长分类名称".repeat(8), version_number: 2, matched_fields: ["description", "ocr_text"], snippet: "合成 OCR 文字，仅供文件匹配，不用于正文知识问答。", preview_kind: "image", can_preview: true, can_download: false };
@@ -18,6 +21,8 @@ for (const scenario of ["success", "error", "stale"]) test(`chat-only attachment
   const stale = scenario === "stale";
   const touch = page.viewportSize()!.width < 600 ? await page.context().newCDPSession(page) : null;
   if (touch) await touch.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+  const dark = scenario === "success" && page.viewportSize()!.width >= 600;
+  if (dark) await page.addInitScript(() => localStorage.setItem("pincheng-theme", "dark"));
   await installChatRoutes(page);
   const requests: string[] = [];
   const externalRequests: string[] = [];
@@ -43,6 +48,7 @@ for (const scenario of ["success", "error", "stale"]) test(`chat-only attachment
   });
   await page.goto("/"); await page.getByPlaceholder("向企业知识库提问").fill("合成附件"); await page.getByRole("button", { name: "发送问题" }).click();
   await expect(page.getByRole("status").filter({ hasText: "已找到 5 个附件，仅提供文件匹配" })).toBeVisible();
+  if (dark) await expect(page.locator("html")).toHaveClass(/dark/);
   await expect(page.getByText(/未检索到可用资料/)).toHaveCount(0);
   const cards = page.getByRole("region", { name: "找到的附件" });
   const strip = cards.getByRole("list", { name: "附件列表" });
@@ -89,8 +95,23 @@ for (const scenario of ["success", "error", "stale"]) test(`chat-only attachment
   const initialPanelId = await more.getAttribute("aria-controls");
   await expect(page.locator(`[id="${initialPanelId}"]`)).toHaveCSS("visibility", "hidden");
   expect(await more.evaluate(element => { const box = element.getBoundingClientRect(); const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2); return hit === element || element.contains(hit); })).toBe(true);
-  if (page.viewportSize()!.width < 600) await more.click();
-  else await items.first().hover();
+  if (fineHover) {
+    // Pointer focus must not pin either card after moving between them.
+    await items.first().hover(); await more.click(); await more.click();
+    await items.nth(1).hover();
+    await expect(page.locator(`[id="${initialPanelId}"]`)).toHaveCSS("visibility", "hidden");
+    await page.mouse.move(5, 5);
+    await expect(items.nth(1).getByText("匹配：描述、OCR 文字")).toBeHidden();
+    await expect(page.locator(`[id="${initialPanelId}"]`)).toHaveCSS("visibility", "hidden");
+    await page.screenshot({ animations: "disabled", path: testInfo.outputPath("attachment-strip-mouseleave.png") });
+    await items.first().hover();
+  } else {
+    await more.click(); await expect(more).toHaveAttribute("aria-expanded", "true");
+    await more.click(); await expect(more).toHaveAttribute("aria-expanded", "false");
+    await more.click(); await cards.getByRole("heading", { name: "相关附件 · 5" }).click();
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+    await more.click();
+  }
   await expect(items.first().getByText("匹配：描述、OCR 文字")).toBeVisible();
   const panelId = await more.getAttribute("aria-controls");
   await expect(page.locator(`[id="${panelId}"]`)).toHaveCSS("opacity", "1");
@@ -119,8 +140,59 @@ for (const scenario of ["success", "error", "stale"]) test(`chat-only attachment
   await expectNoBodyOverflow(page);
   await page.screenshot({ animations: "disabled", path: testInfo.outputPath(`attachment-chat-preview-${scenario}.png`) });
   await dialog.getByRole("button", { name: "关闭预览" }).click(); await expect(preview).toBeFocused();
+  if (fineHover) {
+    await items.first().hover(); await page.mouse.move(5, 5);
+    await expect(page.locator(`[id="${panelId}"]`)).toHaveCSS("visibility", "hidden");
+    await items.nth(1).hover(); await page.mouse.move(5, 5);
+    await expect(items.nth(1).getByText("匹配：描述、OCR 文字")).toBeHidden();
+    await items.first().hover();
+  }
   await preview.click(); await expect(dialog).toBeVisible();
   await page.keyboard.press("Escape"); await expect(dialog).toBeHidden(); await expect(preview).toBeFocused();
+  if (fineHover) {
+    await items.first().hover(); await page.mouse.move(5, 5);
+    await expect(page.locator(`[id="${panelId}"]`)).toHaveCSS("visibility", "hidden");
+  }
+  // Keyboard reveal is transient: Tab into More, then completely out of this card.
+  await page.keyboard.press("Tab"); await more.focus();
+  await expect(page.locator(`[id="${panelId}"]`)).toHaveCSS("visibility", "visible");
+  await page.keyboard.press("Shift+Tab");
+  await expect(page.locator(`[id="${panelId}"]`)).toHaveCSS("visibility", "hidden");
+  await strip.evaluate(element => {
+    let ancestor = element.parentElement;
+    while (ancestor) {
+      if (ancestor.scrollHeight > ancestor.clientHeight && /auto|scroll/.test(getComputedStyle(ancestor).overflowY)) { ancestor.scrollTop = ancestor.scrollHeight; break; }
+      ancestor = ancestor.parentElement;
+    }
+  });
+  const scrollbar = await strip.evaluate(element => {
+    const style = getComputedStyle(element); const box = element.getBoundingClientRect();
+    const card = element.firstElementChild!.getBoundingClientRect();
+    return { padding: parseFloat(style.paddingBottom), height: getComputedStyle(element, "::-webkit-scrollbar").height,
+      thumb: getComputedStyle(element, "::-webkit-scrollbar-thumb").backgroundColor,
+      track: getComputedStyle(element, "::-webkit-scrollbar-track").backgroundColor,
+      gap: box.bottom - card.bottom, x: box.x, y: box.bottom - 6, width: box.width,
+      client: element.clientWidth, total: element.scrollWidth };
+  });
+  expect(scrollbar.padding).toBeGreaterThanOrEqual(12);
+  expect(scrollbar.height).toBe("12px"); expect(scrollbar.gap).toBeGreaterThanOrEqual(12);
+  expect(scrollbar.thumb).not.toBe(scrollbar.track);
+  const luminance = (color: string) => {
+    const rgb = color.match(/[\d.]+/g)!.slice(0, 3).map(value => { const v = Number(value) / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+    return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+  };
+  const thumbLuminance = luminance(scrollbar.thumb), trackLuminance = luminance(scrollbar.track);
+  const contrast = (Math.max(thumbLuminance, trackLuminance) + 0.05) / (Math.min(thumbLuminance, trackLuminance) + 0.05);
+  expect(contrast).toBeGreaterThanOrEqual(3);
+  await testInfo.attach("scrollbar-geometry", { body: JSON.stringify({ ...scrollbar, contrast, dark }), contentType: "application/json" });
+  if (fineHover) {
+    const before = await strip.evaluate(element => element.scrollLeft);
+    const thumbWidth = scrollbar.width * scrollbar.client / scrollbar.total;
+    await page.mouse.move(scrollbar.x + thumbWidth / 2, scrollbar.y);
+    await page.mouse.down(); await page.mouse.move(scrollbar.x + thumbWidth / 2 + 120, scrollbar.y, { steps: 12 }); await page.mouse.up();
+    await expect.poll(() => strip.evaluate(element => element.scrollLeft)).toBeGreaterThan(before + 30);
+    await page.screenshot({ animations: "disabled", path: testInfo.outputPath("attachment-strip-scrollbar-drag.png") });
+  }
   const right = cards.getByRole("button", { name: "向右滚动附件" });
   for (let step = 0; step < 5; step++) {
     const bounds = await strip.evaluate(element => ({ left: element.scrollLeft, max: element.scrollWidth - element.clientWidth }));

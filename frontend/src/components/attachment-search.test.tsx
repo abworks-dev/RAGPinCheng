@@ -23,6 +23,26 @@ describe("attachment discovery separation", () => {
     fireEvent.click(more); fireEvent.keyDown(more, { key: "Escape" });
     expect(more).toHaveAttribute("aria-expanded", "false"); expect(more).toHaveFocus();
   });
+  it("clears keyboard reveal on focus exit and explicit touch reveal on outside pointer", () => {
+    render(<PdfPreviewProvider><FileResultCards results={[file]} /></PdfPreviewProvider>);
+    const more = screen.getByRole("button", { name: "更多信息：合成文件" });
+    fireEvent.keyDown(document, { key: "Tab" }); fireEvent.focus(more);
+    expect(more).toHaveAttribute("aria-expanded", "true");
+    fireEvent.blur(more, { relatedTarget: document.body });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    fireEvent.pointerDown(more); fireEvent.click(more);
+    expect(more).toHaveAttribute("aria-expanded", "true");
+    fireEvent.pointerDown(document.body);
+    expect(more).toHaveAttribute("aria-expanded", "false");
+  });
+  it("does not turn pointer focus into a persistent expansion", () => {
+    render(<PdfPreviewProvider><FileResultCards results={[file]} /></PdfPreviewProvider>);
+    const more = screen.getByRole("button", { name: "更多信息：合成文件" });
+    fireEvent.pointerDown(more); fireEvent.focus(more);
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(more); fireEvent.mouseLeave(more.closest("li")!);
+    expect(more).toHaveAttribute("aria-expanded", "false");
+  });
   it("uses a narrow filename strip and named icon actions with an explanatory disabled tooltip", () => {
     render(<PdfPreviewProvider><FileResultCards results={[file]} /></PdfPreviewProvider>);
     const more = screen.getByRole("button", { name: "更多信息：合成文件" });
