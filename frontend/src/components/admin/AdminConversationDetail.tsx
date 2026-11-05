@@ -34,7 +34,7 @@ export function AdminConversationDetail({
   }
 
   return (
-    <div className="space-y-5">
+    <div className="admin-conversation-transcript space-y-5">
       <div className="border-b border-border pb-4">
         <h3 className="text-ui-lg font-semibold text-foreground">{conversation.title}</h3>
         <p className="mt-1 text-ui-xs text-muted-foreground">

@@ -25,15 +25,14 @@ export function ManagedSummaryCard({
   onClick?: () => void;
   active?: boolean;
 }) {
-  const content = <CardContent className="relative p-4 pt-4">
-    <span className="absolute inset-x-0 top-0 h-1 bg-primary/80" aria-hidden="true" />
+  const content = <CardContent className="relative p-4">
     <span className={`flex items-center justify-between text-ui-xs font-medium text-muted-foreground ${active ? toneClasses[tone] : ""}`}>
       <span>{label}</span>
       <span className={toneClasses[tone]} aria-hidden="true">{icon}</span>
     </span>
     <span className="mt-2 block text-ui-xl font-semibold tabular-nums text-foreground">{value}</span>
   </CardContent>;
-  return <Card className={`overflow-hidden shadow-surface ${active ? "border-primary ring-1 ring-primary/30" : ""}`}>
+  return <Card data-active={active} className={`admin-summary overflow-hidden shadow-none ${active ? "border-primary bg-primary/5" : ""}`}>
     {onClick ? <button type="button" className="block w-full text-left transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-pressed={active} onClick={onClick}>{content}</button> : content}
   </Card>;
 }

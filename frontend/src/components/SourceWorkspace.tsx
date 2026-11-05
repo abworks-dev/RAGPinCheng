@@ -149,7 +149,7 @@ export function SourceWorkspace({
 
   if (!activeSet || !source) {
     return (
-      <aside className="flex h-full flex-col bg-card">
+      <aside className="flex h-full min-w-0 flex-col bg-card">
         <WorkspaceHeader count={0} onCopy={() => undefined} onDownload={() => undefined} status={null} />
         <div className="flex flex-1 flex-col items-center justify-center px-8 text-center">
           <Clipboard className="mb-3 size-8 text-muted-foreground/60" />
@@ -163,7 +163,7 @@ export function SourceWorkspace({
   }
 
   return (
-    <aside className="flex h-full min-h-0 flex-col bg-card">
+    <aside className="flex h-full min-h-0 min-w-0 flex-col bg-card">
       <WorkspaceHeader count={activeSet.sources.length} onCopy={() => void copyAllSources()} onDownload={downloadAllSources} status={exportStatus} />
       {sets.length > 1 && (
         <label className="border-b border-border px-4 py-3">
@@ -184,11 +184,11 @@ export function SourceWorkspace({
           </select>
         </label>
       )}
-      <div className="grid min-h-0 flex-1 grid-rows-[minmax(12rem,0.9fr)_minmax(16rem,1.1fr)]">
+      <div className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)]">
         <div
           ref={sourceListScroll.ref}
           {...sourceListScroll.interactionProps}
-          className={`overflow-y-auto border-b border-border p-3 ${sourceListScroll.className}`}
+          className={`min-h-0 max-h-[min(36dvh,16rem)] overflow-y-auto overscroll-contain border-b border-border bg-secondary/20 px-4 py-3 ${sourceListScroll.className}`}
         >
           {activeSet.sources.map((item, index) => (
             <button
@@ -198,17 +198,18 @@ export function SourceWorkspace({
               }}
               type="button"
               onClick={() => selectSource(activeSet.messageId, index)}
+              aria-pressed={(highlightedSourceIndex ?? safeIndex) === index}
               className={
-                "mb-2 flex w-full items-start gap-2.5 rounded-ui-md border px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring " +
-                (highlightedSourceIndex === index
-                  ? "border-primary/70 bg-primary/10 text-foreground shadow-sm"
+                "mb-2 flex w-full items-start gap-2.5 rounded-ui-md border px-3 py-3 text-left transition-colors last:mb-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring " +
+                ((highlightedSourceIndex ?? safeIndex) === index
+                  ? "border-primary/40 bg-primary/5 text-foreground"
                   : "border-border bg-card hover:border-primary/30 hover:bg-secondary/60")
               }
             >
               <span
                 className={
                   "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-ui-sm text-xs font-semibold " +
-                  (highlightedSourceIndex === index
+                  ((highlightedSourceIndex ?? safeIndex) === index
                     ? "bg-primary text-primary-foreground"
                     : "border border-border bg-secondary text-muted-foreground")
                 }
@@ -216,12 +217,7 @@ export function SourceWorkspace({
                 {index + 1}
               </span>
               <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-1.5 text-sm font-medium">
-                  <span className="flex size-6 shrink-0 items-center justify-center rounded-ui-sm bg-info/15 text-info">
-                    <SourceTypeIcon source={item} />
-                  </span>
-                  <span className="truncate">{sourceDisplayTitle(item)}</span>
-                </span>
+                <span className="block truncate text-sm font-medium leading-6" title={sourceDisplayTitle(item)}>{sourceDisplayTitle(item)}</span>
                 <span className="mt-1.5 block truncate text-xs text-muted-foreground">
                   {sourceCategoryLabel(item)} ·{" "}
                   {item.doc_type === "transcript" ? `时间 ${sourceLocator(item)}` : sourceLocator(item)}
@@ -292,7 +288,7 @@ function SourceDownloadDialog({ sources, open, onOpenChange }: { sources: Source
 
 function WorkspaceHeader({ count, onCopy, onDownload, status }: { count: number; onCopy: () => void; onDownload: () => void; status: string | null }) {
   return (
-    <div className="flex min-h-14 shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-2">
+    <div className="flex min-h-[4.5rem] shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-3">
       <div className="min-w-0">
         <h2 className="text-sm font-semibold text-foreground">来源核验</h2>
         <p className="text-[11px] text-muted-foreground">{count ? `${count} 项回答依据` : "等待检索结果"}</p>
@@ -405,10 +401,11 @@ function SourceDetail({
   };
 
   return (
-    <div
+    <section
+      aria-label="来源详情"
       ref={detailScroll.ref}
       {...detailScroll.interactionProps}
-      className={`min-h-0 overflow-y-auto px-4 py-4 ${detailScroll.className}`}
+      className={`min-h-0 min-w-0 overflow-y-auto overscroll-contain px-4 py-5 ${detailScroll.className}`}
     >
       <div className="flex items-start gap-3">
         <span className="flex size-8 shrink-0 items-center justify-center rounded-ui-md bg-ui-accent text-ui-accent-foreground">
@@ -419,7 +416,7 @@ function SourceDetail({
           <h3 className="mt-0.5 break-words text-sm font-semibold text-foreground">{sourceDisplayTitle(source)}</h3>
         </div>
       </div>
-      <div className="mt-4 rounded-ui-md border border-border bg-secondary/70 px-3 py-2.5">
+      <div className="mt-4 rounded-ui-md border border-border bg-secondary/40 px-3 py-2.5">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
@@ -476,7 +473,7 @@ function SourceDetail({
             }
           />
         </div>
-        <p className="whitespace-pre-wrap break-words border-l-2 border-info bg-info/10 px-3 py-2.5 text-xs leading-6 text-foreground">
+        <p className="whitespace-pre-wrap break-words border-l-2 border-primary/30 bg-secondary/35 px-3 py-3 text-xs leading-6 text-foreground">
           {matchesQuery(visibleText, searchQuery)}
         </p>
         {text.length > 900 && (
@@ -502,6 +499,6 @@ function SourceDetail({
         <button type="button" onClick={() => void downloadSource()} disabled={!source.content_version_id && !source.media_id} className="inline-flex h-9 items-center justify-center gap-1.5 rounded-ui-md border border-border px-3 text-xs font-medium text-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-40"><Download className="size-3.5" />下载文件</button>
       </div>
       {status && <p className="mt-2 text-xs text-muted-foreground">{status}</p>}
-    </div>
+    </section>
   );
 }

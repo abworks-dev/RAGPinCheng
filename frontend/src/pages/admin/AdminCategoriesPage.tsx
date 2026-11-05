@@ -517,7 +517,7 @@ export function AdminCategoriesPage() {
   };
 
   return (
-    <section className="space-y-5" aria-labelledby="managed-categories-title">
+    <section className="admin-page admin-categories space-y-5" aria-labelledby="managed-categories-title">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-ui-xs font-medium text-primary">内容管理</p>
@@ -566,7 +566,7 @@ export function AdminCategoriesPage() {
           </div>
 
           {tree.length === 0 ? <EmptyState className="rounded-none border-0 border-t border-border bg-card" title="没有符合条件的分类" description="请调整搜索词或状态筛选。" /> : (
-            <div className="grid min-h-[28rem] border-t border-border lg:h-[calc(100vh-20rem)] lg:min-h-[22rem] lg:max-h-[40rem] lg:grid-cols-[minmax(22rem,0.88fr)_minmax(25rem,1.12fr)]">
+            <div className="grid min-h-[28rem] border-t border-border lg:h-[calc(100dvh-22rem)] lg:min-h-[24rem] lg:max-h-[42rem] lg:grid-cols-[minmax(16rem,0.78fr)_minmax(0,1.22fr)]">
               <div className="min-h-0 min-w-0 border-border bg-background/30 lg:overflow-y-auto lg:border-r">
                 <div role="tree" aria-label="分类层级" aria-busy={moving || numberSaving} className="border-b border-border">
                   {tree.map((node, index) => <CategoryTreeNodeView key={node.category.id} node={node} level={1} index={index} siblingCount={tree.length} selectedId={selectedId} expanded={expanded} visibleNodes={visibleNodes} nodeRefs={nodeRefs} onSelect={selectCategory} onToggle={(id) => setExpanded((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next; })} />)}

@@ -27,17 +27,30 @@ export function UserMenu({
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
+  useEffect(() => {
+    if (open && !refreshing) {
+      ref.current?.querySelector<HTMLButtonElement>("[data-account-menu] button")?.focus();
+    }
+  }, [open, refreshing]);
+
   if (state.status !== "authed") return null;
   const u = state.user;
   const canAccessWorkspace = hasContentWorkspaceAccess(u);
   const initials = (u.real_name || u.employee_id).slice(0, 1);
 
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative" ref={ref} onKeyDown={(event) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        ref.current?.querySelector<HTMLButtonElement>("button")?.focus();
+      }
+    }}>
       <button
         type="button"
         disabled={refreshing}
         aria-busy={refreshing}
+        aria-expanded={open}
+        aria-label={`账户：${u.real_name || u.employee_id}`}
         onClick={async () => {
           if (open) {
             setOpen(false);
@@ -54,9 +67,9 @@ export function UserMenu({
           }
         }}
         title={collapsed ? u.real_name : undefined}
-        className={`flex h-10 items-center rounded-ui-md hover:bg-secondary disabled:cursor-wait disabled:opacity-70 ${collapsed ? "w-10 justify-center p-1" : "w-full gap-3 px-2"}`}
+        className={`flex h-10 items-center rounded-ui-md transition-colors duration-normal hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70 ${collapsed ? "w-10 justify-center p-1" : "w-full gap-3 px-2"}`}
       >
-        <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-white text-sm font-semibold">
+        <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-ui-md bg-primary/10 text-primary text-sm font-semibold">
           {initials}
         </span>
         {!collapsed && <div className="flex-1 min-w-0 text-left">
@@ -68,7 +81,7 @@ export function UserMenu({
           : <ChevronUp className={`size-4 text-muted-foreground transition-transform ${open ? "" : "rotate-180"}`} />)}
       </button>
       {open && (
-        <div className={`absolute bottom-12 z-dropdown rounded-ui-md border border-border bg-popover p-1.5 text-popover-foreground shadow-overlay ${collapsed ? "left-12 w-48" : "left-0 right-0"}`}>
+        <div data-account-menu className={`absolute bottom-12 z-dropdown rounded-ui-md border border-border bg-popover p-1.5 text-popover-foreground shadow-overlay ${collapsed ? "left-12 w-48" : "left-0 right-0"}`}>
           {adminContext ? (
             <button
               type="button"
@@ -76,7 +89,7 @@ export function UserMenu({
                 setOpen(false);
                 navigate("/");
               }}
-              className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-left text-sm hover:bg-secondary"
+              className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-left text-sm hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <ArrowLeft className="size-4" />
               返回对话
@@ -102,7 +115,7 @@ export function UserMenu({
                     setRefreshing(false);
                   }
                 }}
-                className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-left text-sm hover:bg-secondary"
+                className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-left text-sm hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <BriefcaseBusiness className="size-4" />
                 {workspaceLabel(u)}
@@ -116,7 +129,7 @@ export function UserMenu({
               await logout();
               navigate("/login");
             }}
-            className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10"
+            className="flex w-full items-center gap-2 rounded-ui-sm px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <LogOut className="size-4" />
             退出登录

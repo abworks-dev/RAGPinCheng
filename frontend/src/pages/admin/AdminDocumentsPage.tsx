@@ -320,7 +320,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
   const titleId = embedded ? "managed-index-view-title" : "admin-documents-title";
 
   return (
-      <section className="space-y-5" aria-labelledby={titleId}>
+      <section className="admin-page admin-index-tasks space-y-5" aria-labelledby={titleId}>
       {!embedded && <header><p className="text-ui-xs font-medium text-primary">内容管理</p><h1 id={titleId} className="mt-1 text-ui-2xl font-semibold tracking-tight text-foreground">发布任务</h1><p className="mt-1 max-w-3xl text-ui-sm text-muted-foreground">统一跟踪普通资料和视频转录稿的发布处理状态，并处理可重试的失败任务。</p></header>}
 
       {error && (
@@ -331,7 +331,7 @@ export function AdminDocumentsPage({ embedded = false }: { embedded?: boolean })
         />
       )}
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="发布任务状态概览">
+      <section className="admin-metrics grid grid-cols-2 lg:grid-cols-4" aria-label="发布任务状态概览">
         <ManagedSummaryCard label="全部任务" value={allCount} icon={<ListChecks className="size-4" />} active={status === "all"} onClick={() => setStatus("all")} />
         <ManagedSummaryCard label="处理中" value={counts.processing || 0} icon={<Clock3 className="size-4" />} tone="warning" active={status === "processing"} onClick={() => setStatus((current) => current === "processing" ? "all" : "processing")} />
         <ManagedSummaryCard label="已发布" value={counts.ready || 0} icon={<CheckCircle2 className="size-4" />} tone="success" active={status === "ready"} onClick={() => setStatus((current) => current === "ready" ? "all" : "ready")} />
@@ -461,11 +461,15 @@ function ManagedJobsTable({
 }) {
   return (
     <div className="overflow-x-auto">
-      <table className="block w-full text-ui-sm lg:table lg:min-w-[68rem]">
+      <label className="flex items-center gap-2 border-b border-border px-4 py-3 text-ui-sm sm:px-5 min-[1400px]:hidden">
+        <Checkbox aria-label="全选当前页索引任务" checked={selectableJobs.length > 0 && selectableJobs.every((job) => selectedJobIds.includes(job.id))} disabled={selectableJobs.length === 0} onChange={(event) => onTogglePage(event.target.checked)} />
+        全选当前页任务
+      </label>
+      <table className="block w-full text-ui-sm min-[1400px]:table min-[1400px]:min-w-[68rem]">
         <caption className="sr-only">资料发布任务、类型、更新时间、状态、来源、内容块和操作</caption>
-        <thead className="hidden border-b border-border bg-surface-muted text-left text-muted-foreground lg:table-header-group">
+        <thead className="hidden border-b border-border bg-surface-muted text-left text-muted-foreground min-[1400px]:table-header-group">
           <tr>
-            <th className="w-12 px-3 py-3"><Checkbox aria-label="全选当前页索引任务" checked={selectableJobs.length > 0 && selectableJobs.every((job) => selectedJobIds.includes(job.id))} onChange={(event) => onTogglePage(event.target.checked)} /></th>
+            <th className="w-12 px-3 py-3"><Checkbox aria-label="全选当前页索引任务" checked={selectableJobs.length > 0 && selectableJobs.every((job) => selectedJobIds.includes(job.id))} disabled={selectableJobs.length === 0} onChange={(event) => onTogglePage(event.target.checked)} /></th>
             <th className="w-16 px-2 py-3 text-center font-medium">类型</th>
             <th className="min-w-48 px-3 py-3 font-medium">资料</th>
             <th className="min-w-24 whitespace-nowrap px-3 py-3 font-medium">更新时间</th>
@@ -474,7 +478,7 @@ function ManagedJobsTable({
             <th className="w-32 whitespace-nowrap px-3 py-3 text-right font-medium">操作</th>
           </tr>
         </thead>
-        <tbody className="block divide-y divide-border lg:table-row-group">
+        <tbody className="block divide-y divide-border min-[1400px]:table-row-group">
           {jobs.map((job) => {
             const publicationJob = job as ManagedIndexJob & Partial<UnifiedPublicationJob>;
             const isVideoIntent = publicationJob.task_type === "video_transcript"
@@ -493,10 +497,10 @@ function ManagedJobsTable({
               : meta.hint;
             const retrying = retryingJobId === job.id;
             return (
-              <tr key={job.id} className="group grid grid-cols-[2.5rem_5rem_minmax(0,1fr)] gap-x-2 gap-y-3 px-4 py-4 transition-colors duration-normal hover:bg-surface-muted/60 sm:px-5 lg:table-row lg:p-0">
-                <td className="flex items-start justify-center px-1 pt-0 lg:table-cell lg:w-12 lg:px-3 lg:py-3 lg:align-top"><Checkbox aria-label={`选择${job.title || job.original_filename || "任务"}`} checked={selectedJobIds.includes(job.id)} disabled={!(job.is_latest_attempt && !job.is_archived) && !selectedJobIds.includes(job.id)} onChange={() => onToggleJob(job.id)} /></td>
-                <td className="block lg:table-cell lg:px-2 lg:py-3"><ManagedItemType docType={job.doc_type} /></td>
-                <td className="block min-w-0 lg:table-cell lg:px-3 lg:py-3">
+              <tr key={job.id} className="group grid grid-cols-[2.5rem_5rem_minmax(0,1fr)] gap-x-2 gap-y-3 px-4 py-4 transition-colors duration-normal hover:bg-surface-muted/60 sm:px-5 min-[1400px]:table-row min-[1400px]:p-0">
+                <td className="flex items-start justify-center px-1 pt-0 min-[1400px]:table-cell min-[1400px]:w-12 min-[1400px]:px-3 min-[1400px]:py-3 min-[1400px]:align-top"><Checkbox aria-label={`选择${job.title || job.original_filename || "任务"}`} checked={selectedJobIds.includes(job.id)} disabled={!(job.is_latest_attempt && !job.is_archived) && !selectedJobIds.includes(job.id)} onChange={() => onToggleJob(job.id)} /></td>
+                <td className="block min-[1400px]:table-cell min-[1400px]:px-2 min-[1400px]:py-3"><ManagedItemType docType={job.doc_type} /></td>
+                <td className="block min-w-0 min-[1400px]:table-cell min-[1400px]:px-3 min-[1400px]:py-3">
                   <p className="break-words font-medium text-foreground" title={job.title || job.original_filename || undefined}>
                     {job.title || job.original_filename || "未命名资料"}
                   </p>
@@ -510,10 +514,10 @@ function ManagedJobsTable({
                   )}
                   <p className="mt-1 break-words text-ui-xs text-muted-foreground">分类：{job.category_path || job.category_label || "—"}</p>
                 </td>
-                <td className="col-span-2 block text-ui-xs text-muted-foreground lg:table-cell lg:whitespace-nowrap lg:px-3 lg:py-3">
-                  <span className="lg:hidden">更新时间： </span>{formatAdminDate(job.updated_at)}
+                <td className="col-span-3 block text-ui-xs text-muted-foreground min-[1400px]:table-cell min-[1400px]:whitespace-nowrap min-[1400px]:px-3 min-[1400px]:py-3">
+                  <span className="min-[1400px]:hidden">更新时间： </span>{formatAdminDate(job.updated_at)}
                 </td>
-                <td className="col-span-2 block lg:table-cell lg:px-3 lg:py-3">
+                <td className="col-span-3 block min-[1400px]:table-cell min-[1400px]:px-3 min-[1400px]:py-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant={meta.variant}>{meta.label}</Badge>
                     {job.is_archived && <Badge variant="secondary">已下架</Badge>}
@@ -527,11 +531,11 @@ function ManagedJobsTable({
                     </div>
                   )}
                 </td>
-                <td className="col-span-2 block text-ui-xs text-muted-foreground lg:table-cell lg:whitespace-nowrap lg:px-3 lg:py-3 lg:text-ui-sm lg:text-foreground">
-                  <span className="lg:hidden">来源： </span>{sourceOriginLabel(job.source_origin)}
+                <td className="col-span-3 block text-ui-xs text-muted-foreground min-[1400px]:table-cell min-[1400px]:whitespace-nowrap min-[1400px]:px-3 min-[1400px]:py-3 min-[1400px]:text-ui-sm min-[1400px]:text-foreground">
+                  <span className="min-[1400px]:hidden">来源： </span>{sourceOriginLabel(job.source_origin)}
                   <span className="mt-1 block text-ui-xs text-muted-foreground">内容块：{job.status === "done" && job.is_current_head && job.parent_count != null ? `${job.parent_count} 个` : "—"}</span>
                 </td>
-                <td className="col-span-2 flex flex-wrap justify-end gap-2 lg:table-cell lg:px-3 lg:py-3">
+                <td className="col-span-3 flex flex-wrap justify-end gap-2 min-[1400px]:table-cell min-[1400px]:px-3 min-[1400px]:py-3">
                   <div className="flex flex-wrap justify-end gap-2">
                     {isVideoIntent ? (
                       <a

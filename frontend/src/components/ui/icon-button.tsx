@@ -79,7 +79,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
           ref={tooltipRef}
           id={tooltipId}
           role="tooltip"
-          className="pointer-events-none fixed z-[100] w-max max-w-72 rounded-ui-md border border-border bg-popover px-2.5 py-1.5 text-left text-ui-xs leading-5 text-popover-foreground shadow-overlay"
+          className="pointer-events-none fixed z-tooltip w-max max-w-72 rounded-ui-md border border-border bg-popover px-2.5 py-1.5 text-left text-ui-xs leading-5 text-popover-foreground shadow-overlay"
           style={{
             left: position.left,
             top: position.top,

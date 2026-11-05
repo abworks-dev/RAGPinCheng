@@ -597,7 +597,7 @@ export function Message({
   };
   return (
     <article
-      className={`relative mx-auto flex w-full max-w-[50rem] ${isUser ? "justify-end" : "justify-start"} px-4 py-4`}
+      className={`relative mx-auto flex w-full max-w-[48rem] ${isUser ? "justify-end" : "justify-start"} px-4 py-4 sm:px-6 sm:py-5`}
       onMouseEnter={showTime}
       onMouseLeave={hideTime}
       onFocus={showTime}
@@ -607,7 +607,7 @@ export function Message({
         className={
           (isUser
             ? editing
-              ? "flex w-full max-w-[85%] flex-col items-end"
+              ? "flex w-full min-w-0 flex-col items-end sm:max-w-[90%]"
               : "flex w-full flex-col items-end"
             : "min-w-0 w-full") +
           ""
@@ -616,7 +616,7 @@ export function Message({
         {isUser ? (
           <>
             {editing ? (
-              <div className="w-full min-w-[22rem] rounded-ui-lg bg-primary p-4 text-primary-foreground shadow-surface">
+              <div className="w-full min-w-0 rounded-xl border border-input bg-card p-3 text-foreground shadow-surface sm:p-4">
                 <label htmlFor={`edit-question-${msg.id}`} className="sr-only">编辑提问</label>
                 <textarea
                   ref={editRef}
@@ -633,7 +633,7 @@ export function Message({
                       submitEdit();
                     }
                   }}
-                  className="max-h-72 min-h-28 w-full resize-y rounded-ui-md border border-white/30 bg-white/10 px-4 py-3 text-sm leading-6 text-primary-foreground outline-none placeholder:text-primary-foreground/60 focus:border-white/70 focus:ring-2 focus:ring-white/20"
+                  className="max-h-72 min-h-28 w-full resize-y rounded-ui-md border border-input bg-background px-3 py-3 text-sm leading-7 text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/20"
                 />
                 <div className="mt-2 flex justify-end gap-2">
                   <button
@@ -642,7 +642,7 @@ export function Message({
                       setEditing(false);
                       setDraft(msg.content);
                     }}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-ui-md px-3 text-xs font-medium hover:bg-white/10"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-ui-md px-3 text-xs font-medium hover:bg-secondary"
                   >
                     <X className="size-3.5" />取消
                   </button>
@@ -650,7 +650,7 @@ export function Message({
                     type="button"
                     onClick={submitEdit}
                     disabled={!draft.trim() || draft.trim() === msg.content}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-ui-md bg-white px-3 text-xs font-medium text-primary shadow-sm hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-ui-md bg-primary px-3 text-xs font-medium text-primary-foreground shadow-sm hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Send className="size-3.5" />发送
                   </button>
@@ -660,7 +660,7 @@ export function Message({
               <>
                 <div className="flex w-full items-center justify-end gap-3">
                   {messageTime}
-                  <div className="max-w-[70%] rounded-ui-lg bg-primary px-4 py-3 text-primary-foreground">
+                  <div className="min-w-0 max-w-[90%] rounded-xl rounded-br-sm border border-border/60 bg-secondary/80 px-4 py-3 text-sm leading-7 text-foreground sm:max-w-[85%] sm:px-5">
                     <div className="whitespace-pre-wrap break-words">{msg.content}</div>
                   </div>
                 </div>
@@ -729,8 +729,9 @@ export function Message({
           </>
         ) : (
           <>
+            <div className="mb-3 flex items-center gap-2 text-xs font-semibold text-foreground"><span aria-hidden="true" className="flex size-6 items-center justify-center rounded-ui-sm bg-primary/10 text-[10px] text-primary">品</span>知识库回答</div>
             <AnswerStatus msg={msg} />
-            <div className={"prose-tight relative " + (msg.streaming && msg.content ? "caret" : "")}>
+            <div className={"prose-tight relative min-w-0 " + (msg.streaming && msg.content ? "caret" : "")}>
               {msg.content ? (
                 <CitationContext.Provider value={{ messageId: msg.id, sources: msg.sources || [] }}>
                   <ReactMarkdown
@@ -745,18 +746,18 @@ export function Message({
             </div>
             <FileResultCards results={msg.file_results || []} />
             {msg.error && (
-              <div className="mt-2 flex items-start gap-2 rounded-ui-md border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive">
+              <div role="alert" className="mt-2 flex items-start gap-2 rounded-ui-md border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive">
                 <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                 <span>{msg.error}</span>
               </div>
             )}
             {!msg.streaming && !msg.error && msg.content && (
-              <div className="mt-5 flex min-h-9 items-center justify-between gap-3 border-t border-border pt-3">
+              <div className="mt-5 flex min-h-9 flex-wrap items-center justify-between gap-x-2 gap-y-2 border-t border-border/70 pt-3">
                 {msg.sources && msg.sources.length > 0 && (
                   <button
                     type="button"
                     onClick={() => onToggleSources?.(msg.id)}
-                    className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-ui-md border px-3 text-xs font-medium shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${sourcesSelected ? "border-primary bg-primary/10 text-primary" : "border-border bg-card text-foreground hover:border-primary/40 hover:bg-secondary"}`}
+                    className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-ui-md border px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${sourcesSelected ? "border-primary bg-primary/10 text-primary" : "border-border bg-card text-foreground hover:border-primary/40 hover:bg-secondary"}`}
                   >
                     <Files className="size-4 text-primary" />
                     查看 {msg.sources.length} 个来源

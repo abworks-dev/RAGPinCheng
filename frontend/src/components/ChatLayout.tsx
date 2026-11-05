@@ -182,7 +182,7 @@ export function ChatLayout() {
         <div className="hidden h-full shrink-0 lg:block">
           {sidebar(sidebarCollapsed, () => setSidebarCollapsed((value) => !value))}
         </div>
-        <main className="flex min-w-0 flex-1 flex-col">
+        <main id="chat-workspace" className="flex min-w-0 flex-1 flex-col bg-background">
           <ChatHeader
             title={currentConversation?.title || "品成 BIM 知识库"}
             scopeLabel={scopeLabel}
@@ -196,7 +196,7 @@ export function ChatLayout() {
             }}
           />
           {messages.length === 0 ? (
-            <div className="flex min-h-0 flex-1 flex-col justify-center gap-7 py-8">
+            <div className="flex min-h-0 flex-1 flex-col justify-center gap-5 overflow-y-auto py-5 sm:gap-8 sm:py-10">
               <MessageList messages={messages} conversationId={currentId} centeredEmpty />
               <Composer
                 centered
@@ -235,8 +235,8 @@ export function ChatLayout() {
           />
           </>}
         </main>
-          <div className={`hidden h-full shrink-0 overflow-hidden transition-[width,opacity] duration-slow xl:block ${sourceOpen ? "w-[23rem] opacity-100" : "w-0 opacity-0"}`}>
-            <div className="h-full w-[23rem]">
+          <div className={`hidden h-full shrink-0 overflow-hidden border-l border-border transition-[width,opacity] duration-slow motion-reduce:transition-none xl:block ${sourceOpen ? "w-[22rem] opacity-100" : "w-0 opacity-0"}`}>
+            <div className="h-full w-[22rem]">
             <SourceWorkspace
               messages={messages}
               conversationId={currentId}
