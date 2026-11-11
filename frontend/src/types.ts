@@ -1432,6 +1432,7 @@ export type ExternalMediaSource = {
   target_category_id: string;
   default_scheme_id: string;
   auto_enqueue: boolean;
+  document_import_mode: "manual" | "auto";
   scan_interval_seconds: number;
   enabled: boolean;
   status: "never_scanned" | "scanning" | "available" | "unavailable" | "scan_failed";
@@ -1447,7 +1448,7 @@ export type ExternalMediaSource = {
 };
 export type ExternalMediaEntry = {
   id: string;
-  kind: "folder" | "video";
+  kind: "folder" | "video" | "document";
   name: string;
   relative_path: string;
   file_size?: number | null;
@@ -1461,12 +1462,36 @@ export type ExternalMediaEntry = {
   publication_status?: string | null;
   index_status?: string | null;
   lifecycle_status?: string;
+  doc_type?: string | null;
+  content_item_id?: string | null;
+  content_version_id?: string | null;
+  content_lifecycle_status?: string | null;
+  import_status?: "not_imported" | "pending" | "imported" | "failed" | null;
+  import_error?: string | null;
 };
 export type ExternalMediaEntryList = { source_id: string; parent_relative_path: string; entries: ExternalMediaEntry[] };
 export type ExternalMediaScan = { run_id: string; source_id: string; discovered_count: number; added_count: number; changed_count: number; missing_count: number; enqueued_count: number; enqueue_failures: number };
 export type ExternalMediaEnqueuePreviewItem = { entry_id: string; relative_path: string; file_size: number; modified_ns: number; state: "new" | "updated" | "already_transcribed"; selected: boolean };
 export type ExternalMediaEnqueuePreview = { items: ExternalMediaEnqueuePreviewItem[]; selected_count: number };
 export type ExternalMediaEnqueueResult = { requested: number; enqueued: number; failed: number; failures: Record<string, string> };
+export type ExternalMediaDocumentImportItem = {
+  entry_id: string;
+  relative_path: string;
+  status: "imported" | "skipped" | "failed";
+  doc_type?: string | null;
+  item_id?: string | null;
+  version_id?: string | null;
+  reason_code?: string | null;
+  reason?: string | null;
+};
+export type ExternalMediaDocumentImportResult = {
+  source_id: string;
+  requested: number;
+  imported: number;
+  skipped: number;
+  failed: number;
+  items: ExternalMediaDocumentImportItem[];
+};
 
 export type MediaUploadConflict = {
   media_id: string;

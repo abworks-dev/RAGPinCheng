@@ -1380,6 +1380,7 @@ class ExternalMediaSourceCreate(BaseModel):
     target_category_id: str = Field(min_length=1, max_length=100)
     default_scheme_id: str = Field(min_length=1, max_length=100)
     auto_enqueue: bool = False
+    document_import_mode: Literal["manual", "auto"] = "manual"
     scan_interval_seconds: int = Field(default=900, ge=60, le=86400)
 
 
@@ -1390,6 +1391,7 @@ class ExternalMediaSourceUpdate(BaseModel):
     target_category_id: str = Field(min_length=1, max_length=100)
     default_scheme_id: str = Field(min_length=1, max_length=100)
     auto_enqueue: bool
+    document_import_mode: Literal["manual", "auto"]
     scan_interval_seconds: int = Field(ge=60, le=86400)
     enabled: bool
     expected_version: int = Field(gt=0)
@@ -1403,6 +1405,7 @@ class ExternalMediaSourceDTO(BaseModel):
     target_category_id: str
     default_scheme_id: str
     auto_enqueue: bool
+    document_import_mode: str = "manual"
     scan_interval_seconds: int
     enabled: bool
     status: Literal["never_scanned", "scanning", "available", "unavailable", "scan_failed"]
@@ -1430,7 +1433,7 @@ class ExternalMediaScanDTO(BaseModel):
 
 class ExternalMediaEntryDTO(BaseModel):
     id: str
-    kind: Literal["folder", "video"]
+    kind: Literal["folder", "video", "document"]
     name: str
     relative_path: str
     file_size: int | None = None
@@ -1444,12 +1447,44 @@ class ExternalMediaEntryDTO(BaseModel):
     publication_status: str | None = None
     index_status: str | None = None
     lifecycle_status: str = "awaiting_transcription"
+    doc_type: str | None = None
+    content_item_id: str | None = None
+    content_version_id: str | None = None
+    content_lifecycle_status: str | None = None
+    import_status: str | None = None
+    import_error: str | None = None
 
 
 class ExternalMediaEntryListDTO(BaseModel):
     source_id: str
     parent_relative_path: str
     entries: list[ExternalMediaEntryDTO]
+
+
+class ExternalMediaDocumentImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    entry_ids: list[str] | None = Field(default=None, max_length=200)
+
+
+class ExternalMediaDocumentImportItem(BaseModel):
+    entry_id: str
+    relative_path: str
+    status: Literal["imported", "skipped", "failed"]
+    doc_type: str | None = None
+    item_id: str | None = None
+    version_id: str | None = None
+    reason_code: str | None = None
+    reason: str | None = None
+
+
+class ExternalMediaDocumentImportResult(BaseModel):
+    source_id: str
+    requested: int
+    imported: int
+    skipped: int
+    failed: int
+    items: list[ExternalMediaDocumentImportItem]
 
 
 class ExternalMediaEnqueueRequest(BaseModel):

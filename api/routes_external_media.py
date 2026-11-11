@@ -16,17 +16,23 @@ from src.transcription.types import ContractValidationError
 from .auth import CurrentUser, require_admin, require_csrf_admin
 from .db import connect, get_db
 from .external_media import (
+    ENTRY_KIND_DOCUMENT,
     ExternalMediaError,
     due_source_ids,
     external_request_key,
+    project_external_document_lifecycle,
     project_external_lifecycle,
     reconcile_source,
 )
+from .external_document_import import import_source_documents, run_auto_import
 from .media_storage import normalize_external_relative_path
 from .media_upload_conflicts import require_active_category
 from .content_permissions import require_content_permission
 from .routes_transcription import build_transcription_service
 from .schemas import (
+    ExternalMediaDocumentImportRequest,
+    ExternalMediaDocumentImportResult,
+    ExternalMediaDocumentImportItem,
     ExternalMediaEnqueueRequest,
     ExternalMediaEnqueuePreview,
     ExternalMediaEnqueuePreviewItem,
@@ -55,6 +61,7 @@ def _source_dto(row: sqlite3.Row) -> ExternalMediaSourceDTO:
         target_category_id=str(row["target_category_id"]),
         default_scheme_id=str(row["default_scheme_id"]),
         auto_enqueue=bool(row["auto_enqueue"]),
+        document_import_mode=str(row["document_import_mode"]),
         scan_interval_seconds=int(row["scan_interval_seconds"]),
         enabled=bool(row["enabled"]),
         status=row["status"],
@@ -116,8 +123,8 @@ def create_source(
         conn.execute(
             """INSERT INTO external_media_sources(
                    id,name,root_alias,relative_path,target_category_id,default_scheme_id,
-                   auto_enqueue,scan_interval_seconds,created_by,created_at,updated_at
-               ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                   auto_enqueue,document_import_mode,scan_interval_seconds,created_by,created_at,updated_at
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 source_id,
                 body.name.strip(),
@@ -126,6 +133,7 @@ def create_source(
                 body.target_category_id,
                 body.default_scheme_id,
                 int(body.auto_enqueue),
+                body.document_import_mode,
                 body.scan_interval_seconds,
                 admin.id,
                 now,
@@ -153,13 +161,15 @@ def update_source(
     now = int(time.time())
     changed = conn.execute(
         """UPDATE external_media_sources SET name=?,target_category_id=?,default_scheme_id=?,
-                  auto_enqueue=?,scan_interval_seconds=?,enabled=?,updated_at=?,version=version+1
+                  auto_enqueue=?,document_import_mode=?,scan_interval_seconds=?,enabled=?,updated_at=?,
+                  version=version+1
            WHERE id=? AND version=?""",
         (
             body.name.strip(),
             body.target_category_id,
             body.default_scheme_id,
             int(body.auto_enqueue),
+            body.document_import_mode,
             body.scan_interval_seconds,
             int(body.enabled),
             now,
@@ -207,8 +217,10 @@ def _entry_rows(conn: sqlite3.Connection, source_id: str) -> list[sqlite3.Row]:
                   (SELECT publication_status FROM transcript_versions v WHERE v.media_id=e.media_id ORDER BY created_at DESC LIMIT 1) AS publication_status,
                   (SELECT status FROM transcript_publication_index_jobs p
                      JOIN transcript_versions v ON v.id=p.transcript_version_id
-                    WHERE v.media_id=e.media_id ORDER BY p.created_at DESC LIMIT 1) AS index_status
-           FROM external_media_entries e JOIN media_assets m ON m.media_id=e.media_id
+                    WHERE v.media_id=e.media_id ORDER BY p.created_at DESC LIMIT 1) AS index_status,
+                  (SELECT lifecycle_status FROM content_versions cv WHERE cv.id=e.content_version_id)
+                    AS content_lifecycle_status
+           FROM external_media_entries e LEFT JOIN media_assets m ON m.media_id=e.media_id
            WHERE e.source_id=? AND e.availability<>'superseded'
            ORDER BY e.relative_path COLLATE NOCASE""",
         (source_id,),
@@ -231,6 +243,7 @@ def list_entries(
     prefix = f"{parent_path}/" if parent_path else ""
     folders: dict[str, ExternalMediaEntryDTO] = {}
     videos: list[ExternalMediaEntryDTO] = []
+    documents: list[ExternalMediaEntryDTO] = []
     for row in _entry_rows(conn, source_id):
         relative = str(row["relative_path"])
         if not relative.startswith(prefix):
@@ -242,6 +255,30 @@ def list_entries(
             folders.setdefault(
                 parts[0],
                 ExternalMediaEntryDTO(id=f"folder:{folder_path}", kind="folder", name=parts[0], relative_path=folder_path),
+            )
+            continue
+        if str(row["entry_kind"]) == ENTRY_KIND_DOCUMENT:
+            documents.append(
+                ExternalMediaEntryDTO(
+                    id=str(row["id"]),
+                    kind="document",
+                    name=str(row["filename"]),
+                    relative_path=relative,
+                    file_size=int(row["file_size"]),
+                    modified_ns=int(row["modified_ns"]),
+                    availability=row["availability"],
+                    content_item_id=row["content_item_id"],
+                    content_version_id=row["content_version_id"],
+                    doc_type=row["doc_type"],
+                    import_status=row["import_status"],
+                    import_error=row["import_error"],
+                    content_lifecycle_status=row["content_lifecycle_status"],
+                    lifecycle_status=project_external_document_lifecycle(
+                        availability=row["availability"],
+                        import_status=row["import_status"],
+                        content_lifecycle_status=row["content_lifecycle_status"],
+                    ),
+                )
             )
             continue
         videos.append(
@@ -268,7 +305,7 @@ def list_entries(
                 ),
             )
         )
-    entries = sorted(folders.values(), key=lambda item: item.name.casefold()) + videos
+    entries = sorted(folders.values(), key=lambda item: item.name.casefold()) + documents + videos
     return ExternalMediaEntryListDTO(source_id=source_id, parent_relative_path=parent_path, entries=entries)
 
 
@@ -408,6 +445,55 @@ def preview_enqueue_entries(
     return ExternalMediaEnqueuePreview(items=items, selected_count=sum(item.selected for item in items))
 
 
+@router.post("/sources/{source_id}/documents/import", response_model=ExternalMediaDocumentImportResult)
+def import_documents(
+    source_id: str,
+    body: ExternalMediaDocumentImportRequest,
+    admin: CurrentUser = Depends(require_content_permission("item.upload", csrf=True)),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ExternalMediaDocumentImportResult:
+    """Copy selected shared-folder documents into the managed library.
+
+    Each document becomes a ``pending_publication`` version and still needs the
+    normal publication step before it is indexed for retrieval.
+    """
+    try:
+        result = import_source_documents(
+            conn,
+            source_id,
+            entry_ids=None if body.entry_ids is None else tuple(body.entry_ids),
+            actor_user_id=admin.id,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="外部媒体源不存在") from exc
+    except ExternalMediaError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": str(exc), "message": "共享目录当前不可访问，未能导入文档。"},
+        ) from exc
+    items = [
+        ExternalMediaDocumentImportItem(
+            entry_id=item.entry_id,
+            relative_path=item.relative_path,
+            status=item.status,
+            doc_type=item.doc_type,
+            item_id=item.item_id,
+            version_id=item.version_id,
+            reason_code=item.reason_code,
+            reason=item.reason,
+        )
+        for item in result.outcomes
+    ]
+    return ExternalMediaDocumentImportResult(
+        source_id=result.source_id,
+        requested=result.requested,
+        imported=result.imported,
+        skipped=result.skipped,
+        failed=result.failed,
+        items=items,
+    )
+
+
 def run_due_external_scans() -> None:
     conn = connect()
     try:
@@ -415,9 +501,30 @@ def run_due_external_scans() -> None:
             try:
                 result = reconcile_source(conn, source_id, trigger_type="scheduled")
                 source = conn.execute(
-                    "SELECT auto_enqueue,created_by FROM external_media_sources WHERE id=?", (source_id,)
+                    "SELECT auto_enqueue,document_import_mode,created_by FROM external_media_sources WHERE id=?",
+                    (source_id,),
                 ).fetchone()
-                if source is not None and source["auto_enqueue"] and source["created_by"] is not None and result.added_entry_ids:
+                if source is None or source["created_by"] is None:
+                    continue
+                if (
+                    source["document_import_mode"] == "auto"
+                    and (
+                        result.added_document_entry_ids
+                        or conn.execute(
+                            """SELECT 1 FROM external_media_entries
+                               WHERE source_id=? AND entry_kind=? AND availability='available'
+                                 AND import_status IN ('not_imported','pending','failed') LIMIT 1""",
+                            (source_id, ENTRY_KIND_DOCUMENT),
+                        ).fetchone()
+                    )
+                ):
+                    try:
+                        run_auto_import(conn, source_id, actor_user_id=int(source["created_by"]))
+                    except (ExternalMediaError, KeyError, ValueError):
+                        # A failed auto-import must not stop the scan loop; the
+                        # per-entry failure state stays visible in the panel.
+                        conn.rollback()
+                if source["auto_enqueue"] and result.added_entry_ids:
                     outcome = enqueue_source_entries(
                         conn,
                         source_id,
