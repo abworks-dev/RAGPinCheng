@@ -288,7 +288,7 @@ def test_upgrade_from_45_and_replay(tmp_path, monkeypatch):
     init_db(path,backup_dir=tmp_path/'backups')
     init_db(path,backup_dir=tmp_path/'backups')
     conn = connect(path)
-    assert conn.execute('SELECT max(version) FROM app_schema_migrations').fetchone()[0] ==46
+    assert conn.execute('SELECT max(version) FROM app_schema_migrations').fetchone()[0] == migrations[-1].version
     assert categories == [tuple(r) for r in conn.execute('SELECT * FROM category_nodes ORDER BY id')]
     for table in ('messages','message_answer_versions'):
         assert 'file_results_json' in [r['name'] for r in conn.execute('PRAGMA table_info('+table+')')]
