@@ -31,6 +31,7 @@ import type {
   ExternalMediaScan,
   ExternalMediaEnqueueResult,
   ExternalMediaEnqueuePreview,
+  ExternalMediaDocumentImportResult,
   MediaUploadPreflightResponse,
   ManagedCategory,
   CategoryDeletePreview,
@@ -1152,14 +1153,15 @@ export const api = {
   listMediaAssets: () => jsonFetch<MediaAsset[]>("/api/admin/media?limit=500"),
   listExternalMediaRoots: () => jsonFetch<ExternalMediaRoot[]>("/api/admin/external-media/roots"),
   listExternalMediaSources: () => jsonFetch<ExternalMediaSource[]>("/api/admin/external-media/sources"),
-  createExternalMediaSource: (body: { name: string; root_alias: string; relative_path: string; unc_path?: string | null; target_category_id: string; default_scheme_id: string; auto_enqueue: boolean; scan_interval_seconds: number }) =>
+  createExternalMediaSource: (body: { name: string; root_alias: string; relative_path: string; unc_path?: string | null; target_category_id: string; default_scheme_id: string; auto_enqueue: boolean; document_import_mode: "manual" | "auto"; scan_interval_seconds: number }) =>
     jsonFetch<ExternalMediaSource>("/api/admin/external-media/sources", { method: "POST", body: JSON.stringify(body) }),
-  updateExternalMediaSource: (sourceId: string, body: { name: string; target_category_id: string; default_scheme_id: string; auto_enqueue: boolean; scan_interval_seconds: number; enabled: boolean; expected_version: number }) =>
+  updateExternalMediaSource: (sourceId: string, body: { name: string; target_category_id: string; default_scheme_id: string; auto_enqueue: boolean; document_import_mode: "manual" | "auto"; scan_interval_seconds: number; enabled: boolean; expected_version: number }) =>
     jsonFetch<ExternalMediaSource>(`/api/admin/external-media/sources/${encodeURIComponent(sourceId)}`, { method: "PATCH", body: JSON.stringify(body) }),
   scanExternalMediaSource: (sourceId: string) => jsonFetch<ExternalMediaScan>(`/api/admin/external-media/sources/${encodeURIComponent(sourceId)}/scan`, { method: "POST", body: JSON.stringify({}) }),
   listExternalMediaEntries: (sourceId: string, parent = "") => jsonFetch<ExternalMediaEntryList>(`/api/admin/external-media/sources/${encodeURIComponent(sourceId)}/entries?parent=${encodeURIComponent(parent)}`),
   enqueueExternalMedia: (sourceId: string, entryIds?: string[]) => jsonFetch<ExternalMediaEnqueueResult>(`/api/admin/external-media/sources/${encodeURIComponent(sourceId)}/enqueue`, { method: "POST", body: JSON.stringify({ entry_ids: entryIds ?? null }) }),
   previewEnqueueExternalMedia: (sourceId: string, entryIds?: string[]) => jsonFetch<ExternalMediaEnqueuePreview>(`/api/admin/external-media/sources/${encodeURIComponent(sourceId)}/enqueue-preview`, { method: "POST", body: JSON.stringify({ entry_ids: entryIds ?? null }) }),
+  importExternalMediaDocuments: (sourceId: string, entryIds?: string[]) => jsonFetch<ExternalMediaDocumentImportResult>(`/api/admin/external-media/sources/${encodeURIComponent(sourceId)}/documents/import`, { method: "POST", body: JSON.stringify({ entry_ids: entryIds ?? null }) }),
   preflightMediaUpload: (body: {
     category_id: string;
     items: Array<{ client_id: string; title: string; original_filename: string }>;

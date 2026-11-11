@@ -41,4 +41,5 @@ export const adminMediaApi = {
   externalEntries: (...args: Parameters<typeof api.listExternalMediaEntries>) => api.listExternalMediaEntries(...args),
   enqueueExternal: (...args: Parameters<typeof api.enqueueExternalMedia>) => api.enqueueExternalMedia(...args),
   previewEnqueueExternal: (...args: Parameters<typeof api.previewEnqueueExternalMedia>) => api.previewEnqueueExternalMedia(...args),
+  importExternalDocuments: (...args: Parameters<typeof api.importExternalMediaDocuments>) => api.importExternalMediaDocuments(...args),
 };

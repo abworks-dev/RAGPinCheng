@@ -13,6 +13,7 @@ from typing import Mapping
 
 from src.config import EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE, EXTERNAL_MEDIA_ROOTS
 
+from .external_document_types import document_doc_type
 from .media_storage import (
     MediaStorageError,
     normalize_external_relative_path,
@@ -21,6 +22,8 @@ from .media_storage import (
 from .media_transcript_catalog import ensure_media_transcript_catalog_item
 
 VIDEO_EXTENSIONS = frozenset({".mp4"})
+ENTRY_KIND_VIDEO = "video"
+ENTRY_KIND_DOCUMENT = "document"
 
 
 class ExternalMediaError(RuntimeError):
@@ -58,6 +61,30 @@ def project_external_lifecycle(
     return "awaiting_transcription"
 
 
+def project_external_document_lifecycle(
+    *,
+    availability: str | None,
+    import_status: str | None,
+    content_lifecycle_status: str | None,
+) -> str:
+    """Project a shared-folder document onto the managed library lifecycle."""
+    if availability == "missing":
+        return "remote_missing"
+    if availability == "superseded":
+        return "remote_changed"
+    if import_status == "failed":
+        return "import_failed"
+    if not content_lifecycle_status:
+        return "awaiting_import"
+    if content_lifecycle_status == "published":
+        return "published"
+    if content_lifecycle_status == "pending_publication":
+        return "pending_publication"
+    if content_lifecycle_status == "publishing":
+        return "publishing"
+    return "awaiting_import"
+
+
 @dataclass(frozen=True, slots=True)
 class ScannedFile:
     relative_path: str
@@ -66,6 +93,8 @@ class ScannedFile:
     file_size: int
     modified_ns: int
     fingerprint: str
+    entry_kind: str = ENTRY_KIND_VIDEO
+    doc_type: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +106,7 @@ class ScanResult:
     changed_count: int
     missing_count: int
     added_entry_ids: tuple[str, ...]
+    added_document_entry_ids: tuple[str, ...] = ()
 
 
 def _is_link_or_reparse(entry: os.DirEntry[str]) -> bool:
@@ -89,7 +119,7 @@ def _is_link_or_reparse(entry: os.DirEntry[str]) -> bool:
     return bool(getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
 
 
-def _fingerprint(relative_path: str, size: int, modified_ns: int) -> str:
+def file_fingerprint(relative_path: str, size: int, modified_ns: int) -> str:
     value = f"external-media-v1\n{relative_path}\n{size}\n{modified_ns}".encode("utf-8")
     return hashlib.sha256(value).hexdigest()
 
@@ -159,11 +189,11 @@ class ShareScan:
 
 def scan_share(root: Path, *, max_files: int = EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE) -> ShareScan:
     """Walk a shared directory once, returning every visited directory
-    (relative POSIX path) and every discoverable MP4 file.
+    (relative POSIX path) and every discoverable video or library document.
 
     Directory paths feed shared-folder mirror materialization so that folders
-    containing only subfolders (or no MP4 at all) still appear in the managed
-    category tree mirror.
+    containing only subfolders (or no supported file at all) still appear in
+    the managed category tree mirror.
     """
     if max_files < 1:
         raise ValueError("max_files_must_be_positive")
@@ -190,8 +220,17 @@ def scan_share(root: Path, *, max_files: int = EXTERNAL_MEDIA_MAX_FILES_PER_SOUR
                 if child.is_dir(follow_symlinks=False):
                     pending.append(Path(child.path))
                     continue
-                if not child.is_file(follow_symlinks=False) or Path(child.name).suffix.lower() not in VIDEO_EXTENSIONS:
+                if not child.is_file(follow_symlinks=False):
                     continue
+                suffix = Path(child.name).suffix.lower()
+                if suffix in VIDEO_EXTENSIONS:
+                    entry_kind = ENTRY_KIND_VIDEO
+                    doc_type: str | None = None
+                else:
+                    doc_type = document_doc_type(suffix)
+                    if doc_type is None:
+                        continue
+                    entry_kind = ENTRY_KIND_DOCUMENT
                 info = child.stat(follow_symlinks=False)
             except OSError as exc:
                 raise ExternalMediaError("external_source_changed_during_scan") from exc
@@ -211,7 +250,9 @@ def scan_share(root: Path, *, max_files: int = EXTERNAL_MEDIA_MAX_FILES_PER_SOUR
                     child.name,
                     int(info.st_size),
                     int(info.st_mtime_ns),
-                    _fingerprint(normalized, int(info.st_size), int(info.st_mtime_ns)),
+                    file_fingerprint(normalized, int(info.st_size), int(info.st_mtime_ns)),
+                    entry_kind,
+                    doc_type,
                 )
             )
             if len(found) > max_files:
@@ -220,7 +261,9 @@ def scan_share(root: Path, *, max_files: int = EXTERNAL_MEDIA_MAX_FILES_PER_SOUR
 
 
 def discover_video_files(root: Path, *, max_files: int = EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE) -> tuple[ScannedFile, ...]:
-    return scan_share(root, max_files=max_files).files
+    return tuple(
+        item for item in scan_share(root, max_files=max_files).files if item.entry_kind == ENTRY_KIND_VIDEO
+    )
 
 
 def source_root(source: sqlite3.Row, roots: Mapping[str, Path] = EXTERNAL_MEDIA_ROOTS) -> Path:
@@ -275,7 +318,9 @@ def reconcile_source(
         raise
 
     current_rows = conn.execute(
-        """SELECT id,media_id,relative_path,fingerprint FROM external_media_entries
+        """SELECT id,media_id,relative_path,fingerprint,entry_kind,doc_type,content_item_id,
+                  content_version_id,imported_fingerprint
+           FROM external_media_entries
            WHERE source_id=? AND availability='available'""",
         (source_id,),
     ).fetchall()
@@ -283,13 +328,21 @@ def reconcile_source(
     seen_paths: set[str] = set()
     added = changed = 0
     added_entry_ids: list[str] = []
+    added_document_entry_ids: list[str] = []
     try:
         conn.execute("BEGIN IMMEDIATE")
         for item in scanned.files:
             seen_paths.add(item.relative_path)
             existing = current_by_path.get(item.relative_path)
-            if existing is not None and existing["fingerprint"] == item.fingerprint:
-                ensure_media_transcript_catalog_item(conn, media_id=str(existing["media_id"]), now=timestamp)
+            if (
+                existing is not None
+                and existing["fingerprint"] == item.fingerprint
+                and str(existing["entry_kind"]) == item.entry_kind
+            ):
+                if item.entry_kind == ENTRY_KIND_VIDEO and existing["media_id"]:
+                    ensure_media_transcript_catalog_item(
+                        conn, media_id=str(existing["media_id"]), now=timestamp
+                    )
                 conn.execute(
                     """UPDATE external_media_entries SET last_seen_at=?,updated_at=?,missing_since=NULL
                        WHERE id=?""",
@@ -320,31 +373,52 @@ def reconcile_source(
             else:
                 added += 1
             entry_id = str(uuid.uuid4())
-            media_id = str(uuid.uuid4())
-            title = Path(item.filename).stem.strip() or item.filename
-            conn.execute(
-                """INSERT INTO media_assets(
-                       media_id,title,original_filename,storage_rel_path,mime_type,file_size,sha256,
-                       transcript_source_path,transcript_origin,status,created_by,created_at,updated_at,
-                       target_category_id,normalized_title,normalized_original_filename,storage_kind
-                   ) VALUES (?,?,?,?,'video/mp4',?,NULL,NULL,'generated','uploaded',?,?,?, ?,NULL,NULL,'external')""",
-                (
-                    media_id,
-                    title[:200],
-                    item.filename[:255],
-                    f"external/{source_id}/{entry_id}",
-                    item.file_size,
-                    source["created_by"],
-                    timestamp,
-                    timestamp,
-                    source["target_category_id"],
-                ),
+            previous_item_id = (
+                str(existing["content_item_id"])
+                if existing is not None and existing["content_item_id"]
+                else None
             )
+            previous_version_id = (
+                str(existing["content_version_id"])
+                if existing is not None and existing["content_version_id"]
+                else None
+            )
+            previous_imported_fingerprint = (
+                str(existing["imported_fingerprint"])
+                if existing is not None and existing["imported_fingerprint"]
+                else None
+            )
+            media_id: str | None = None
+            if item.entry_kind == ENTRY_KIND_VIDEO:
+                media_id = str(uuid.uuid4())
+                title = Path(item.filename).stem.strip() or item.filename
+                conn.execute(
+                    """INSERT INTO media_assets(
+                           media_id,title,original_filename,storage_rel_path,mime_type,file_size,sha256,
+                           transcript_source_path,transcript_origin,status,created_by,created_at,updated_at,
+                           target_category_id,normalized_title,normalized_original_filename,storage_kind
+                       ) VALUES (?,?,?,?,'video/mp4',?,NULL,NULL,'generated','uploaded',?,?,?, ?,NULL,NULL,'external')""",
+                    (
+                        media_id,
+                        title[:200],
+                        item.filename[:255],
+                        f"external/{source_id}/{entry_id}",
+                        item.file_size,
+                        source["created_by"],
+                        timestamp,
+                        timestamp,
+                        source["target_category_id"],
+                    ),
+                )
+                document_import_status = "not_imported"
+            else:
+                document_import_status = "pending" if previous_item_id else "not_imported"
             conn.execute(
                 """INSERT INTO external_media_entries(
                        id,source_id,media_id,relative_path,parent_relative_path,filename,file_size,
-                       modified_ns,fingerprint,availability,discovered_at,last_seen_at,missing_since,updated_at
-                   ) VALUES (?,?,?,?,?,?,?,?,?,'available',?,?,NULL,?)""",
+                       modified_ns,fingerprint,availability,discovered_at,last_seen_at,missing_since,updated_at,
+                       entry_kind,doc_type,content_item_id,content_version_id,import_status,imported_fingerprint
+                   ) VALUES (?,?,?,?,?,?,?,?,?,'available',?,?,NULL,?,?,?,?,?,?,?)""",
                 (
                     entry_id,
                     source_id,
@@ -358,20 +432,29 @@ def reconcile_source(
                     timestamp,
                     timestamp,
                     timestamp,
+                    item.entry_kind,
+                    item.doc_type,
+                    previous_item_id,
+                    previous_version_id,
+                    document_import_status,
+                    previous_imported_fingerprint,
                 ),
             )
-            ensure_media_transcript_catalog_item(conn, media_id=media_id, now=timestamp)
-            if existing is not None:
-                _register_replacement_if_published(
-                    conn,
-                    source=source,
-                    previous_media_id=str(existing["media_id"]),
-                    candidate_media_id=media_id,
-                    candidate_entry_id=entry_id,
-                    fingerprint=item.fingerprint,
-                    now=timestamp,
-                )
-            added_entry_ids.append(entry_id)
+            if item.entry_kind == ENTRY_KIND_VIDEO and media_id is not None:
+                ensure_media_transcript_catalog_item(conn, media_id=media_id, now=timestamp)
+                if existing is not None and existing["media_id"]:
+                    _register_replacement_if_published(
+                        conn,
+                        source=source,
+                        previous_media_id=str(existing["media_id"]),
+                        candidate_media_id=media_id,
+                        candidate_entry_id=entry_id,
+                        fingerprint=item.fingerprint,
+                        now=timestamp,
+                    )
+                added_entry_ids.append(entry_id)
+            else:
+                added_document_entry_ids.append(entry_id)
 
         missing_rows = [row for path, row in current_by_path.items() if path not in seen_paths]
         for row in missing_rows:
@@ -422,7 +505,16 @@ def reconcile_source(
         except Exception:
             conn.rollback()
         raise ExternalMediaError(error_code) from exc
-    return ScanResult(run_id, source_id, len(scanned.files), added, changed, missing_count, tuple(added_entry_ids))
+    return ScanResult(
+        run_id,
+        source_id,
+        len(scanned.files),
+        added,
+        changed,
+        missing_count,
+        tuple(added_entry_ids),
+        tuple(added_document_entry_ids),
+    )
 
 
 def due_source_ids(conn: sqlite3.Connection, *, now: int | None = None) -> tuple[str, ...]:
@@ -652,3 +744,41 @@ def resolve_shared_category_key(conn: sqlite3.Connection, media_id: str) -> str 
         if node is not None:
             return str(node["category_key"])
     return str(root["category_key"])
+
+
+def resolve_shared_category_id(
+    conn: sqlite3.Connection,
+    source_id: str,
+    relative_path: str,
+) -> str | None:
+    """Resolve the managed category id a shared-folder file should import into.
+
+    Prefers the deepest materialized mirror node matching the file's remote
+    folder, walking up to the closest existing ancestor.  Falls back to the
+    source's configured publish target (the shared root itself only when the
+    source has no usable target), and ``None`` when the source has no shared
+    root yet.
+    """
+    root = _load_shared_root(conn, source_id)
+    if root is None:
+        return None
+    root_id = str(root["id"])
+    folder = PurePosixPath(relative_path).parent.as_posix() if relative_path else ""
+    if folder == ".":
+        folder = ""
+    node = _mirror_node_by_path(conn, root_id, folder) if folder else None
+    if node is not None:
+        return str(node["id"])
+    parts = folder.split("/") if folder else []
+    for depth in range(len(parts) - 1, 0, -1):
+        node = _mirror_node_by_path(conn, root_id, "/".join(parts[:depth]))
+        if node is not None:
+            return str(node["id"])
+    target = conn.execute(
+        """SELECT target_category_id FROM external_media_sources WHERE id=?
+           AND target_category_id IS NOT NULL AND target_category_id<>''""",
+        (source_id,),
+    ).fetchone()
+    if target is not None and str(target["target_category_id"]) != root_id:
+        return str(target["target_category_id"])
+    return root_id

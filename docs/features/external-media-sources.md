@@ -2,17 +2,20 @@
 
 ## 状态
 
-已实现，默认关闭。服务端配置至少一个外部根别名后，管理员可以在分类管理中创建带共享标记的只读共享文件夹，递归扫描其中的 MP4，并将视频加入现有自动转录队列。共享原视频不能在应用中移动、重命名或删除；失败任务可以受控清理本地状态后重新入队。真实 SMB 挂载、凭据、服务账号权限和生产业务数据尚未配置或验收。
+已实现，默认关闭。服务端配置至少一个外部根别名后，管理员可以在分类管理中创建带共享标记的只读共享文件夹，递归扫描其中的 MP4 与文档，并将视频加入现有自动转录队列。共享原文件不能在应用中移动、重命名或删除；失败任务可以受控清理本地状态后重新入队。文档可按源配置“手动导入”或“自动导入”复制进受管对象存储，导入后停在待发布，由管理员确认发布后才进入索引。真实 SMB 挂载、凭据、服务账号权限和生产业务数据尚未配置或验收。
+
+支持的文档格式与受管资料库一致：PDF、Word（`.docx`/`.doc`）、Excel（`.xlsx`/`.xls`）、PowerPoint（`.pptx`/`.ppt`）、Markdown（`.md`）和 XMind（`.xmind`），对应 `doc_type` 为 `pdf/docx/doc/xlsx/xls/pptx/ppt/markdown/xmind`（`api/external_document_types.py`）。
 
 ## 入口与调用链
 
-- 页面：`frontend/src/pages/admin/AdminMediaPage.tsx`
+- 页面：`frontend/src/pages/admin/AdminMediaPage.tsx`、`frontend/src/pages/admin/AdminManagedContentPage.tsx`
 - 分类创建入口：`frontend/src/pages/admin/AdminCategoriesPage.tsx`
 - 前端 API：`frontend/src/api/admin/media.ts`、`frontend/src/api/client.ts`
 - HTTP 路由：`api/routes_external_media.py`
 - 扫描与协调：`api/external_media.py`
-- 路径与存储解析：`api/media_storage.py`
-- Schema：`api/db_migrations.py` migration 27
+- 文档导入：`api/external_document_import.py`、`api/external_document_types.py`
+- 路径与存储解析：`api/media_storage.py`、`api/content_storage.py`
+- Schema：`api/db_migrations.py` migration 27、38、47
 - 配置：`src/config.py`
 
 ```text
@@ -20,20 +23,29 @@
 -> EXTERNAL_MEDIA_ROOTS_JSON 根别名
 -> external_media_sources
 -> 周期/手动 reconcile
--> external_media_entries + media_assets(storage_kind=external)
+-> external_media_entries + media_assets(storage_kind=external)         # 视频
+-> external_media_entries(entry_kind='document')                       # 文档（无 media_assets）
 -> 管理员首次确认或后续自动入队
 -> 本地 prepared-audio-v1.wav
 -> 既有 Profile/Provider/Canonical 转录
 -> 管理员发布决策（允许发布 / 拒绝发布）-> 索引候选 -> 发布 head
 -> content_items(media_transcript) 目录壳
+
+文档分支：
+-> 手动勾选导入 / document_import_mode='auto' 自动导入
+-> ContentStorage.ingest_path 复制进 SHA-256 对象存储
+-> register_uploaded_document 或 create_content_revision（新版本）
+-> content_versions(pending_publication, source_origin='server')
+-> 管理员确认发布 -> content_index_jobs -> 索引
 ```
 
 ## 数据与状态
 
-- `external_media_sources` 保存显示名、根别名、相对目录、目标发布目录、默认转录方案、扫描间隔、自动入队开关和最近扫描摘要。
-- `external_media_entries` 保存相对路径、父目录、文件名、大小、修改时间、指纹、可用性和媒体绑定。文件状态为 `available | missing | superseded`。
+- `external_media_sources` 保存显示名、根别名、相对目录、目标发布目录、默认转录方案、扫描间隔、自动入队开关、文档导入模式（`document_import_mode`: `manual | auto`）和最近扫描摘要。
+- `external_media_entries` 保存相对路径、父目录、文件名、大小、修改时间、指纹、可用性、条目类型（`entry_kind`: `video | document`）和媒体绑定。文件状态为 `available | missing | superseded`。
+- 文档条目额外保存 `doc_type`、`import_status`（`not_imported | pending | imported | failed`）、`content_item_id`、`content_version_id`、`imported_fingerprint` 与 `import_error`；文档不创建 `media_assets`（`media_id` 为 NULL）。远程指纹变化时旧条目置 `superseded`，新条目继承 `content_item_id` 并置 `import_status='pending'`，重新导入时追加新版本而不是新建资料。
 - `external_media_scan_runs` 保存手动或周期扫描的新增、变更、缺失和入队计数。
-- 外部条目树不是受管分类树。未发布的视频不会创建 `content_items`；发布后仍由现有媒体正式 head 决定资料库和检索可见性。
+- 外部条目树不是受管分类树。未发布的视频不会创建 `content_items`；发布后仍由现有媒体正式 head 决定资料库和检索可见性。文档在导入前也不产生 `content_items`；导入后按受管资料库常规生命周期停在待发布，确认发布后才进入索引。
 - 共享文件夹在资料列表中复用普通文件夹/视频条目结构，在分类管理中把共享分类根节点下的远程子目录物化为受管分类镜像（`category_kind='shared_folder'`、`external_source_id` 为 NULL、`external_relative_path` 记录远程相对目录）。镜像与普通子分类同款样式与交互，可设置启用状态、企业知识问答和对话筛选项，也可调整编号（仅本地显示顺序）；名称跟随远程目录，不能移动、改名或删除，也不能作为父分类。扫描（手动或周期 `reconcile`）新增远端目录（追加同级末尾）、软删除消失目录（并重排同级编号），但不改写既有镜像的问答设置与编号；若同级已存在同名普通分类，则不再创建镜像。共享视频的转录索引按 `external_media_entries.relative_path` 归属到最深已物化镜像的 `category_key`（目录未物化时回退共享根），旧转录点由 `scripts/backfill_shared_transcript_category_keys.py` 一次回填（dry-run 默认，仅补 `category_key`，不重置索引）。远程文件不进入分类树，仍由资料库远程目录浏览展示。
 - 源不可达时只更新源与 scan run 的失败状态，不改写条目可用性；下一次成功扫描才协调文件级变化。
 - 共享媒体在任务创建前失败、仅有 `media_assets.status=failed` 时仍可重试；后端优先解析 `external_media_sources.default_scheme_id`，若其当前运行 Profile 未被应用准入，则按后台方案顺序回退到首个实际可用方案，仅用于本次任务且不改写来源配置。前端不传入或推断方案。
@@ -46,8 +58,11 @@
 - 扫描跳过符号链接和 reparse point，并限制单源最大文件数。播放和 ASR 准备前再次核对大小与修改时间，文件身份变化时 fail closed。
 - 浏览器只接收逻辑源名和相对路径，管理工作台视频仍经管理员预览端点鉴权代理并支持 200/206/416；公共媒体端点保持既有受管媒体边界。
 - 外部原视频永不进入上传删除或回收站物理删除。只有不存在活动转录/索引任务、转录版本、正式 head、发布索引历史和活动替换时，失败对象才允许清理；清理只删除本地任务与派生缓存，把媒体重置为 `uploaded` 以便重新入队，并保留 `external_media_entries` 与共享原文件。事务内移动出的缓存先使用 `.cleanup-pending-*`；数据库提交后再转换为 `.cleanup-*`，提交失败则恢复后重新执行完整清理。只有已提交残留由服务端优先投影为独立的 `finalize_failed_cleanup` 幂等收尾动作；即使媒体已重新入队或再次失败，该动作也只删除旧暂存缓存，不修改当前媒体目录、任务或状态，收尾刷新后才重新投影普通失败清理能力。
-- 仅支持 MP4。根挂载的只读属性、SMB 凭据、网络 ACL、容量和可用性监控不由应用管理。
-- migration 27 为添加式，不需要 Qdrant 或 Parent 全量重建。migration 38 为共享子目录镜像补充 `category_nodes.external_relative_path` 列与索引，同样是添加式；旧转录点的 `category_key` 由回填脚本补齐，无需重置索引。
+- 支持 MP4 视频与 9 种文档格式（PDF、Word、Excel、PowerPoint、Markdown、XMind）。其他扩展名不会登记。文档导入只复制到受管对象存储，远程原文件保持只读、不移动、不改名、不删除；远端文件消失或更新只影响 `external_media_entries` 与 `import_status`，不删除已导入的受管资料。
+- 文档导入的逐项校验：目标分类必须存在（取最深已物化共享子目录镜像，回退源的 `target_category_id`）、远程文件大小与修改时间必须与扫描记录一致（否则跳过并给出 `external_file_changed`）、目标目录内同名资料冲突时跳过（`content_filename_conflict`）、Office 文档在 `OFFICE_PROCESSING_ENABLED` 关闭时跳过（`office_processing_disabled`）。导入成功后统一停在 `pending_publication`，不自动发布。
+- 仅支持 MP4 视频的播放与转录链路不变。根挂载的只读属性、SMB 凭据、网络 ACL、容量和可用性监控不由应用管理。
+- migration 27 为添加式，不需要 Qdrant 或 Parent 全量重建。migration 38 为共享子目录镜像补充 `category_nodes.external_relative_path` 列与索引，同样是添加式；旧转录点的 `category_key` 由回填脚本补齐，无需重置索引。migration 47 为文档导入增加 `external_media_sources.document_import_mode`，以及 `external_media_entries` 的 `entry_kind/doc_type/content_item_id/content_version_id/import_status/imported_fingerprint/import_error` 与两个索引，同样为添加式；已导入资料仍按常规资料发布链路进入索引，不需要重建 Qdrant。
+- 共享目录中的 PDF 在发布后由既有 MinerU 解析链路处理，属于资料外发；管理员在导入并发布前需确认该外发授权。
 
 ## 配置
 
@@ -61,8 +76,9 @@ Compose 只透传这些变量，不自动添加宿主机挂载。生产启用前
 
 ## 验证
 
-- `tests/test_external_media_sources.py`：新增、幂等重扫、变更、缺失、恢复、源离线、路径逃逸、文件上限、外部身份解析和符号链接跳过。
+- `tests/test_external_media_sources.py`：新增、幂等重扫、变更、缺失、恢复、源离线、路径逃逸、文件上限、外部身份解析和符号链接跳过；文档扫描登记（不建 `media_assets`）、手动导入停在待发布、远程变更后重新导入生成新版本、同名冲突跳过、`document_import_mode='auto'` 时周期扫描自动导入。
 - `tests/test_shared_mirror_categories.py`：镜像物化（建树/幂等/追加/消失软删与重排）、镜像守卫（禁移动/改名/改父、禁作父分类、允许调编号）、转录 `category_key` 归属解析、镜像参与知识范围及停用排除。
+- `frontend/src/components/admin/ExternalMediaSourcesPanel.test.tsx`：共享目录同时列出子文件夹、视频与文档，未导入文档显示状态。
 - `tests/test_media_library_access.py`、`tests/test_admin_media_preview_route.py`：现有登录、发布可见性与 Range 回归。
 - `tests/test_transcription_media_input.py`、`tests/test_transcription_application.py`：本地音频准备、内容哈希和转录应用回归。
 - `tests/test_content_trash_cleanup.py`：既有回收站清理回归；外部媒体额外由预检阻止永久删除。
@@ -75,7 +91,9 @@ Compose 只透传这些变量，不自动添加宿主机挂载。生产启用前
 - 外部文件在旧正式版本发布后被原地替换时，旧转录 head 可继续检索，但旧视频字节不能恢复预览。
 - 失败媒体的数据库补偿与本地缓存清理当前使用应用进程内互斥；多进程 worker 或允许低信任主体写入 `MEDIA_DIR` 的部署仍需文件锁或持久化 ownership，目录 reparse 检查与后续文件操作之间也存在本地文件系统 TOCTOU 残余风险。
 - 当前扫描和入队为单实例协调；多应用副本部署前需要增加分布式租约。
-- 真实 SMB、长时断网、大规模目录性能和生产 ASR 吞吐尚待用户环境验收。
+- 文档导入按单批 200 个文件处理，源级扫描上限仍为 `EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE`（默认 10000，视频与文档共用该上限）。
+- 自动导入只把文件停在待发布，发布仍需管理员确认；未实现的是一键批量发布与远程目录删除同步（远端删除只标记条目缺失，不删除已导入资料）。
+- 真实 SMB、长时断网、大规模目录性能和生产 ASR 吞吐尚待用户环境验收；共享目录文档导入的真实业务目录同样待验收。
 
 ## 相关决策
 

@@ -583,7 +583,7 @@ export function AdminCategoriesPage() {
       {canManageExternalSources && !error && <ExternalMediaSourcesPanel categories={categories} schemes={sharedSchemes} onOpenWorkbench={() => undefined} onMediaChanged={async () => { await load(true); }} />}
       <Sheet open={sharedOpen} onOpenChange={(open) => { if (!sharedSaving) setSharedOpen(open); }}>
         <SheetContent className="max-w-xl overflow-y-auto">
-          <SheetHeader><SheetTitle>新建共享文件夹</SheetTitle><SheetDescription>只读扫描服务端白名单目录中的 MP4 视频，不修改远程文件。</SheetDescription></SheetHeader>
+          <SheetHeader><SheetTitle>新建共享文件夹</SheetTitle><SheetDescription>只读扫描服务端白名单目录中的 MP4 视频与 PDF、Word、Excel、PowerPoint、Markdown、XMind 文档，不修改远程文件。</SheetDescription></SheetHeader>
           <div className="space-y-4 p-6">
             {sharedError && <Alert variant="destructive" role="alert"><AlertTitle>共享文件夹创建失败</AlertTitle><AlertDescription>{sharedError}</AlertDescription></Alert>}
             {sharedRoots.length === 0 && <Alert role="status"><AlertTitle>未配置共享目录根</AlertTitle><AlertDescription>请先在服务端配置可选根别名。</AlertDescription></Alert>}

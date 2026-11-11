@@ -14,11 +14,18 @@ from fastapi.testclient import TestClient
 from api import routes_external_media
 from api.db import connect, init_db
 from api.db import get_db
+from api import external_document_import
+from api.content_storage import ContentStorage
+from api.content_store import create_batch, create_category, register_uploaded_document
+from api.external_document_import import import_source_documents
 from api.external_media import (
+    ENTRY_KIND_DOCUMENT,
+    ENTRY_KIND_VIDEO,
     ExternalMediaError,
     discover_video_files,
     project_external_lifecycle,
     reconcile_source,
+    scan_share,
 )
 from api.media_storage import MediaStorageError, normalize_external_relative_path, require_mutable_media_source, resolve_media_path
 from src.config import parse_external_unc_roots, resolve_external_unc_path
@@ -248,13 +255,18 @@ def test_external_relative_path_rejects_escape_and_ambiguous_separators(value: s
         normalize_external_relative_path(value)
 
 
-def test_scanner_ignores_non_mp4_and_rejects_bounded_overflow(tmp_path: Path) -> None:
+def test_scanner_collects_videos_and_documents_and_rejects_bounded_overflow(tmp_path: Path) -> None:
     (tmp_path / "one.mp4").write_bytes(b"1")
-    (tmp_path / "notes.md").write_text("not media", encoding="utf-8")
-    assert [item.filename for item in discover_video_files(tmp_path, max_files=1)] == ["one.mp4"]
-    (tmp_path / "two.mp4").write_bytes(b"2")
+    (tmp_path / "notes.txt").write_text("unsupported suffix", encoding="utf-8")
+    (tmp_path / "spec.pdf").write_bytes(b"%PDF-1.4")
+    scanned = scan_share(tmp_path, max_files=10)
+    assert [(item.filename, item.entry_kind, item.doc_type) for item in scanned.files] == [
+        ("one.mp4", ENTRY_KIND_VIDEO, None),
+        ("spec.pdf", ENTRY_KIND_DOCUMENT, "pdf"),
+    ]
+    assert [item.filename for item in discover_video_files(tmp_path, max_files=10)] == ["one.mp4"]
     with pytest.raises(ExternalMediaError, match="external_source_file_limit_exceeded"):
-        discover_video_files(tmp_path, max_files=1)
+        scan_share(tmp_path, max_files=1)
 
 
 def test_scanner_skips_symbolic_links_when_supported(tmp_path: Path) -> None:
@@ -323,3 +335,262 @@ def test_external_media_api_requires_admin_and_csrf(tmp_path: Path, monkeypatch:
         )
         assert created.status_code == 201
         assert created.json()["root_alias"] == "share"
+        assert created.json()["document_import_mode"] == "manual"
+        source_id = created.json()["id"]
+        import_url = f"/api/admin/external-media/sources/{source_id}/documents/import"
+        assert client.post(
+            import_url, json={"entry_ids": None}, cookies={"pc_sid": "admin-sid"}
+        ).status_code == 403
+        assert client.post(
+            import_url, json={"entry_ids": None}, cookies={"pc_sid": "user-sid"},
+            headers={"X-CSRF-Token": "user-csrf"},
+        ).status_code == 403
+        ready = client.post(
+            import_url, json={"entry_ids": None}, cookies={"pc_sid": "admin-sid"},
+            headers={"X-CSRF-Token": "admin-csrf"},
+        )
+        assert ready.status_code == 200
+        assert ready.json()["requested"] == 0
+
+
+def _document_share(tmp_path: Path) -> tuple[sqlite3.Connection, str, Path]:
+    share = tmp_path / "share"
+    (share / "公司标准").mkdir(parents=True)
+    (share / "公司标准" / "设计标准.md").write_text("# 设计标准\n\n正文内容\n", encoding="utf-8")
+    (share / "说明.md").write_text("# 说明\n\n根目录文档\n", encoding="utf-8")
+    db_path = tmp_path / "app.sqlite"
+    init_db(db_path, backup_dir=tmp_path / "backups")
+    conn = connect(db_path)
+    conn.execute(
+        "INSERT INTO users(id,employee_id,real_name,password_hash,role,is_active,created_at)"
+        " VALUES (1,'importer','Importer','x','admin',1,1)"
+    )
+    used_codes = {
+        str(row["display_code"])
+        for row in conn.execute(
+            "SELECT display_code FROM category_nodes WHERE parent_id IS NULL AND deleted_at IS NULL"
+        ).fetchall()
+    }
+    display_code = next(f"{i:02d}" for i in range(1, 100) if f"{i:02d}" not in used_codes)
+    root = create_category(
+        conn,
+        category_key=None,
+        parent_id=None,
+        display_code=display_code,
+        display_name="共享标准镜像测试",
+        sort_order=990,
+        actor_user_id=1,
+    )
+    scheme = conn.execute(
+        "SELECT id FROM transcription_schemes WHERE enabled=1 AND archived=0 ORDER BY sort_order LIMIT 1"
+    ).fetchone()
+    assert scheme is not None
+    source_id = str(uuid.uuid4())
+    conn.execute(
+        """INSERT INTO external_media_sources(
+               id,name,root_alias,relative_path,target_category_id,default_scheme_id,
+               created_at,updated_at,created_by
+           ) VALUES (?,?,?,?,?,?,?,?,1)""",
+        (source_id, "共享标准源", "share", "", "cat-05", scheme["id"], 1, 1),
+    )
+    conn.execute(
+        """UPDATE category_nodes SET category_kind='shared_folder', external_source_id=?,
+                  version=version+1 WHERE id=?""",
+        (source_id, root["id"]),
+    )
+    conn.commit()
+    return conn, source_id, share
+
+
+def test_scan_registers_documents_without_media_assets(tmp_path: Path) -> None:
+    conn, source_id, share = _document_share(tmp_path)
+    try:
+        result = reconcile_source(conn, source_id, trigger_type="manual", roots={"share": share}, now=10)
+        assert result.added_count == 2
+        assert result.added_entry_ids == ()
+        assert len(result.added_document_entry_ids) == 2
+        rows = {
+            row["relative_path"]: row
+            for row in conn.execute("SELECT * FROM external_media_entries").fetchall()
+        }
+        document = rows["说明.md"]
+        assert (document["entry_kind"], document["doc_type"]) == (ENTRY_KIND_DOCUMENT, "markdown")
+        assert document["media_id"] is None
+        assert document["import_status"] == "not_imported"
+        assert document["content_item_id"] is None
+        # Documents are library candidates, not transcription media.
+        assert conn.execute("SELECT COUNT(*) FROM media_assets").fetchone()[0] == 0
+        mirror = conn.execute(
+            "SELECT id FROM category_nodes WHERE external_relative_path='公司标准' AND deleted_at IS NULL"
+        ).fetchone()
+        assert mirror is not None
+    finally:
+        conn.close()
+
+
+def test_import_documents_registers_pending_publication_version(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    conn, source_id, share = _document_share(tmp_path)
+    monkeypatch.setattr(external_document_import, "_storage", ContentStorage(tmp_path / "content"))
+    try:
+        reconcile_source(conn, source_id, trigger_type="manual", roots={"share": share}, now=10)
+        result = import_source_documents(conn, source_id, entry_ids=None, actor_user_id=1, roots={"share": share})
+        assert (result.imported, result.skipped, result.failed) == (2, 0, 0)
+
+        entry = conn.execute(
+            "SELECT * FROM external_media_entries WHERE relative_path='公司标准/设计标准.md'"
+        ).fetchone()
+        assert entry["import_status"] == "imported"
+        assert entry["imported_fingerprint"] == entry["fingerprint"]
+        assert entry["import_error"] is None
+        assert entry["content_item_id"] and entry["content_version_id"]
+
+        version = conn.execute(
+            "SELECT * FROM content_versions WHERE id=?", (entry["content_version_id"],)
+        ).fetchone()
+        assert (version["doc_type"], version["source_origin"]) == ("markdown", "server")
+        assert version["lifecycle_status"] == "pending_publication"
+        assert conn.execute(
+            "SELECT 1 FROM content_objects WHERE sha256=?", (version["object_sha256"],)
+        ).fetchone() is not None
+
+        mirror = conn.execute(
+            "SELECT id FROM category_nodes WHERE external_relative_path='公司标准' AND deleted_at IS NULL"
+        ).fetchone()
+        item = conn.execute(
+            "SELECT category_id FROM content_items WHERE id=?", (entry["content_item_id"],)
+        ).fetchone()
+        assert item["category_id"] == mirror["id"]
+
+        root_entry = conn.execute(
+            "SELECT content_item_id FROM external_media_entries WHERE relative_path='说明.md'"
+        ).fetchone()
+        root_item = conn.execute(
+            "SELECT category_id FROM content_items WHERE id=?", (root_entry["content_item_id"],)
+        ).fetchone()
+        assert root_item["category_id"] == "cat-05"
+
+        # The remote share stays read-only and untouched.
+        assert (share / "公司标准" / "设计标准.md").exists()
+
+        again = import_source_documents(conn, source_id, entry_ids=None, actor_user_id=1, roots={"share": share})
+        assert (again.requested, again.imported) == (0, 0)
+    finally:
+        conn.close()
+
+
+def test_changed_document_creates_new_version_on_reimport(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    conn, source_id, share = _document_share(tmp_path)
+    monkeypatch.setattr(external_document_import, "_storage", ContentStorage(tmp_path / "content"))
+    try:
+        reconcile_source(conn, source_id, trigger_type="manual", roots={"share": share}, now=10)
+        import_source_documents(conn, source_id, entry_ids=None, actor_user_id=1, roots={"share": share})
+        first = conn.execute(
+            "SELECT content_item_id,content_version_id FROM external_media_entries"
+            " WHERE relative_path='说明.md' AND availability='available'"
+        ).fetchone()
+
+        (share / "说明.md").write_text("# 说明\n\n更新后的正文更长一些\n", encoding="utf-8")
+        changed = reconcile_source(conn, source_id, trigger_type="manual", roots={"share": share}, now=20)
+        assert (changed.added_count, changed.changed_count) == (0, 1)
+
+        entry = conn.execute(
+            "SELECT * FROM external_media_entries WHERE relative_path='说明.md' AND availability='available'"
+        ).fetchone()
+        # The superseded row keeps the previous version; the new row inherits the item.
+        assert entry["import_status"] == "pending"
+        assert entry["content_item_id"] == first["content_item_id"]
+
+        again = import_source_documents(conn, source_id, entry_ids=None, actor_user_id=1, roots={"share": share})
+        assert (again.requested, again.imported) == (1, 1)
+        versions = conn.execute(
+            "SELECT version_number,lifecycle_status FROM content_versions WHERE item_id=? ORDER BY version_number",
+            (first["content_item_id"],),
+        ).fetchall()
+        assert [(row["version_number"], row["lifecycle_status"]) for row in versions] == [
+            (1, "superseded"),
+            (2, "pending_publication"),
+        ]
+        entry_after = conn.execute(
+            "SELECT content_version_id FROM external_media_entries"
+            " WHERE relative_path='说明.md' AND availability='available'"
+        ).fetchone()
+        assert entry_after["content_version_id"] != first["content_version_id"]
+    finally:
+        conn.close()
+
+
+def test_import_skips_document_when_target_filename_exists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    conn, source_id, share = _document_share(tmp_path)
+    storage = ContentStorage(tmp_path / "content")
+    monkeypatch.setattr(external_document_import, "_storage", storage)
+    try:
+        stored = storage.ingest_path(share / "说明.md", mime_type="text/markdown", max_bytes=1024 * 1024)
+        batch_id = create_batch(conn, origin="web", actor_user_id=1)
+        register_uploaded_document(
+            conn,
+            batch_id=batch_id,
+            category_id="cat-05",
+            title="说明",
+            original_filename="说明.md",
+            doc_type="markdown",
+            stored=stored,
+            actor_user_id=1,
+        )
+        reconcile_source(conn, source_id, trigger_type="manual", roots={"share": share}, now=10)
+        result = import_source_documents(conn, source_id, entry_ids=None, actor_user_id=1, roots={"share": share})
+        # The sub-folder document imports; the root one collides with the existing item.
+        assert (result.imported, result.skipped, result.failed) == (1, 1, 0)
+        conflict = [item for item in result.outcomes if item.status == "skipped"]
+        assert [item.reason_code for item in conflict] == ["content_filename_conflict"]
+        assert conn.execute(
+            "SELECT import_status FROM external_media_entries WHERE relative_path='说明.md'"
+        ).fetchone()[0] == "not_imported"
+        assert conn.execute("SELECT COUNT(*) FROM content_items").fetchone()[0] == 2
+    finally:
+        conn.close()
+
+
+def test_scheduled_scan_auto_imports_documents_for_auto_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    conn, source_id, share = _document_share(tmp_path)
+    db_path = tmp_path / "app.sqlite"
+    conn.execute(
+        "UPDATE external_media_sources SET document_import_mode='auto',created_by=1 WHERE id=?", (source_id,)
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(external_document_import, "_storage", ContentStorage(tmp_path / "content"))
+    monkeypatch.setattr(routes_external_media, "EXTERNAL_MEDIA_ROOTS", {"share": share})
+    real_reconcile = routes_external_media.reconcile_source
+    monkeypatch.setattr(
+        routes_external_media,
+        "reconcile_source",
+        lambda conn, sid, *, trigger_type, **kwargs: real_reconcile(
+            conn, sid, trigger_type=trigger_type, roots={"share": share}, **kwargs
+        ),
+    )
+    monkeypatch.setattr(routes_external_media, "connect", lambda: connect(db_path))
+    real_auto_import = routes_external_media.run_auto_import
+    monkeypatch.setattr(
+        routes_external_media,
+        "run_auto_import",
+        lambda conn, sid, *, actor_user_id: real_auto_import(
+            conn, sid, actor_user_id=actor_user_id, roots={"share": share}
+        ),
+    )
+    try:
+        routes_external_media.run_due_external_scans()
+        conn = connect(db_path)
+        entry = conn.execute(
+            "SELECT import_status,import_error,content_version_id FROM external_media_entries"
+            " WHERE relative_path='说明.md'"
+        ).fetchone()
+        assert entry["import_error"] is None, entry["import_error"]
+        assert entry["import_status"] == "imported"
+        assert conn.execute(
+            "SELECT lifecycle_status FROM content_versions WHERE id=?", (entry["content_version_id"],)
+        ).fetchone()[0] == "pending_publication"
+    finally:
+        try:
+            conn.close()
+        except Exception:  # pragma: no cover - connection may already be closed
+            pass

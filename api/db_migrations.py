@@ -1466,6 +1466,23 @@ MIGRATIONS += (Migration(46, 'attachment_search_and_original_image_ocr', (
     )""",
 )),)
 
+# Shared folders act as a read-only document import source as well as a video
+# source: scanned documents are copied into managed storage and land as pending
+# publication versions. Existing rows stay videos ('video' default).
+MIGRATIONS += (Migration(47, 'shared_folder_document_import', (
+    "ALTER TABLE external_media_sources ADD COLUMN document_import_mode TEXT NOT NULL DEFAULT 'manual' CHECK (document_import_mode IN ('manual','auto'))",
+    "ALTER TABLE external_media_entries ADD COLUMN entry_kind TEXT NOT NULL DEFAULT 'video' CHECK (entry_kind IN ('video','document'))",
+    "ALTER TABLE external_media_entries ADD COLUMN doc_type TEXT",
+    "ALTER TABLE external_media_entries ADD COLUMN content_item_id TEXT REFERENCES content_items(id) ON DELETE SET NULL",
+    "ALTER TABLE external_media_entries ADD COLUMN content_version_id TEXT",
+    "ALTER TABLE external_media_entries ADD COLUMN import_status TEXT NOT NULL DEFAULT 'not_imported' CHECK (import_status IN ('not_imported','pending','imported','failed'))",
+    "ALTER TABLE external_media_entries ADD COLUMN imported_fingerprint TEXT",
+    "ALTER TABLE external_media_entries ADD COLUMN import_error TEXT",
+    """CREATE INDEX IF NOT EXISTS idx_external_media_entries_kind
+       ON external_media_entries(source_id,entry_kind,availability)""",
+    "CREATE INDEX IF NOT EXISTS idx_external_media_entries_item ON external_media_entries(content_item_id)",
+)),)
+
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
     {
