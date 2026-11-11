@@ -641,15 +641,17 @@ jobs:
               CONTENT_ROOT,
           )
 
+          # 默认根分类必须按顺序存在；管理员在运行期新增的根分类（例如共享资料源根）
+          # 允许追加或插入，display_code 会随同级排序重排，因此只校验名称与相对顺序。
           expected_categories = [
-              ("01", "行业规范与标准"),
-              ("02", "客户标准与要求"),
-              ("03", "公司内部标准"),
-              ("04", "培训资料"),
-              ("05", "项目资料"),
-              ("06", "项目经验与案例"),
-              ("07", "内部教学视频"),
-              ("08", "待确认资料"),
+              "行业规范与标准",
+              "客户标准与要求",
+              "公司内部标准",
+              "培训资料",
+              "项目资料",
+              "项目经验与案例",
+              "内部教学视频",
+              "待确认资料",
           ]
           assert CONTENT_MANAGEMENT_ENABLED is True
           assert CONTENT_HEAD_ENFORCEMENT in {"compat", "strict"}
@@ -688,11 +690,32 @@ jobs:
                   f"schema_version_mismatch: actual={version} expected={CURRENT_SCHEMA_VERSION}"
               )
           actual_categories = [tuple(row) for row in categories]
-          assert actual_categories == expected_categories, {
+          actual_names = [name for _code, name in actual_categories]
+          assert len(set(actual_names)) == len(actual_names), {
               "check": "root_categories",
-              "expected": expected_categories,
+              "reason": "duplicate_names",
               "actual": actual_categories,
           }
+          cursor = 0
+          for name in expected_categories:
+              try:
+                  cursor = actual_names.index(name, cursor) + 1
+              except ValueError:
+                  raise AssertionError(
+                      {
+                          "check": "root_categories",
+                          "reason": "missing_or_out_of_order",
+                          "expected": expected_categories,
+                          "actual": actual_categories,
+                      }
+                  ) from None
+          extra_roots = [
+              pair for pair in actual_categories if pair[1] not in expected_categories
+          ]
+          print(
+              "APP_ONLY_ROOT_CATEGORIES status=verified "
+              f"defaults={len(expected_categories)} extra={extra_roots}"
+          )
           assert active_jobs == 0, {
               "check": "active_index_jobs",
               "actual": active_jobs,
@@ -730,7 +753,8 @@ jobs:
 
           print(
               f"MANAGED_CONTENT status=verified schema={CURRENT_SCHEMA_VERSION} "
-              f"categories=7 permission_groups={len(expected_groups)} mode={CONTENT_HEAD_ENFORCEMENT} "
+              f"categories={len(expected_categories)} permission_groups={len(expected_groups)} "
+              f"mode={CONTENT_HEAD_ENFORCEMENT} "
               f"retained_legacy_permissions={retained_legacy_permissions}"
           )
           PY
