@@ -755,6 +755,11 @@ def _raise_domain_error(exc: Exception) -> None:
         raise HTTPException(status_code=409, detail="资料正在调整分类，暂时不能移入回收站") from exc
     if message == "content_delete_forbidden":
         raise HTTPException(status_code=403, detail="当前账号没有将此状态资料移入回收站的权限") from exc
+    if message == "external_media_read_only":
+        raise HTTPException(
+            status_code=409,
+            detail="共享目录视频是只读外部来源，不能重命名、移动或删除；如需调整请在共享目录中操作",
+        ) from exc
     if message == "content_trash_item_not_found":
         raise HTTPException(status_code=404, detail="回收站中没有这份资料") from exc
     if message == "content_restore_forbidden":
@@ -3085,6 +3090,41 @@ def _verified_media_transcript_bytes(row: sqlite3.Row) -> bytes:
         raise HTTPException(status_code=409, detail="当前正式转录稿完整性校验失败") from exc
 
 
+_MEDIA_DOWNLOAD_ROW_SQL = """SELECT i.title,i.media_id,m.original_filename,m.storage_rel_path,m.mime_type,m.file_size,m.sha256,
+          v.markdown_storage_kind,v.markdown_rel_path,v.markdown_sha256,
+          v.markdown_size_bytes,v.publication_status,h.current_version_id AS published_head_id
+   FROM content_items i
+   JOIN media_assets m ON m.media_id=i.media_id AND m.status<>'archived'
+   LEFT JOIN media_transcript_heads h ON h.media_id=m.media_id
+   LEFT JOIN transcript_versions v ON v.id=COALESCE(
+       h.current_version_id,
+       (SELECT latest.id FROM transcript_versions latest
+        WHERE latest.media_id=m.media_id
+        ORDER BY latest.created_at DESC,latest.id DESC LIMIT 1)
+   ) AND v.media_id=m.media_id
+   WHERE @@COLUMN@@=? AND i.content_kind='media_transcript' AND i.archived_at IS NULL"""
+
+
+def _load_media_download_row(conn: sqlite3.Connection, item_id: str):
+    """Resolve a video download target by content item id, then by media id.
+
+    Chat sources indexed from transcripts carry only ``media_id`` because the
+    managed library catalog item is created lazily, so a client can legitimately
+    send a media id here. Falling back keeps those sources downloadable instead
+    of failing with ``视频资料不存在``.
+    """
+    row = conn.execute(
+        _MEDIA_DOWNLOAD_ROW_SQL.replace("@@COLUMN@@", "i.id"), (item_id,)
+    ).fetchone()
+    if row is not None:
+        return row
+    return conn.execute(
+        _MEDIA_DOWNLOAD_ROW_SQL.replace("@@COLUMN@@", "i.media_id")
+        + " ORDER BY i.created_at DESC,i.id DESC LIMIT 1",
+        (item_id,),
+    ).fetchone()
+
+
 @router.get("/items/{item_id}/media-download")
 def download_media_library_item(
     item_id: str,
@@ -3093,25 +3133,11 @@ def download_media_library_item(
     conn: sqlite3.Connection = Depends(get_db),
 ):
     _require_feature()
-    row = conn.execute(
-        """SELECT i.title,i.media_id,m.original_filename,m.storage_rel_path,m.mime_type,m.file_size,m.sha256,
-                  v.markdown_storage_kind,v.markdown_rel_path,v.markdown_sha256,
-                  v.markdown_size_bytes,v.publication_status,h.current_version_id AS published_head_id
-           FROM content_items i
-           JOIN media_assets m ON m.media_id=i.media_id AND m.status<>'archived'
-           LEFT JOIN media_transcript_heads h ON h.media_id=m.media_id
-           LEFT JOIN transcript_versions v ON v.id=COALESCE(
-               h.current_version_id,
-               (SELECT latest.id FROM transcript_versions latest
-                WHERE latest.media_id=m.media_id
-                ORDER BY latest.created_at DESC,latest.id DESC LIMIT 1)
-           ) AND v.media_id=m.media_id
-           WHERE i.id=? AND i.content_kind='media_transcript' AND i.archived_at IS NULL""",
-        (item_id,),
-    ).fetchone()
+    row = _load_media_download_row(conn, item_id)
     if row is None:
         raise HTTPException(status_code=404, detail="视频资料不存在")
-    if part != "video" and (not row["published_head_id"] or row["publication_status"] != "published"):
+    transcript_published = bool(row["published_head_id"]) and row["publication_status"] == "published"
+    if part == "transcript" and not transcript_published:
         raise HTTPException(status_code=404, detail="视频转录稿尚未正式发布")
     transcript_filename = _safe_bulk_archive_name(f"{row['title']}-转录稿.md", set())
     if part == "transcript":
@@ -3152,7 +3178,8 @@ def download_media_library_item(
         if digest.hexdigest() != row["sha256"]:
             raise HTTPException(status_code=409, detail="视频文件完整性校验失败")
     video_filename = _safe_bulk_archive_name(str(row["original_filename"]), set())
-    if part == "video":
+    if part == "video" or not transcript_published:
+        # 未正式发布的转录稿不应阻塞视频下载：part=all 退化为只返回原视频。
         return FileResponse(
             video_path,
             media_type=row["mime_type"],
@@ -3769,6 +3796,7 @@ def _bulk_failure_message(exc: Exception) -> str:
         "content_reclassification_same_category": "资料已经位于所选分类",
         "media_transcript_operation_not_supported": "视频转录稿请前往视频管理处理",
         "content_delete_forbidden": "当前账号没有删除此状态资料的权限",
+        "external_media_read_only": "共享目录视频是只读外部来源，不能删除",
         "content_delete_in_progress": "资料正在发布，暂时不能移入回收站",
         "content_delete_reclassification_in_progress": "资料正在调整分类，暂时不能移入回收站",
         "version_not_submittable": "仅草稿或已退回资料可以提交审核",
