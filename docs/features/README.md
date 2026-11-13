@@ -35,7 +35,7 @@
 | 反馈处理工作流 | 已实现 | `/api/admin/feedback` | feedback.jsonl、app.sqlite、管理员权限 | [feedback-management.md](feedback-management.md) |
 | 系统维护 | 已实现 | `/api/admin/maintenance` / `AdminMaintenancePage` | app.sqlite、管理员权限、认证 | [system-maintenance.md](system-maintenance.md) |
 | 受管资料库 | 已实现 | `/api/admin/content` / `AdminManagedContentPage` | 资料权限、对象存储、发布索引 | [managed-content-library.md](managed-content-library.md) |
-| 共享目录同步与夜间发布 | 代码完成待验证（默认关闭） | `/api/admin/shared-sync` / `AdminSharedSyncPage` | 外部媒体源、受管资料库、多格式附件、发布索引 | [shared-folder-sync.md](shared-folder-sync.md) |
+| 共享目录同步与夜间发布 | 待用户验收（默认关闭） | `/api/admin/shared-sync` / `AdminSharedSyncPage` | 外部媒体源、受管资料库、多格式附件、发布索引 | [shared-folder-sync.md](shared-folder-sync.md) |
 | 多格式附件与轻量预览 | 已实现 | 受管版本信息 / 受控预览与下载 | 受管资料库、资料权限、浏览器查看器 | [attachment-previews.md](attachment-previews.md) |
 | 附件检索与图片 OCR | 已实现（本地验证，待远端 CI/用户验收） | `/api/attachments/search` / `ChatSession` 文件卡 | 受管附件、分类聊天范围、可选本地 OCR | [attachment-search.md](<attachment-search.md>) |
 | GPU运行时部署 | 部分实现 | `deploy-gpu.ps1` / `runtime-lock.json` | Windows GPU Runner、CUDA、模型缓存 | [gpu-runtime-deployment.md](gpu-runtime-deployment.md) |
