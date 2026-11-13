@@ -9,7 +9,14 @@ from pathlib import PurePosixPath
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from src.config import ASR_ENABLED, ASR_SERVICE_TOKEN, EXTERNAL_MEDIA_ROOTS, EXTERNAL_MEDIA_UNC_ROOTS, resolve_external_unc_path
+from src.config import (
+    ASR_ENABLED,
+    ASR_SERVICE_TOKEN,
+    EXTERNAL_MEDIA_ROOTS,
+    EXTERNAL_MEDIA_UNC_ROOTS,
+    SHARED_SYNC_ENABLED,
+    resolve_external_unc_path,
+)
 from src.transcription.profile import ProfileOperation
 from src.transcription.types import ContractValidationError
 
@@ -495,6 +502,12 @@ def import_documents(
 
 
 def run_due_external_scans() -> None:
+    # When the shared-folder scheduler is enabled it owns scanning for these
+    # sources (leases, quiet/window phases, withdrawal and cleanup).  Running
+    # both loops would scan the same share twice, race the entries table and
+    # let a day-time scan publish outside the approved window.
+    if SHARED_SYNC_ENABLED:
+        return
     conn = connect()
     try:
         for source_id in due_source_ids(conn):

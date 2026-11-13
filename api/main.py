@@ -61,6 +61,8 @@ from .image_ocr_jobs import start_image_ocr_worker
 from .routes_media import router as media_router
 from .routes_media_transcript import router as media_transcript_router
 from .routes_external_media import router as external_media_router, run_due_external_scans
+from .routes_shared_sync import router as shared_sync_router
+from .shared_sync_scheduler import run_forever as run_shared_sync_forever
 from .routes_prompts import router as prompts_router
 from .routes_rag import router as rag_router
 from .routes_transcript_ai import router as transcript_ai_router
@@ -132,6 +134,12 @@ async def _external_media_scan_loop() -> None:
             logger.exception("external media scan iteration failed (non-fatal)")
 
 
+async def _shared_sync_loop() -> None:
+    # Shared-folder sync owns its own schedule (quiet/window/day phases) so it
+    # must not share the external-media poll cadence.
+    await run_shared_sync_forever()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Bring parents.sqlite forward to the current schema if it pre-dates a
@@ -197,6 +205,7 @@ async def lifespan(app: FastAPI):
     sweeper_task = asyncio.create_task(_sweeper_loop())
     trash_cleanup_task = asyncio.create_task(_trash_cleanup_loop())
     external_media_scan_task = asyncio.create_task(_external_media_scan_loop())
+    shared_sync_task = asyncio.create_task(_shared_sync_loop())
     # Indexing worker: started before resuming pending jobs so the queue
     # has a consumer ready when resume_pending_on_boot enqueues them.
     configure_publication_runner(run_publication_index_job)
@@ -242,6 +251,11 @@ async def lifespan(app: FastAPI):
             await external_media_scan_task
         except (asyncio.CancelledError, Exception):
             pass
+        shared_sync_task.cancel()
+        try:
+            await shared_sync_task
+        except (asyncio.CancelledError, Exception):
+            pass
         if transcription_runtime_ready:
             await stop_transcription_worker()
         await asyncio.to_thread(stop_bulk_operation_worker)
@@ -280,6 +294,7 @@ app.include_router(media_router, prefix="/api")
 app.include_router(media_transcript_router, prefix="/api")
 app.include_router(transcription_router, prefix="/api")
 app.include_router(external_media_router, prefix="/api")
+app.include_router(shared_sync_router, prefix="/api")
 app.include_router(prompts_router, prefix="/api")
 app.include_router(transcript_ai_router, prefix="/api")
 app.include_router(rag_router, prefix="/api")

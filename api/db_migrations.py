@@ -1483,6 +1483,112 @@ MIGRATIONS += (Migration(47, 'shared_folder_document_import', (
     "CREATE INDEX IF NOT EXISTS idx_external_media_entries_item ON external_media_entries(content_item_id)",
 )),)
 
+# Shared-folder synchronisation: source generations, withdrawal/restore state,
+# a per-run lease and a 30-day structured log.  Purely additive — existing
+# scan/import/publication rows keep their meaning; the new columns default to
+# values that leave every pre-existing row on the old manual path.
+MIGRATIONS += (Migration(48, 'shared_folder_sync', (
+    "ALTER TABLE external_media_entries ADD COLUMN sync_generation INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE external_media_entries ADD COLUMN withdrawn_at INTEGER",
+    "ALTER TABLE content_index_jobs ADD COLUMN source_generation INTEGER",
+    "ALTER TABLE content_index_jobs ADD COLUMN shared_entry_id TEXT",
+    """CREATE TABLE IF NOT EXISTS content_head_withdrawals (
+        id TEXT PRIMARY KEY,
+        item_id TEXT NOT NULL,
+        version_id TEXT NOT NULL,
+        publication_id TEXT NOT NULL,
+        source_id TEXT,
+        entry_id TEXT,
+        relative_path TEXT,
+        fingerprint TEXT NOT NULL,
+        sync_generation INTEGER NOT NULL DEFAULT 0,
+        reason TEXT NOT NULL CHECK (reason IN ('shared_missing','shared_replaced','manual')),
+        state TEXT NOT NULL CHECK (state IN ('withdrawn','restored','cleanup_claimed','purged')),
+        cleanup_run_id TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        restored_at INTEGER,
+        purged_at INTEGER
+    )""",
+    """CREATE UNIQUE INDEX IF NOT EXISTS uq_content_head_withdrawal_active
+       ON content_head_withdrawals(item_id,version_id)
+       WHERE state IN ('withdrawn','cleanup_claimed')""",
+    """CREATE INDEX IF NOT EXISTS idx_content_head_withdrawals_state
+       ON content_head_withdrawals(state,created_at)""",
+    """CREATE INDEX IF NOT EXISTS idx_content_head_withdrawals_source
+       ON content_head_withdrawals(source_id,relative_path)""",
+    """CREATE TABLE IF NOT EXISTS shared_sync_runs (
+        id TEXT PRIMARY KEY,
+        source_id TEXT REFERENCES external_media_sources(id) ON DELETE SET NULL,
+        source_name TEXT NOT NULL,
+        root_alias TEXT NOT NULL,
+        relative_path TEXT NOT NULL,
+        trigger_type TEXT NOT NULL CHECK (trigger_type IN ('manual','nightly')),
+        status TEXT NOT NULL CHECK (status IN ('running','succeeded','failed','skipped')),
+        lease_token TEXT,
+        lease_until INTEGER,
+        discovered_count INTEGER NOT NULL DEFAULT 0 CHECK (discovered_count >= 0),
+        added_count INTEGER NOT NULL DEFAULT 0 CHECK (added_count >= 0),
+        changed_count INTEGER NOT NULL DEFAULT 0 CHECK (changed_count >= 0),
+        missing_count INTEGER NOT NULL DEFAULT 0 CHECK (missing_count >= 0),
+        imported_count INTEGER NOT NULL DEFAULT 0 CHECK (imported_count >= 0),
+        published_count INTEGER NOT NULL DEFAULT 0 CHECK (published_count >= 0),
+        withdrawn_count INTEGER NOT NULL DEFAULT 0 CHECK (withdrawn_count >= 0),
+        restored_count INTEGER NOT NULL DEFAULT 0 CHECK (restored_count >= 0),
+        purged_count INTEGER NOT NULL DEFAULT 0 CHECK (purged_count >= 0),
+        skipped_count INTEGER NOT NULL DEFAULT 0 CHECK (skipped_count >= 0),
+        failed_count INTEGER NOT NULL DEFAULT 0 CHECK (failed_count >= 0),
+        error_code TEXT,
+        started_at INTEGER NOT NULL,
+        finished_at INTEGER,
+        updated_at INTEGER NOT NULL
+    )""",
+    """CREATE UNIQUE INDEX IF NOT EXISTS uq_shared_sync_run_active
+       ON shared_sync_runs(source_id) WHERE status='running'""",
+    """CREATE INDEX IF NOT EXISTS idx_shared_sync_runs_started
+       ON shared_sync_runs(started_at DESC)""",
+    """CREATE TABLE IF NOT EXISTS shared_sync_events (
+        id TEXT PRIMARY KEY,
+        run_id TEXT REFERENCES shared_sync_runs(id) ON DELETE SET NULL,
+        source_id TEXT,
+        entry_id TEXT,
+        relative_path TEXT,
+        action TEXT NOT NULL CHECK (action IN (
+            'observed','coalesced','skipped','imported','published',
+            'withdrawn','restored','purged','failed'
+        )),
+        item_id TEXT,
+        version_id TEXT,
+        previous_version_id TEXT,
+        error_code TEXT,
+        detail_json TEXT,
+        created_at INTEGER NOT NULL
+    )""",
+    """CREATE INDEX IF NOT EXISTS idx_shared_sync_events_created
+       ON shared_sync_events(created_at DESC)""",
+    """CREATE INDEX IF NOT EXISTS idx_shared_sync_events_source
+       ON shared_sync_events(source_id,created_at DESC)""",
+    """CREATE TABLE IF NOT EXISTS shared_sync_candidates (
+        id TEXT PRIMARY KEY,
+        source_id TEXT NOT NULL,
+        relative_path TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        entry_id TEXT NOT NULL,
+        doc_type TEXT,
+        first_seen_at INTEGER NOT NULL,
+        last_seen_at INTEGER NOT NULL,
+        observed_count INTEGER NOT NULL DEFAULT 1 CHECK (observed_count >= 1),
+        state TEXT NOT NULL DEFAULT 'waiting' CHECK (state IN (
+            'waiting','ready','coalesced','importing','imported','failed'
+        )),
+        error_code TEXT,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(source_id,relative_path,fingerprint)
+    )""",
+    """CREATE INDEX IF NOT EXISTS idx_shared_sync_candidates_state
+       ON shared_sync_candidates(state,last_seen_at)""",
+)),)
+
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 PHASE2_TABLES = frozenset(
     {
@@ -1544,6 +1650,14 @@ TRANSCRIPTION_SCHEME_TABLES = frozenset({"transcription_bases", "transcription_s
 CATEGORY_FORCE_DELETE_TABLES = frozenset({"category_force_delete_runs"})
 EXTERNAL_MEDIA_SOURCE_TABLES = frozenset(
     {"external_media_sources", "external_media_entries", "external_media_scan_runs"}
+)
+SHARED_SYNC_TABLES = frozenset(
+    {
+        "content_head_withdrawals",
+        "shared_sync_runs",
+        "shared_sync_events",
+        "shared_sync_candidates",
+    }
 )
 
 
@@ -1976,6 +2090,8 @@ def has_pending_ddl(path: Path, *, base_tables: frozenset[str]) -> bool:
         raise RuntimeError("migration_schema_mismatch")
     if any(version == 28 for version, _name in applied) and not EXTERNAL_MEDIA_SOURCE_TABLES.issubset(tables):
         raise RuntimeError("migration_schema_mismatch")
+    if any(version == 48 for version, _name in applied) and not SHARED_SYNC_TABLES.issubset(tables):
+        raise RuntimeError("migration_schema_mismatch")
     if any(version == 30 for version, _name in applied) and not CONTENT_BULK_OPERATION_TABLES.issubset(tables):
         raise RuntimeError("migration_schema_mismatch")
     if any(version == 34 for version, _name in applied):
@@ -2078,6 +2194,8 @@ def apply_all(conn: sqlite3.Connection, *, base_schema: str, applied_at: int) ->
         if 25 in applied_versions and not CATEGORY_FORCE_DELETE_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         if 28 in applied_versions and not EXTERNAL_MEDIA_SOURCE_TABLES.issubset(tables):
+            raise RuntimeError("migration_schema_mismatch")
+        if 48 in applied_versions and not SHARED_SYNC_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")
         if 21 in applied_versions and not TRANSCRIPTION_SCHEME_TABLES.issubset(tables):
             raise RuntimeError("migration_schema_mismatch")

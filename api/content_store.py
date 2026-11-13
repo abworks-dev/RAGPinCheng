@@ -2879,6 +2879,8 @@ def create_publication_job(
     version_id: str,
     *,
     actor_user_id: int,
+    source_generation: int | None = None,
+    shared_entry_id: str | None = None,
 ) -> tuple[str, str]:
     row = conn.execute(
         "SELECT item_id,lifecycle_status,source_batch_id FROM content_versions WHERE id=?",
@@ -2908,9 +2910,20 @@ def create_publication_job(
         )
         conn.execute(
             """INSERT INTO content_index_jobs
-               (id,publication_id,version_id,attempt_number,target_index_id,status,created_at,updated_at)
-               VALUES (?,?,?,?,?,'pending',?,?)""",
-            (index_job_id, publication_id, version_id, attempt, target_index_id, now, now),
+               (id,publication_id,version_id,attempt_number,target_index_id,status,created_at,updated_at,
+                source_generation,shared_entry_id)
+               VALUES (?,?,?,?,?,'pending',?,?,?,?)""",
+            (
+                index_job_id,
+                publication_id,
+                version_id,
+                attempt,
+                target_index_id,
+                now,
+                now,
+                None if source_generation is None else int(source_generation),
+                shared_entry_id,
+            ),
         )
         conn.execute(
             "UPDATE content_versions SET lifecycle_status='publishing',updated_at=? WHERE id=?",

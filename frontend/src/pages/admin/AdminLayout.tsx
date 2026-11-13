@@ -10,6 +10,7 @@ import {
   PanelLeftClose,
   SlidersHorizontal,
   Tags,
+  FolderSync,
   Users,
   Wrench,
   X,
@@ -24,7 +25,7 @@ import { useAuth } from "../../context/AuthContext";
 import { contentWorkspaceTabs, workspaceLabel } from "../../lib/workspace-access";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 
-type Tab = "users" | "conversations" | "managed" | "categories" | "stats" | "feedback" | "maintenance" | "answer-policy" | "asr";
+type Tab = "users" | "conversations" | "managed" | "categories" | "stats" | "feedback" | "maintenance" | "answer-policy" | "asr" | "shared-sync";
 
 type TabDefinition = { key: Tab; label: string; path: string };
 
@@ -38,6 +39,7 @@ const navigationIcons: Record<Tab, LucideIcon> = {
   maintenance: Wrench,
   "answer-policy": SlidersHorizontal,
   asr: AudioLines,
+  "shared-sync": FolderSync,
   managed: FileText,
   categories: Tags,
   users: Users,
@@ -57,6 +59,7 @@ const adminNavigation: NavigationGroup[] = [
     tabs: [
       { key: "managed", label: "资料管理", path: "content" },
       { key: "categories", label: "分类管理", path: "categories" },
+      { key: "shared-sync", label: "共享同步", path: "shared-sync" },
     ],
   },
   {

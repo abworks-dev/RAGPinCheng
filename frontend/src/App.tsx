@@ -15,6 +15,7 @@ import { AdminConversationsPage } from "./pages/admin/AdminConversationsPage";
 import { AdminFeedbackPage } from "./pages/admin/AdminFeedbackPage";
 import { AdminLayout } from "./pages/admin/AdminLayout";
 import { AdminMaintenancePage } from "./pages/admin/AdminMaintenancePage";
+import { AdminSharedSyncPage } from "./pages/admin/AdminSharedSyncPage";
 import { AdminManagedContentPage } from "./pages/admin/AdminManagedContentPage";
 import { AdminOverviewPage } from "./pages/admin/AdminOverviewPage";
 import { AdminUsersPage } from "./pages/admin/AdminUsersPage";
@@ -121,6 +122,7 @@ export default function App() {
                 <Route index element={<AdminIndexRedirect />} />
                 <Route path="overview" element={<AdminOverviewRoute />} />
                 <Route path="maintenance" element={<AdminMaintenancePage />} />
+                <Route path="shared-sync" element={<RequireSystemAdmin><AdminSharedSyncPage /></RequireSystemAdmin>} />
                 <Route path="answer-policy" element={<RequireSystemAdmin><AdminAnswerPolicyPage /></RequireSystemAdmin>} />
                 <Route path="asr" element={<RequireSystemAdmin><AdminAsrSettingsPage /></RequireSystemAdmin>} />
                 <Route path="content" element={<AdminManagedContentPage />} />
