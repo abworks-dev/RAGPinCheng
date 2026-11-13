@@ -22,7 +22,19 @@ import re
 from time import perf_counter
 from typing import Iterator
 
-from .config import DECOMPOSE_MAX_CONTEXT_CHARS, ENUMERATION_TOP_K, FINAL_TOP_K, MAX_CONTEXT_CHARS, QUERY_DECOMPOSE_ENABLED
+from .config import (
+    APP_DB_PATH,
+    CONTENT_HEAD_ENFORCEMENT,
+    DECOMPOSE_MAX_CONTEXT_CHARS,
+    ENUMERATION_TOP_K,
+    FINAL_TOP_K,
+    MAX_CONTEXT_CHARS,
+    QUERY_DECOMPOSE_ENABLED,
+)
+from .content_retrieval_visibility import (
+    PublishedContentSnapshot,
+    SQLitePublishedContentVisibility,
+)
 from .attachment_search import AttachmentSearch, AttachmentValidator, file_intent, file_reference
 from .decompose import maybe_decompose
 from .intent import Intent, classify_intent, extract_series_token, is_enumeration_intent, is_ordinal_section_query
@@ -318,12 +330,36 @@ def _merge_enumeration_recall(
     return merged
 
 
+_DEFAULT_CONTENT_VISIBILITY = SQLitePublishedContentVisibility(
+    APP_DB_PATH, CONTENT_HEAD_ENFORCEMENT
+)
+
+
+def _carried_source_visible(
+    parent: RetrievedParent, snapshot: PublishedContentSnapshot
+) -> bool:
+    """Carry-forward never resurrects a withdrawn or archived version.
+
+    ``retrieve_for_turn`` carries raw ``RetrievedParent`` objects across turns;
+    without this check a version withdrawn by shared-folder sync (or archived by
+    an administrator) would keep being quoted purely because it was cited in the
+    previous turn.
+    """
+    if parent.doc_type == "transcript":
+        return True
+    version_id = getattr(parent, "content_version_id", None)
+    if version_id is None:
+        return True
+    return snapshot.allows(version_id)
+
+
 def retrieve_for_turn(
     fresh: list[RetrievedParent],
     last_sources: list[RetrievedParent] | None,
     query: str,
     carry: int = CARRY_SOURCES,
     categories: list[str] | None = None,
+    content_snapshot: PublishedContentSnapshot | None = None,
 ) -> list[RetrievedParent]:
     """Merge fresh retrieval with the top-`carry` of last turn's sources.
 
@@ -342,9 +378,11 @@ def retrieve_for_turn(
 
     seen = {p.parent_id for p in fresh}
     allowed = None if categories is None else set(categories)
+    snapshot = content_snapshot or _DEFAULT_CONTENT_VISIBILITY.snapshot()
     carry_candidates = [
         p for p in last_sources[:carry]
         if p.parent_id not in seen
+        and _carried_source_visible(p, snapshot)
         and (allowed is None or p.category_key in allowed or p.category in allowed)
     ]
     if not carry_candidates:

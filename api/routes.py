@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sqlite3
 import time
 from pathlib import Path
 
@@ -50,21 +51,44 @@ router = APIRouter()
 _content_storage = ContentStorage(CONTENT_ROOT)
 
 
+_WITHDRAWAL_GUARD = """SELECT 1 FROM content_head_withdrawals w
+    WHERE w.version_id=v.id AND w.state IN ('withdrawn','cleanup_claimed')"""
+
+
 def _managed_source(
     content_item_id: str | None,
     content_version_id: str | None,
 ) -> tuple[Path, str] | None:
+    """Resolve a managed version to its stored object, honouring visibility.
+
+    A version withdrawn by shared-folder sync (its head removed but the bytes
+    kept for restore) or an archived item must not stay downloadable through an
+    old citation. Draft versions that never had a head keep working exactly as
+    before, so upload previews are unaffected.
+    """
     if not content_item_id or not content_version_id or not APP_DB_PATH.exists():
         return None
     conn = db_connect(APP_DB_PATH)
     try:
-        row = conn.execute(
-            """SELECT o.storage_rel_path,v.original_filename
+        sql = f"""SELECT o.storage_rel_path,v.original_filename,i.archived_at
                FROM content_versions v
                JOIN content_objects o ON o.sha256=v.object_sha256
-               WHERE v.id=? AND v.item_id=?""",
-            (content_version_id, content_item_id),
-        ).fetchone()
+               JOIN content_items i ON i.id=v.item_id
+               WHERE v.id=? AND v.item_id=?
+                 AND i.archived_at IS NULL
+                 AND NOT EXISTS ({_WITHDRAWAL_GUARD})"""
+        try:
+            row = conn.execute(sql, (content_version_id, content_item_id)).fetchone()
+        except sqlite3.OperationalError:
+            # Databases created before migration 48 have no withdrawal table.
+            row = conn.execute(
+                """SELECT o.storage_rel_path,v.original_filename,i.archived_at
+                   FROM content_versions v
+                   JOIN content_objects o ON o.sha256=v.object_sha256
+                   JOIN content_items i ON i.id=v.item_id
+                   WHERE v.id=? AND v.item_id=? AND i.archived_at IS NULL""",
+                (content_version_id, content_item_id),
+            ).fetchone()
     finally:
         conn.close()
     if row is None:
@@ -321,16 +345,10 @@ def get_pdf(parent_id: str, _user_id: int = Depends(require_user)) -> Response:
         pdf_path = Path(raw) if Path(raw).is_absolute() else DOCS_DIR / raw
 
     if not pdf_path.exists() or not pdf_path.is_file():
-        # Fallback: search by filename in case the directory structure changed
-        # during migration (e.g. wget flattened the top-level category folders).
-        filename = pdf_path.name
-        if not filename:
-            raise HTTPException(status_code=404, detail="PDF file not found")
-        # Search recursively up to 3 levels deep to avoid scanning the entire tree.
-        matches = sorted(DOCS_DIR.rglob(filename))
-        if not matches:
-            raise HTTPException(status_code=404, detail="PDF file not found")
-        pdf_path = matches[0]
+        # No filename fallback: a same-named file elsewhere in the corpus is not
+        # evidence that THIS parent's source is still available. Serving it would
+        # keep a withdrawn managed version previewable.
+        raise HTTPException(status_code=404, detail="PDF file not found")
 
     # 有些 source_path 指向 .md 文件（非教学视频的 markdown 被标记为
     # doc_type="pdf"），浏览器无法渲染 Markdown 为 PDF。

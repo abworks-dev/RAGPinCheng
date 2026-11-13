@@ -639,6 +639,12 @@ const feedbackEntries = [
   },
 ];
 
+const sharedSyncCounts = {
+  discovered_count: 3, added_count: 1, changed_count: 0, missing_count: 1,
+  imported_count: 1, published_count: 1, withdrawn_count: 1, restored_count: 0,
+  purged_count: 0, skipped_count: 0, failed_count: 0,
+};
+
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
@@ -677,6 +683,7 @@ export async function installAdminRoutes(
       || path.startsWith("/api/admin/stats")
       || path.startsWith("/api/admin/system-overview")
       || path.startsWith("/api/admin/maintenance")
+      || path.startsWith("/api/admin/shared-sync")
     );
     if (isTargetRead && scenario === "loading") {
       await new Promise((resolve) => setTimeout(resolve, 1_500));
@@ -779,6 +786,64 @@ export async function installAdminRoutes(
     if (request.method() === "PATCH" && path === "/api/admin/maintenance/settings") {
       const payload = request.postDataJSON();
       return json(route, { ...payload, updated_at: 1700000100, updated_by: 9001 });
+    }
+    if (request.method() === "GET" && path === "/api/admin/shared-sync/status") {
+      return json(route, {
+        enabled: true,
+        phase: "day",
+        next_transition: 1787000000,
+        sources: scenario === "empty" ? [] : [{
+          id: "source-1",
+          name: "BIM 共享目录",
+          enabled: true,
+          state: {
+            entries_total: 12, entries_available: 11, entries_missing: 1, entries_superseded: 0,
+            imported: 10, import_failed: 1, withdrawn: 1,
+            last_run: {
+              id: "run-1", source_id: "source-1", source_name: "BIM 共享目录", trigger: "nightly",
+              status: "succeeded", counts: sharedSyncCounts, error_code: null,
+              started_at: 1786000000, finished_at: 1786000090,
+            },
+          },
+        }],
+      });
+    }
+    if (request.method() === "GET" && path === "/api/admin/shared-sync/runs") {
+      return json(route, scenario === "empty" ? [] : [{
+        id: "run-1", source_id: "source-1", source_name: "BIM 共享目录", trigger: "nightly",
+        status: "succeeded", counts: sharedSyncCounts, error_code: null,
+        started_at: 1786000000, finished_at: 1786000090,
+      }]);
+    }
+    if (request.method() === "GET" && path === "/api/admin/shared-sync/events") {
+      return json(route, scenario === "empty" ? [] : [{
+        id: "event-1", run_id: "run-1", source_id: "source-1", entry_id: "entry-1",
+        relative_path: "项目资料/设计说明.md", action: "withdrawn", item_id: "item-1",
+        version_id: "version-1", previous_version_id: null, error_code: null, detail: null,
+        created_at: 1786000000,
+      }]);
+    }
+    if (request.method() === "GET" && path === "/api/admin/shared-sync/withdrawals") {
+      return json(route, scenario === "empty" ? [] : [{
+        id: "withdrawal-1", item_id: "item-1", version_id: "version-1", source_id: "source-1",
+        relative_path: "项目资料/设计说明.md", reason: "shared_missing", state: "withdrawn",
+        sync_generation: 3, created_at: 1786000000, restored_at: null, purged_at: null,
+      }]);
+    }
+    if (request.method() === "POST" && /^\/api\/admin\/shared-sync\/withdrawals\/[^/]+\/restore$/.test(path)) {
+      return json(route, {
+        id: "withdrawal-1", item_id: "item-1", version_id: "version-1", source_id: "source-1",
+        relative_path: "项目资料/设计说明.md", reason: "shared_missing", state: "restored",
+        sync_generation: 3, created_at: 1786000000, restored_at: 1786000500, purged_at: null,
+      });
+    }
+    if (request.method() === "POST" && path === "/api/admin/shared-sync/run") {
+      return json(route, {
+        phase: "day",
+        reaped: 0,
+        pruned: {},
+        results: [{ source_id: "source-1", status: "succeeded", counts: sharedSyncCounts }],
+      });
     }
     if (request.method() === "POST" && path === "/api/admin/maintenance/cleanup") {
       return json(route, { run_id: 2, retention_days: 30, deleted_conversations: 4, deleted_messages: 12, deleted_auth_sessions: 2, started_at: 1700000200, finished_at: 1700000202 });

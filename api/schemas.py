@@ -1512,6 +1512,98 @@ class ExternalMediaEnqueueResult(BaseModel):
     failures: dict[str, str]
 
 
+class SharedSyncCounts(BaseModel):
+    discovered_count: int = 0
+    added_count: int = 0
+    changed_count: int = 0
+    missing_count: int = 0
+    imported_count: int = 0
+    published_count: int = 0
+    withdrawn_count: int = 0
+    restored_count: int = 0
+    purged_count: int = 0
+    skipped_count: int = 0
+    failed_count: int = 0
+
+
+class SharedSyncRunDTO(BaseModel):
+    id: str
+    source_id: str | None
+    source_name: str | None
+    trigger: Literal["manual", "nightly"]
+    status: Literal["running", "succeeded", "failed", "skipped"]
+    counts: SharedSyncCounts
+    error_code: str | None
+    started_at: int
+    finished_at: int | None
+
+
+class SharedSyncEventDTO(BaseModel):
+    id: str
+    run_id: str | None
+    source_id: str | None
+    entry_id: str | None
+    relative_path: str | None
+    action: Literal[
+        "observed",
+        "coalesced",
+        "skipped",
+        "imported",
+        "published",
+        "withdrawn",
+        "restored",
+        "purged",
+        "failed",
+    ]
+    item_id: str | None
+    version_id: str | None
+    previous_version_id: str | None
+    error_code: str | None
+    detail: dict[str, Any] | None
+    created_at: int
+
+
+class SharedSyncWithdrawalDTO(BaseModel):
+    id: str
+    item_id: str
+    version_id: str
+    source_id: str | None
+    relative_path: str | None
+    reason: Literal["shared_missing", "shared_replaced", "manual"]
+    state: Literal["withdrawn", "restored", "cleanup_claimed", "purged"]
+    sync_generation: int
+    created_at: int
+    restored_at: int | None
+    purged_at: int | None
+
+
+class SharedSyncSourceStateDTO(BaseModel):
+    id: str
+    name: str
+    enabled: bool
+    state: dict[str, Any]
+
+
+class SharedSyncStatusDTO(BaseModel):
+    enabled: bool
+    phase: Literal["day", "quiet", "window"]
+    next_transition: int | None
+    sources: list[SharedSyncSourceStateDTO]
+
+
+class SharedSyncRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_ids: list[str] | None = Field(default=None, max_length=200)
+
+
+class SharedSyncRunSummaryDTO(BaseModel):
+    phase: Literal["day", "quiet", "window"]
+    reaped: int
+    pruned: dict[str, int]
+    results: list[dict[str, Any]]
+
+
 class MediaTranscriptSegmentDTO(BaseModel):
     id: int
     start_ms: int

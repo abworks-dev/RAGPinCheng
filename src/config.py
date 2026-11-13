@@ -153,6 +153,54 @@ IMAGE_OCR_MAX_PIXELS = int(os.getenv("IMAGE_OCR_MAX_PIXELS", "80000000"))
 if IMAGE_OCR_TIMEOUT_SECONDS < 1 or IMAGE_OCR_MAX_BYTES < 1 or IMAGE_OCR_MAX_PIXELS < 1:
     raise ValueError("image OCR limits must be positive")
 
+# Shared-folder sync (BIM folder auto-publish).  Disabled by default: the
+# scheduler only runs when SHARED_SYNC_ENABLED is on, and even then scans are
+# read-only against the share — nothing is ever written back to it.
+SHARED_SYNC_ENABLED = os.getenv("SHARED_SYNC_ENABLED", "").strip().lower() in (
+    "1", "true", "yes", "on",
+)
+SHARED_SYNC_TIMEZONE = os.getenv("SHARED_SYNC_TIMEZONE", "Asia/Shanghai").strip() or "Asia/Shanghai"
+
+
+def _parse_clock(value: str, *, name: str) -> tuple[int, int]:
+    match = re.fullmatch(r"(\d{1,2}):(\d{2})", value.strip())
+    if not match:
+        raise ValueError(f"{name} must be HH:MM")
+    hour, minute = int(match.group(1)), int(match.group(2))
+    if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+        raise ValueError(f"{name} must be a valid time of day")
+    return hour, minute
+
+
+SHARED_SYNC_QUIET_START = _parse_clock(os.getenv("SHARED_SYNC_QUIET_START", "00:00"), name="SHARED_SYNC_QUIET_START")
+SHARED_SYNC_WINDOW_START = _parse_clock(os.getenv("SHARED_SYNC_WINDOW_START", "01:00"), name="SHARED_SYNC_WINDOW_START")
+SHARED_SYNC_WINDOW_END = _parse_clock(os.getenv("SHARED_SYNC_WINDOW_END", "06:30"), name="SHARED_SYNC_WINDOW_END")
+# A candidate must be seen unchanged in two scans at least this far apart before
+# it is copied/published; this is what keeps half-saved files out of the index.
+SHARED_SYNC_STABILITY_SECONDS = int(os.getenv("SHARED_SYNC_STABILITY_SECONDS", "120"))
+SHARED_SYNC_MAX_FILES_PER_RUN = int(os.getenv("SHARED_SYNC_MAX_FILES_PER_RUN", "200"))
+SHARED_SYNC_CONCURRENCY = int(os.getenv("SHARED_SYNC_CONCURRENCY", "1"))
+SHARED_SYNC_ATTACHMENT_MAX_MB = int(os.getenv("SHARED_SYNC_ATTACHMENT_MAX_MB", "1024"))
+# 0 = clean the knowledge-library copy of a withdrawn item the same night.
+SHARED_SYNC_PURGE_GRACE_MINUTES = int(os.getenv("SHARED_SYNC_PURGE_GRACE_MINUTES", "0"))
+SHARED_SYNC_LOG_RETENTION_DAYS = int(os.getenv("SHARED_SYNC_LOG_RETENTION_DAYS", "30"))
+SHARED_SYNC_POLL_SECONDS = int(os.getenv("SHARED_SYNC_POLL_SECONDS", "60"))
+SHARED_SYNC_LEASE_MINUTES = int(os.getenv("SHARED_SYNC_LEASE_MINUTES", "30"))
+if SHARED_SYNC_STABILITY_SECONDS < 0:
+    raise ValueError("SHARED_SYNC_STABILITY_SECONDS must be non-negative")
+if SHARED_SYNC_MAX_FILES_PER_RUN < 1 or SHARED_SYNC_CONCURRENCY < 1:
+    raise ValueError("SHARED_SYNC_MAX_FILES_PER_RUN and SHARED_SYNC_CONCURRENCY must be positive")
+if SHARED_SYNC_ATTACHMENT_MAX_MB < 1:
+    raise ValueError("SHARED_SYNC_ATTACHMENT_MAX_MB must be positive")
+if SHARED_SYNC_PURGE_GRACE_MINUTES < 0:
+    raise ValueError("SHARED_SYNC_PURGE_GRACE_MINUTES must be non-negative")
+if SHARED_SYNC_LOG_RETENTION_DAYS < 1:
+    raise ValueError("SHARED_SYNC_LOG_RETENTION_DAYS must be positive")
+if SHARED_SYNC_POLL_SECONDS < 10:
+    raise ValueError("SHARED_SYNC_POLL_SECONDS must be at least 10")
+if SHARED_SYNC_LEASE_MINUTES < 1:
+    raise ValueError("SHARED_SYNC_LEASE_MINUTES must be positive")
+
 CONTENT_TRASH_RETENTION_DAYS = int(os.getenv("CONTENT_TRASH_RETENTION_DAYS", "90"))
 CONTENT_TRASH_EXPIRING_WARNING_DAYS = int(os.getenv("CONTENT_TRASH_EXPIRING_WARNING_DAYS", "7"))
 if not 0 <= CONTENT_TRASH_EXPIRING_WARNING_DAYS <= CONTENT_TRASH_RETENTION_DAYS:

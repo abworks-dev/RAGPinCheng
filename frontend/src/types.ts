@@ -382,6 +382,107 @@ export type CleanupResult = {
   finished_at: number;
 };
 
+export type SharedSyncPhase = "day" | "quiet" | "window";
+
+export type SharedSyncCounts = {
+  discovered_count: number;
+  added_count: number;
+  changed_count: number;
+  missing_count: number;
+  imported_count: number;
+  published_count: number;
+  withdrawn_count: number;
+  restored_count: number;
+  purged_count: number;
+  skipped_count: number;
+  failed_count: number;
+};
+
+export type SharedSyncRun = {
+  id: string;
+  source_id: string | null;
+  source_name: string | null;
+  trigger: "manual" | "nightly";
+  status: "running" | "succeeded" | "failed" | "skipped";
+  counts: SharedSyncCounts;
+  error_code: string | null;
+  started_at: number;
+  finished_at: number | null;
+};
+
+export type SharedSyncEventAction =
+  | "observed"
+  | "coalesced"
+  | "skipped"
+  | "imported"
+  | "published"
+  | "withdrawn"
+  | "restored"
+  | "purged"
+  | "failed";
+
+export type SharedSyncEvent = {
+  id: string;
+  run_id: string | null;
+  source_id: string | null;
+  entry_id: string | null;
+  relative_path: string | null;
+  action: SharedSyncEventAction;
+  item_id: string | null;
+  version_id: string | null;
+  previous_version_id: string | null;
+  error_code: string | null;
+  detail: Record<string, unknown> | null;
+  created_at: number;
+};
+
+export type SharedSyncWithdrawalReason = "shared_missing" | "shared_replaced" | "manual";
+export type SharedSyncWithdrawalState = "withdrawn" | "restored" | "cleanup_claimed" | "purged";
+
+export type SharedSyncWithdrawal = {
+  id: string;
+  item_id: string;
+  version_id: string;
+  source_id: string | null;
+  relative_path: string | null;
+  reason: SharedSyncWithdrawalReason;
+  state: SharedSyncWithdrawalState;
+  sync_generation: number;
+  created_at: number;
+  restored_at: number | null;
+  purged_at: number | null;
+};
+
+export type SharedSyncSourceState = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  state: {
+    entries_total?: number;
+    entries_available?: number;
+    entries_missing?: number;
+    entries_superseded?: number;
+    imported?: number;
+    import_failed?: number;
+    withdrawn?: number;
+    last_run?: SharedSyncRun | null;
+  };
+};
+
+export type SharedSyncStatus = {
+  enabled: boolean;
+  phase: SharedSyncPhase;
+  next_transition: number | null;
+  sources: SharedSyncSourceState[];
+};
+
+export type SharedSyncRunSummary = {
+  phase: SharedSyncPhase;
+  reaped: number;
+  pruned: Record<string, number>;
+  results: Array<Record<string, unknown>>;
+};
+
 export type SystemPromptItem = {
   key: string;
   title: string;

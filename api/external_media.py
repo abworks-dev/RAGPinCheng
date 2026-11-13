@@ -13,7 +13,7 @@ from typing import Mapping
 
 from src.config import EXTERNAL_MEDIA_MAX_FILES_PER_SOURCE, EXTERNAL_MEDIA_ROOTS
 
-from .external_document_types import document_doc_type
+from .external_document_types import library_doc_type
 from .media_storage import (
     MediaStorageError,
     normalize_external_relative_path,
@@ -119,6 +119,23 @@ def _is_link_or_reparse(entry: os.DirEntry[str]) -> bool:
     return bool(getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
 
 
+# Transient artefacts Office/AutoCAD/Access leave beside the real document.
+# They are never source material, and importing them would let the nightly
+# window publish lock files and half-written saves.
+IGNORED_SUFFIXES = frozenset({".tmp", ".laccdb", ".dwl", ".dwl2", ".bak"})
+IGNORED_NAMES = frozenset({".ds_store", "thumbs.db", "desktop.ini"})
+
+
+def is_ignored_share_file(name: str) -> bool:
+    """Return True for editor/lock/backup artefacts that must never be imported."""
+    lowered = name.casefold()
+    if lowered in IGNORED_NAMES:
+        return True
+    if lowered.startswith("~$") or lowered.startswith(".~lock"):
+        return True
+    return PurePosixPath(lowered).suffix in IGNORED_SUFFIXES
+
+
 def file_fingerprint(relative_path: str, size: int, modified_ns: int) -> str:
     value = f"external-media-v1\n{relative_path}\n{size}\n{modified_ns}".encode("utf-8")
     return hashlib.sha256(value).hexdigest()
@@ -222,12 +239,14 @@ def scan_share(root: Path, *, max_files: int = EXTERNAL_MEDIA_MAX_FILES_PER_SOUR
                     continue
                 if not child.is_file(follow_symlinks=False):
                     continue
+                if is_ignored_share_file(child.name):
+                    continue
                 suffix = Path(child.name).suffix.lower()
                 if suffix in VIDEO_EXTENSIONS:
                     entry_kind = ENTRY_KIND_VIDEO
                     doc_type: str | None = None
                 else:
-                    doc_type = document_doc_type(suffix)
+                    doc_type = library_doc_type(suffix)
                     if doc_type is None:
                         continue
                     entry_kind = ENTRY_KIND_DOCUMENT
@@ -319,7 +338,7 @@ def reconcile_source(
 
     current_rows = conn.execute(
         """SELECT id,media_id,relative_path,fingerprint,entry_kind,doc_type,content_item_id,
-                  content_version_id,imported_fingerprint
+                  content_version_id,imported_fingerprint,sync_generation
            FROM external_media_entries
            WHERE source_id=? AND availability='available'""",
         (source_id,),
@@ -359,19 +378,27 @@ def reconcile_source(
                 if recovered is not None:
                     conn.execute(
                         """UPDATE external_media_entries SET availability='available',last_seen_at=?,
-                                  missing_since=NULL,updated_at=? WHERE id=?""",
+                                  missing_since=NULL,updated_at=?,sync_generation=sync_generation+1
+                           WHERE id=?""",
                         (timestamp, timestamp, recovered["id"]),
                     )
                     continue
             if existing is not None:
                 conn.execute(
-                    """UPDATE external_media_entries SET availability='superseded',missing_since=?,updated_at=?
+                    """UPDATE external_media_entries
+                       SET availability='superseded',missing_since=?,updated_at=?,
+                           sync_generation=sync_generation+1
                        WHERE id=?""",
                     (timestamp, timestamp, existing["id"]),
                 )
                 changed += 1
             else:
                 added += 1
+            # A replacement continues the previous generation so any publication
+            # job created for the older bytes can never become the head.
+            next_generation = (
+                int(existing["sync_generation"]) + 1 if existing is not None else 1
+            )
             entry_id = str(uuid.uuid4())
             previous_item_id = (
                 str(existing["content_item_id"])
@@ -417,8 +444,9 @@ def reconcile_source(
                 """INSERT INTO external_media_entries(
                        id,source_id,media_id,relative_path,parent_relative_path,filename,file_size,
                        modified_ns,fingerprint,availability,discovered_at,last_seen_at,missing_since,updated_at,
-                       entry_kind,doc_type,content_item_id,content_version_id,import_status,imported_fingerprint
-                   ) VALUES (?,?,?,?,?,?,?,?,?,'available',?,?,NULL,?,?,?,?,?,?,?)""",
+                       entry_kind,doc_type,content_item_id,content_version_id,import_status,imported_fingerprint,
+                       sync_generation
+                   ) VALUES (?,?,?,?,?,?,?,?,?,'available',?,?,NULL,?,?,?,?,?,?,?,?)""",
                 (
                     entry_id,
                     source_id,
@@ -438,6 +466,7 @@ def reconcile_source(
                     previous_version_id,
                     document_import_status,
                     previous_imported_fingerprint,
+                    next_generation,
                 ),
             )
             if item.entry_kind == ENTRY_KIND_VIDEO and media_id is not None:
@@ -458,8 +487,12 @@ def reconcile_source(
 
         missing_rows = [row for path, row in current_by_path.items() if path not in seen_paths]
         for row in missing_rows:
+            # Availability flips are a generation change: any publication job
+            # created while the entry was available must not become the head.
             conn.execute(
-                """UPDATE external_media_entries SET availability='missing',missing_since=?,updated_at=?
+                """UPDATE external_media_entries
+                   SET availability='missing',missing_since=?,updated_at=?,
+                       sync_generation=sync_generation+1
                    WHERE id=? AND availability='available'""",
                 (timestamp, timestamp, row["id"]),
             )

@@ -12,6 +12,11 @@ import type {
   MaintenanceRun,
   MaintenanceSettings,
   MaintenanceStatus,
+  SharedSyncEvent,
+  SharedSyncRun,
+  SharedSyncRunSummary,
+  SharedSyncStatus,
+  SharedSyncWithdrawal,
   AdminUser,
   ApiConfig,
   AuthUser,
@@ -432,6 +437,45 @@ export const api = {
     jsonFetch<CleanupResult>("/api/admin/maintenance/cleanup", { method: "POST" }),
   adminMaintenanceRuns: (limit = 20) =>
     jsonFetch<{ runs: MaintenanceRun[] }>(`/api/admin/maintenance/runs?limit=${limit}`),
+  adminSharedSyncStatus: () => jsonFetch<SharedSyncStatus>("/api/admin/shared-sync/status"),
+  adminSharedSyncRuns: (params: { sourceId?: string; limit?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (params.sourceId) query.set("source_id", params.sourceId);
+    if (params.limit) query.set("limit", String(params.limit));
+    const suffix = query.toString();
+    return jsonFetch<SharedSyncRun[]>(`/api/admin/shared-sync/runs${suffix ? `?${suffix}` : ""}`);
+  },
+  adminSharedSyncEvents: (
+    params: { sourceId?: string; runId?: string; before?: number; limit?: number } = {},
+  ) => {
+    const query = new URLSearchParams();
+    if (params.sourceId) query.set("source_id", params.sourceId);
+    if (params.runId) query.set("run_id", params.runId);
+    if (params.before) query.set("before", String(params.before));
+    if (params.limit) query.set("limit", String(params.limit));
+    const suffix = query.toString();
+    return jsonFetch<SharedSyncEvent[]>(`/api/admin/shared-sync/events${suffix ? `?${suffix}` : ""}`);
+  },
+  adminSharedSyncWithdrawals: (params: { sourceId?: string; state?: string; limit?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (params.sourceId) query.set("source_id", params.sourceId);
+    if (params.state) query.set("state", params.state);
+    if (params.limit) query.set("limit", String(params.limit));
+    const suffix = query.toString();
+    return jsonFetch<SharedSyncWithdrawal[]>(
+      `/api/admin/shared-sync/withdrawals${suffix ? `?${suffix}` : ""}`,
+    );
+  },
+  adminSharedSyncRestore: (withdrawalId: string) =>
+    jsonFetch<SharedSyncWithdrawal>(
+      `/api/admin/shared-sync/withdrawals/${encodeURIComponent(withdrawalId)}/restore`,
+      { method: "POST" },
+    ),
+  adminSharedSyncRun: (sourceIds?: string[] | null) =>
+    jsonFetch<SharedSyncRunSummary>("/api/admin/shared-sync/run", {
+      method: "POST",
+      body: JSON.stringify({ source_ids: sourceIds ?? null }),
+    }),
   adminListPrompts: () =>
     jsonFetch<SystemPromptItem[]>("/api/admin/prompts"),
   adminUpdatePrompt: (key: string, customBody: string) =>

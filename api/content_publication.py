@@ -14,6 +14,7 @@ from src.indexing_pipeline import ManagedIndexMetadata, index_managed_content
 from .content_storage import ContentStorage
 from .content_store import audit_event
 from .db import connect
+from .shared_sync import promotion_conflict
 
 
 logger = logging.getLogger("api.content_publication")
@@ -54,6 +55,32 @@ _FAILURE_DETAILS = {
     "index_provider_failed": ("向量索引服务写入失败。", True, "请恢复索引服务后重试。"),
     "index_storage_failed": ("索引存储写入失败。", True, "请联系系统管理员检查索引存储后重试。"),
     "backend_restarted": ("后端重启时发布任务正在运行，任务已中止。", True, "请重新发布该资料。"),
+    "shared_entry_superseded": (
+        "共享目录中的文件在发布前又被修改。",
+        False,
+        "系统会在下一次同步时按最新内容重新登记，无需手工处理。",
+    ),
+    "shared_entry_unavailable": (
+        "共享目录中的文件在发布时已不可用。",
+        False,
+        "请确认共享目录中的文件仍在；文件恢复后系统会自动撤回或恢复对应版本。",
+    ),
+    "shared_entry_removed": (
+        "共享目录条目已被移除，本次发布已取消。",
+        False,
+        "无需手工处理；如文件确需入库，请在共享目录中恢复后再等待同步。",
+    ),
+    "shared_entry_mismatch": (
+        "共享目录条目与待发布资料不匹配，本次发布已取消。",
+        False,
+        "无需手工处理；系统会在下一次同步时重新登记。",
+    ),
+    "content_head_cleaned": (
+        "该版本已被夜间清理，无法再发布。",
+        False,
+        "请等待共享目录同步重新导入该文件。",
+    ),
+    "content_archived": ("资料已归档，发布已取消。", False, "如需恢复请先在资料管理中取消归档。"),
     "unknown_publication_failure": ("资料发布索引失败。", True, "请重试；持续失败时联系系统管理员。"),
 }
 _FAILURE_SUMMARIES = {code: detail[0] for code, detail in _FAILURE_DETAILS.items()}
@@ -61,6 +88,10 @@ _FAILURE_SUMMARIES = {code: detail[0] for code, detail in _FAILURE_DETAILS.items
 
 class ContentPublicationCancelled(RuntimeError):
     pass
+
+
+class ContentPublicationRejected(RuntimeError):
+    """The publication lost its source generation and must not become the head."""
 
 
 def normalize_failure_code(error_code: object) -> str | None:
@@ -109,12 +140,18 @@ def _delete_cancelled_artifacts(row: sqlite3.Row) -> None:
         logger.exception("failed to clean cancelled publication artifacts for %s", row["version_id"])
 
 
+def _item_archived(conn: sqlite3.Connection, item_id: str) -> bool:
+    row = conn.execute("SELECT archived_at FROM content_items WHERE id=?", (item_id,)).fetchone()
+    return row is None or row["archived_at"] is not None
+
+
 def run_content_publication(index_job_id: str) -> None:
     office_disabled = False
     conn = connect()
     try:
         row = conn.execute(
             """SELECT j.id,j.status,j.target_index_id,j.publication_id,j.version_id,
+                      j.source_generation,j.shared_entry_id,
                       v.item_id,v.object_sha256,v.original_filename,v.doc_type,v.source_batch_id,
                       COALESCE(v.title,i.title) AS title,i.category_id,
                       c.category_key,c.display_name,o.storage_rel_path
@@ -152,6 +189,25 @@ def run_content_publication(index_job_id: str) -> None:
     if office_disabled:
         _fail(index_job_id, "office_processing_disabled")
         return
+
+    # An attachment publication does no parsing, so a generation that already
+    # moved on must be caught before the (cheap) promote rather than after it.
+    if row["shared_entry_id"] is not None:
+        guard = connect()
+        try:
+            conflict = promotion_conflict(
+                guard,
+                entry_id=row["shared_entry_id"],
+                source_generation=row["source_generation"],
+                item_id=str(row["item_id"]),
+                item_archived=_item_archived(guard, str(row["item_id"])),
+            )
+        finally:
+            guard.close()
+        if conflict is not None:
+            logger.info("shared publication job %s rejected before indexing: %s", index_job_id, conflict)
+            _fail(index_job_id, conflict)
+            return
 
     current_stage = "pending"
 
@@ -192,6 +248,12 @@ def run_content_publication(index_job_id: str) -> None:
         _promote(index_job_id)
     except ContentPublicationCancelled:
         logger.info("managed publication job %s was cancelled", index_job_id)
+        _delete_cancelled_artifacts(row)
+    except ContentPublicationRejected as exc:
+        # Lost the source generation / entry / head: never publish, and drop the
+        # artifacts this attempt produced so they cannot be reached later.
+        logger.info("shared publication job %s rejected: %s", index_job_id, exc)
+        _fail(index_job_id, str(exc))
         _delete_cancelled_artifacts(row)
     except Exception as exc:  # noqa: BLE001 - persisted failure keeps worker alive
         logger.exception("managed publication job %s failed", index_job_id)
@@ -236,15 +298,32 @@ def _promote(index_job_id: str) -> None:
     try:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
-            """SELECT j.publication_id,j.version_id,v.item_id,v.source_batch_id,p.publisher_id
+            """SELECT j.publication_id,j.version_id,v.item_id,v.source_batch_id,p.publisher_id,
+                      j.source_generation,j.shared_entry_id,i.archived_at
                FROM content_index_jobs j
                JOIN content_publications p ON p.id=j.publication_id
                JOIN content_versions v ON v.id=j.version_id
+               JOIN content_items i ON i.id=v.item_id
                WHERE j.id=? AND j.status IN ('embedding','summarizing','chunking','parsing','pending')""",
             (index_job_id,),
         ).fetchone()
         if row is None:
             raise ContentPublicationCancelled("content_publication_cancelled")
+        # Shared-folder sources need one extra guaranteed check inside the head
+        # transaction: a publication job must never become the head for a
+        # generation the share already replaced, for an entry that is gone, or
+        # for a head the nightly cleanup already claimed.
+        if row["shared_entry_id"] is not None or row["source_generation"] is not None:
+            conflict = promotion_conflict(
+                conn,
+                entry_id=row["shared_entry_id"],
+                source_generation=row["source_generation"],
+                item_id=str(row["item_id"]),
+                item_archived=row["archived_at"] is not None,
+            )
+            if conflict is not None:
+                conn.rollback()
+                raise ContentPublicationRejected(conflict)
         previous = conn.execute(
             "SELECT current_version_id FROM content_item_heads WHERE item_id=?",
             (row["item_id"],),

@@ -20,7 +20,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
-from src.config import CONTENT_ROOT, EXTERNAL_MEDIA_ROOTS, OFFICE_PROCESSING_ENABLED
+from src.config import (
+    CONTENT_ROOT,
+    EXTERNAL_MEDIA_ROOTS,
+    OFFICE_PROCESSING_ENABLED,
+    SHARED_SYNC_ATTACHMENT_MAX_MB,
+)
 from src.office_security import find_unsafe_office_content
 from src.xmind_parser import XMindParseError, parse_xmind
 
@@ -32,7 +37,12 @@ from .content_store import (
     find_content_filename_conflict,
     register_uploaded_document,
 )
-from .external_document_types import OFFICE_DOCUMENT_TYPES, document_doc_type
+from .content_attachment_types import ATTACHMENT_TYPES
+from .external_document_types import (
+    OFFICE_DOCUMENT_TYPES,
+    document_doc_type,
+    library_doc_type,
+)
 from .external_media import (
     ENTRY_KIND_DOCUMENT,
     ExternalMediaError,
@@ -82,6 +92,7 @@ _REASON_TEXT: dict[str, str] = {
     "xmind_content_invalid": "XMind 主题内容无效",
     "xmind_topic_structure_invalid": "XMind 主题结构无效或层级过深",
     "external_document_import_failed": "导入失败",
+    "attachment_validation_failed": "附件文件校验失败",
 }
 
 
@@ -219,7 +230,7 @@ def _import_one(
     entry_id = str(entry["id"])
     relative_path = str(entry["relative_path"])
     filename = str(entry["filename"])
-    doc_type = entry["doc_type"] or document_doc_type(Path(filename).suffix)
+    doc_type = entry["doc_type"] or library_doc_type(Path(filename).suffix)
     if doc_type is None:
         return (
             ImportOutcome(
@@ -313,20 +324,52 @@ def _import_one(
                 reason_code="content_filename_conflict",
                 reason=import_reason_text("content_filename_conflict"),
             )
+        is_attachment = doc_type in ATTACHMENT_TYPES
+        effective_max_bytes = (
+            max_bytes
+            if not is_attachment
+            else max(max_bytes, SHARED_SYNC_ATTACHMENT_MAX_MB * 1024 * 1024)
+        )
         stored = _storage.ingest_path(
             absolute,
             mime_type=mimetypes.guess_type(filename)[0] or "application/octet-stream",
-            max_bytes=max_bytes,
+            max_bytes=effective_max_bytes,
         )
-        _validate_document(stored.absolute_path, doc_type)
+        # The copy above can race an in-place save on the share.  Re-stat the
+        # source afterwards: if the size or modification time moved, the bytes
+        # we just stored are a half-written intermediate state and must not be
+        # registered as this generation's content.
+        try:
+            after = absolute.stat()
+        except OSError:
+            after = None
+        if after is None or after.st_size != int(entry["file_size"]) or after.st_mtime_ns != int(
+            entry["modified_ns"]
+        ):
+            _discard_unreferenced_object(conn, stored)
+            return ImportOutcome(
+                entry_id,
+                relative_path,
+                "skipped",
+                doc_type,
+                reason_code="external_file_changed",
+                reason=import_reason_text("external_file_changed"),
+            )
+        # Attachments are stored verbatim; only documents have a parser to guard.
+        if not is_attachment:
+            _validate_document(stored.absolute_path, doc_type)
         now = _now()
         expected_version_id = _latest_version_id(conn, item_id) if item_id else None
+        # ``register_uploaded_document`` rejects a blank title, and a shared
+        # file named "..pdf" would otherwise fail the whole entry.  Fall back to
+        # the file name so a valid file is not lost to a formatting nuance.
+        title = Path(filename).stem.strip() or filename[:200]
         if item_id is None or expected_version_id is None:
             uploaded = register_uploaded_document(
                 conn,
                 batch_id=batch_id,
                 category_id=category_id,
-                title=Path(filename).stem,
+                title=title,
                 original_filename=filename,
                 doc_type=doc_type,
                 stored=stored,
@@ -341,7 +384,7 @@ def _import_one(
                 conn,
                 item_id,
                 expected_version_id=expected_version_id,
-                title=Path(filename).stem,
+                title=title,
                 original_filename=filename,
                 actor_user_id=actor_user_id,
                 can_revise=True,

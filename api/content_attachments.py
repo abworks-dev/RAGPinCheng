@@ -28,6 +28,19 @@ router = APIRouter(dependencies=[Depends(_require_feature)])
 _storage = ContentStorage(CONTENT_ROOT)
 
 
+def version_withdrawn(conn: sqlite3.Connection, version_id: str) -> bool:
+    """True while the version's head is withdrawn (pending restore or cleanup)."""
+    try:
+        return conn.execute(
+            """SELECT 1 FROM content_head_withdrawals
+               WHERE version_id=? AND state IN ('withdrawn','cleanup_claimed')""",
+            (version_id,),
+        ).fetchone() is not None
+    except sqlite3.OperationalError:
+        # Pre-migration-48 database: nothing can be withdrawn yet.
+        return False
+
+
 def can_view_drafts(conn: sqlite3.Connection, user: CurrentUser) -> bool:
     return any(has_content_permission(conn, user, permission) for permission in ('item.upload', 'item.publish'))
 
@@ -49,6 +62,10 @@ def authorized_version(conn: sqlite3.Connection, user: CurrentUser, version_id: 
         published = conn.execute("SELECT 1 FROM content_publications WHERE version_id=? AND status='published'", (version_id,)).fetchone()
         if row['lifecycle_status'] not in ('published', 'superseded') or not published:
             raise HTTPException(404, '资料文件不存在')
+    if not can_view_drafts(conn, user) and version_withdrawn(conn, version_id):
+        # Shared-folder sync withdrew this version's head; the bytes are kept for
+        # restore but must not be readable by ordinary users in the meantime.
+        raise HTTPException(404, '资料文件不存在')
     return row
 
 
